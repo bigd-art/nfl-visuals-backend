@@ -1,0 +1,50 @@
+import os
+import glob
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+
+from app.generator.week_posters import generate_week
+from app.services.storage_supabase import upload_file_return_url
+
+app = FastAPI()
+
+class WeekRequest(BaseModel):
+    year: int
+    week: int
+    seasontype: int = 2  # 1=preseason, 2=regular, 3=postseason
+
+@app.get("/health")
+def health():
+    return {"ok": True}
+
+@app.post("/generate-week")
+def generate_week_endpoint(req: WeekRequest):
+    # 1) Generate posters locally
+    try:
+        out_dir = generate_week(req.year, req.week, req.seasontype)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Generator failed: {e}")
+
+    # 2) Find all generated PNGs
+    pngs = sorted(glob.glob(os.path.join(out_dir, "*.png")))
+    if not pngs:
+        raise HTTPException(status_code=500, detail=f"No PNGs found in {out_dir}")
+
+    # 3) Upload each PNG to Supabase + collect URLs
+    urls = []
+    for path in pngs:
+        storage_key = f"posters/{req.year}/week{req.week}/{os.path.basename(path)}"
+        try:
+            url = upload_file_return_url(local_path=path, storage_key=storage_key)
+            urls.append(url)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Upload failed for {path}: {e}")
+
+    return {
+        "year": req.year,
+        "week": req.week,
+        "seasontype": req.seasontype,
+        "count": len(urls),
+        "images": urls,
+    }
+
