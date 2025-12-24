@@ -378,7 +378,6 @@ def extract_all_defensive_leaders(summary: Dict) -> Dict[str, Dict]:
 
 
 def extract_game_meta(summary: Dict, meta_event_id: str) -> Dict:
-
     header = summary.get("header", {}) or {}
     competitions = header.get("competitions", []) or []
     comp = competitions[0] if competitions else {}
@@ -416,6 +415,7 @@ def extract_game_meta(summary: Dict, meta_event_id: str) -> Dict:
             }
         )
 
+    # away first, then home
     teams_sorted = sorted(teams, key=lambda t: t["home_away"] != "away")
 
     # Fill quarter scores (and OT if it exists) for both teams
@@ -426,6 +426,7 @@ def extract_game_meta(summary: Dict, meta_event_id: str) -> Dict:
         t["quarter_scores"] = periods_by_abbr.get(ab, [])
 
     return {"teams": teams_sorted, "completed": completed, "period_labels": period_labels}
+
 
 
 
