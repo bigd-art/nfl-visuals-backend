@@ -6,6 +6,9 @@ from io import BytesIO
 from typing import Dict, List, Optional, Tuple
 
 import requests
+import matplotlib
+matplotlib.use("Agg")
+
 import matplotlib.pyplot as plt
 from matplotlib import gridspec, patches
 from PIL import Image
@@ -733,6 +736,31 @@ def main():
         print("\nFailures:")
         for f in fails:
             print(" -", f)
+
+
+def generate_week(year: int, week: int, seasontype: int = 2, limit: int = 0) -> str:
+    """
+    Wrapper used by FastAPI.
+    Generates posters for a given week and returns the output folder path.
+    """
+    url = scoreboard_url(year, week, seasontype)
+    html = fetch_url(url)
+    game_ids = extract_game_ids_from_scoreboard_html(html)
+
+    if limit and limit > 0:
+        game_ids = game_ids[:limit]
+
+    if not game_ids:
+        raise RuntimeError("No gameIds found. ESPN page format may have changed.")
+
+    out_dir = os.path.join("game_visuals", f"{year}_week{week}")
+    os.makedirs(out_dir, exist_ok=True)
+
+    for gid in game_ids:
+        generate_poster_for_game(gid, out_dir)
+
+    return out_dir
+
 
 
 if __name__ == "__main__":
