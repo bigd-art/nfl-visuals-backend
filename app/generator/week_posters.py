@@ -6,8 +6,10 @@ from io import BytesIO
 from typing import Dict, List, Optional, Tuple
 
 import requests
+
 import matplotlib
-matplotlib.use("Agg")
+# Add this before importing pyplot
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from matplotlib import gridspec, patches
 from PIL import Image
@@ -36,7 +38,7 @@ STYLE = {
 
 # ---------------------- ESPN HELPERS ----------------------
 
-def fetch_url(url: str, timeout: int = 20) -> str:
+def fetch_url(url: str, timeout: int = 25) -> str:
     headers = {"User-Agent": "Mozilla/5.0"}
     r = requests.get(url, headers=headers, timeout=timeout)
     r.raise_for_status()
@@ -49,7 +51,7 @@ def fetch_summary(event_id: str) -> Dict:
         f"?event={event_id}"
     )
     headers = {"User-Agent": "Mozilla/5.0"}
-    r = requests.get(api_url, headers=headers, timeout=20)
+    r = requests.get(api_url, headers=headers, timeout=25)
     r.raise_for_status()
     return r.json()
 
@@ -80,15 +82,12 @@ def fetch_logo_image(url: Optional[str]) -> Optional[Image.Image]:
 
 
 def scoreboard_url(year: int, week: int, seasontype: int) -> str:
-    # Example:
-    # https://www.espn.com/nfl/scoreboard/_/week/13/year/2025/seasontype/2
+    # seasontype: 1=preseason, 2=regular season, 3=postseason
     return f"https://www.espn.com/nfl/scoreboard/_/week/{week}/year/{year}/seasontype/{seasontype}"
 
 
 def extract_game_ids_from_scoreboard_html(html: str) -> List[str]:
-    # Find all occurrences of gameId/#########
     ids = re.findall(r"gameId/(\d+)", html)
-    # Unique in order
     seen = set()
     out = []
     for gid in ids:
@@ -221,10 +220,7 @@ def extract_interception_leader_from_players_block(team_block: Dict) -> Optional
 
         rows = parse_stat_group(stat_group)
         for row in rows:
-            ints = safe_int(
-                row.get("INT") or row.get("INTS") or row.get("NO.") or 0,
-                0,
-            )
+            ints = safe_int(row.get("INT") or row.get("INTS") or row.get("NO.") or 0, 0)
             if ints > best_ints:
                 best_ints = ints
                 best_player = {"name": row.get("player") or "N/A", "ints": ints}
@@ -257,14 +253,8 @@ def extract_defensive_leaders_from_players_block(team_block: Dict) -> Dict:
         max_sacks = 0.0
 
         for row in rows:
-            tackles = safe_int(
-                row.get("TOT") or row.get("Total") or row.get("TKL") or 0,
-                0,
-            )
-            sacks = safe_float(
-                row.get("SACKS") or row.get("SACK") or row.get("SK") or 0,
-                0.0,
-            )
+            tackles = safe_int(row.get("TOT") or row.get("Total") or row.get("TKL") or 0, 0)
+            sacks = safe_float(row.get("SACKS") or row.get("SACK") or row.get("SK") or 0, 0.0)
             name = row.get("player") or "N/A"
 
             if tackles > max_tackles and tackles > 0:
@@ -366,7 +356,7 @@ def extract_team_yardage(summary: Dict) -> Dict[str, Dict]:
     return results
 
 
-# ---------------------- POSTER ----------------------
+# ---------------------- POSTER GENERATION ----------------------
 
 def make_poster_style_image(
     meta: Dict,
@@ -422,11 +412,13 @@ def make_poster_style_image(
         logo_ax = fig.add_axes([0.07, 0.78, 0.14, 0.14])
         logo_ax.imshow(away_logo)
         logo_ax.axis("off")
+        away_logo.close() # Close PIL object after it's handed to the axes
 
     if home_logo is not None:
         logo_ax = fig.add_axes([0.79, 0.78, 0.14, 0.14])
         logo_ax.imshow(home_logo)
         logo_ax.axis("off")
+        home_logo.close() # Close PIL object after it's handed to the axes
 
     ax_top.text(0.18, 0.55, f"{away['abbr'] or ''}", ha="center", va="center",
                 fontsize=28, fontweight="bold", color=style["text_secondary"])
@@ -448,7 +440,7 @@ def make_poster_style_image(
     ax_top.text(0.50, 0.55, "AT", ha="center", va="center",
                 fontsize=14, color=style["text_muted"])
 
-    # QUARTERS (API linescores)
+    # QUARTERS
     ax_q = fig.add_subplot(gs[1])
     ax_q.axis("off")
     ax_q.set_facecolor(style["middle_band_color"])
@@ -481,7 +473,6 @@ def make_poster_style_image(
     ax_ty.set_facecolor(style["middle_band_color"])
     ax_ty.text(0.5, 0.75, "TOTAL YARDS", ha="center", va="center",
                fontsize=13, fontweight="bold", color=style["accent"])
-
     ax_ty.text(
         0.5,
         0.42,
@@ -492,12 +483,11 @@ def make_poster_style_image(
         color=style["text_primary"],
     )
 
-    # LEADERS
+    # TEAM LEADERS
     ax_leaders = fig.add_subplot(gs[3])
     ax_leaders.axis("off")
     ax_leaders.set_facecolor(style["bottom_band_color"])
 
-    # Title: higher + no overlap (your fix)
     ax_leaders.text(
         0.5, 1.08, "TEAM LEADERS",
         ha="center", va="top",
@@ -570,8 +560,12 @@ def make_poster_style_image(
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     plt.tight_layout()
     plt.savefig(output_path, dpi=150, facecolor=fig.get_facecolor(), bbox_inches="tight")
-    plt.close(fig)
 
+    # Explicitly clear the figure and axes
+    fig.clf()
+    plt.close(fig)
+    import gc
+    gc.collect() # Force garbage collection for the Image objects
 
 def generate_poster_for_game(game_id: str, out_dir: str) -> Tuple[bool, str]:
     try:
@@ -591,11 +585,11 @@ def generate_poster_for_game(game_id: str, out_dir: str) -> Tuple[bool, str]:
 # ---------------------- MAIN ----------------------
 
 def main():
-    parser = argparse.ArgumentParser(description="Generate NFL posters for an entire week.")
-    parser.add_argument("--year", type=int, default=2025)
-    parser.add_argument("--week", type=int, default=13)
-    parser.add_argument("--seasontype", type=int, default=2, help="2=regular season")
-    parser.add_argument("--limit", type=int, default=0, help="Limit number of games (0 = all)")
+    parser = argparse.ArgumentParser(description="Generate NFL posters for any ESPN week.")
+    parser.add_argument("--year", type=int, required=True, help="Season year (e.g., 2025)")
+    parser.add_argument("--week", type=int, required=True, help="Week number (e.g., 13)")
+    parser.add_argument("--seasontype", type=int, default=2, help="1=preseason, 2=regular, 3=postseason")
+    parser.add_argument("--limit", type=int, default=0, help="Limit number of games (0=all)")
     args = parser.parse_args()
 
     url = scoreboard_url(args.year, args.week, args.seasontype)
@@ -631,32 +625,9 @@ def main():
         print("\nFailures:")
         for f in fails:
             print(" -", f)
-def generate_week(year: int, week: int, seasontype: int = 2) -> str:
-    """
-    Wrapper for FastAPI.
-    Calls the existing CLI-based main() by temporarily setting sys.argv,
-    so we don't have to rewrite your generator logic.
-    Returns the output folder path containing PNGs.
-    """
-    import sys
-    import os
 
-    out_dir = os.path.join("game_visuals", f"{year}_week{week}")
-
-    old_argv = sys.argv[:]
-    try:
-        sys.argv = [
-            old_argv[0],
-            "--year", str(year),
-            "--week", str(week),
-            "--seasontype", str(seasontype),
-        ]
-        main()
-    finally:
-        sys.argv = old_argv
-
-    return out_dir
 
 if __name__ == "__main__":
     main()
+
 
