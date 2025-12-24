@@ -91,10 +91,7 @@ def extract_game_ids_from_scoreboard_html(html: str) -> List[str]:
             seen.add(gid)
             out.append(gid)
     return out
-import re
-from typing import Dict, List, Tuple, Optional
 
-import requests
 
 
 def _strip_html_to_text(html: str) -> str:
@@ -404,9 +401,8 @@ def extract_game_meta(summary: Dict, meta_event_id: str) -> Dict:
         if logos:
             logo = logos[0].get("href") or team.get("logo")
 
-                # quarter/OT scores will be filled later via get_scoring_periods_from_summary
+        # quarter/OT scores will be filled later via get_scoring_periods_from_summary
         q_scores: List[int] = []
-
 
         teams.append(
             {
@@ -421,7 +417,8 @@ def extract_game_meta(summary: Dict, meta_event_id: str) -> Dict:
         )
 
     teams_sorted = sorted(teams, key=lambda t: t["home_away"] != "away")
-        # Fill quarter scores (and OT if it exists) for both teams
+
+    # Fill quarter scores (and OT if it exists) for both teams
     period_labels, periods_by_abbr = get_scoring_periods_from_summary(meta_event_id)
 
     for t in teams_sorted:
@@ -430,7 +427,6 @@ def extract_game_meta(summary: Dict, meta_event_id: str) -> Dict:
 
     return {"teams": teams_sorted, "completed": completed, "period_labels": period_labels}
 
-    return {"teams": teams_sorted, "completed": completed}
 
 
 def extract_team_yardage(summary: Dict) -> Dict[str, Dict]:
@@ -551,32 +547,35 @@ def make_poster_style_image(
     ax_q.text(0.5, 0.86, "SCORING BY QUARTER", ha="center", va="center",
               fontsize=13, fontweight="bold", color=style["accent"])
 
-    # Dynamically space columns depending on whether OT exists
-n_cols = 1 + len(period_labels)  # TEAM + periods
-left, right = 0.14, 0.90
-step = (right - left) / (n_cols - 1)
-x_positions = [left + i * step for i in range(n_cols)]
-
     period_labels = meta.get("period_labels", ["1Q", "2Q", "3Q", "4Q"])
-labels = ["TEAM"] + period_labels
+    labels = ["TEAM"] + period_labels
+
+    # Dynamically space columns depending on whether OT exists
+    n_cols = len(labels)  # TEAM + periods
+    left, right = 0.14, 0.90
+    step = (right - left) / max(1, (n_cols - 1))
+    x_positions = [left + i * step for i in range(n_cols)]
 
     for x, lbl in zip(x_positions, labels):
         ax_q.text(x, 0.68, lbl, ha="center", va="center",
                   fontsize=11, color=style["text_secondary"])
 
     def row_scores(team: Dict, y_pos: float):
-        abbr = team["abbr"] or ""
-               q_scores = team.get("quarter_scores") or []
+        abbr = team.get("abbr") or ""
+        ax_q.text(x_positions[0], y_pos, abbr, ha="center", va="center",
+                  fontsize=11, color=style["text_secondary"], fontweight="bold")
+
+        q_scores = team.get("quarter_scores") or []
         q_scores = (q_scores + [0] * len(period_labels))[:len(period_labels)]
-        ...
+
         for i in range(len(period_labels)):
             ax_q.text(x_positions[i + 1], y_pos, str(q_scores[i]),
-
                       ha="center", va="center", fontsize=11,
                       color=style["text_secondary"])
 
     row_scores(away, 0.50)
     row_scores(home, 0.32)
+
 
     # TOTAL YARDS
     ax_ty = fig.add_subplot(gs[2])
