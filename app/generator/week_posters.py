@@ -91,6 +91,106 @@ def extract_game_ids_from_scoreboard_html(html: str) -> List[str]:
             seen.add(gid)
             out.append(gid)
     return out
+import re
+from typing import Dict, List, Tuple, Optional
+
+import requests
+
+
+def _strip_html_to_text(html: str) -> str:
+    html = re.sub(r"<script[\s\S]*?</script>", " ", html, flags=re.IGNORECASE)
+    html = re.sub(r"<style[\s\S]*?</style>", " ", html, flags=re.IGNORECASE)
+    html = re.sub(r"<[^>]+>", " ", html)
+    html = re.sub(r"&nbsp;|&#160;", " ", html)
+    html = re.sub(r"\s+", " ", html).strip()
+    return html
+
+
+def _safe_int(v, default=0) -> int:
+    try:
+        return int(v)
+    except Exception:
+        try:
+            return int(float(v))
+        except Exception:
+            return default
+
+
+def get_scoring_periods_from_summary(event_id: str) -> Tuple[List[str], Dict[str, List[int]]]:
+    """
+    Returns (period_labels, periods_by_team_abbr)
+
+    - period_labels: ["1Q","2Q","3Q","4Q"] and includes "OT" ONLY if OT exists.
+    - periods_by_team_abbr: {"SEA":[q1,q2,q3,q4,(ot?)], "WSH":[...]}
+    """
+    url = f"https://site.web.api.espn.com/apis/site/v2/sports/football/nfl/summary?event={event_id}"
+    j = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=15).json()
+    comp = j["header"]["competitions"][0]
+
+    # Build team scores per period using ESPN linescores when available
+    tmp: Dict[str, List[int]] = {}
+    max_periods = 0
+    for c in comp["competitors"]:
+        abbr = c["team"]["abbreviation"]
+        ls = c.get("linescores", []) or []
+        vals = [_safe_int(q.get("value", q.get("displayValue", 0))) for q in ls]
+        tmp[abbr] = vals
+        max_periods = max(max_periods, len(vals))
+
+    # If linescores missing for either team, fall back to scraping boxscore header table
+    if max_periods == 0 or any(len(v) == 0 for v in tmp.values()):
+        labels, scraped = fetch_scoring_periods_from_boxscore(event_id)
+        return labels, scraped
+
+    # Determine if OT occurred based on number of periods
+    # NFL regulation has 4 quarters. ESPN may include OT as 5th period.
+    has_ot = max_periods > 4
+
+    labels = ["1Q", "2Q", "3Q", "4Q"] + (["OT"] if has_ot else [])
+    target_len = 5 if has_ot else 4
+
+    # Normalize all teams to same length (pad with 0s if needed)
+    out: Dict[str, List[int]] = {}
+    for abbr, vals in tmp.items():
+        out[abbr] = (vals + [0] * target_len)[:target_len]
+
+    return labels, out
+
+
+def fetch_scoring_periods_from_boxscore(event_id: str) -> Tuple[List[str], Dict[str, List[int]]]:
+    """
+    Scrapes the top linescore table from the ESPN boxscore page.
+    Returns (period_labels, periods_by_team_abbr) where period_labels includes OT only if present.
+    """
+    url = f"https://www.espn.com/nfl/boxscore/_/gameId/{event_id}"
+    r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
+    r.raise_for_status()
+    text = _strip_html_to_text(r.text)
+
+    # Match header like: "Final 1 2 3 4 T" or "Final 1 2 3 4 OT T"
+    m = re.search(r"\bFinal\b\s+((?:(?:\d+|OT)\s+)+)T\b", text)
+    if not m:
+        return (["1Q", "2Q", "3Q", "4Q"], {})
+
+    raw_labels = m.group(1).strip().split()  # e.g. ["1","2","3","4"] or ["1","2","3","4","OT"]
+    labels = [f"{x}Q" if x.isdigit() else "OT" for x in raw_labels]
+    n = len(labels)
+
+    # After header: "ABBR q1 q2 ... qn total"
+    window = text[m.end(): m.end() + 2200]
+    row_pat = re.compile(rf"\b([A-Z]{{2,4}})\b\s+((?:\d+\s+){{{n}}}\d+)\b")
+    rows = row_pat.findall(window)[:2]
+
+    out: Dict[str, List[int]] = {}
+    for abbr, nums_blob in rows:
+        nums = [_safe_int(x) for x in nums_blob.strip().split()]
+        # nums = period scores (n) + total (1)
+        if len(nums) == n + 1:
+            out[abbr] = nums[:n]
+
+    # If somehow only 4 labels but OT exists in data, keep labels as parsed.
+    # If labels has OT, we will show it; otherwise we won't.
+    return labels, out
 
 
 # ---------------------- STAT PARSING ----------------------
@@ -280,7 +380,8 @@ def extract_all_defensive_leaders(summary: Dict) -> Dict[str, Dict]:
     return results
 
 
-def extract_game_meta(summary: Dict) -> Dict:
+def extract_game_meta(summary: Dict, meta_event_id: str) -> Dict:
+
     header = summary.get("header", {}) or {}
     competitions = header.get("competitions", []) or []
     comp = competitions[0] if competitions else {}
@@ -303,9 +404,9 @@ def extract_game_meta(summary: Dict) -> Dict:
         if logos:
             logo = logos[0].get("href") or team.get("logo")
 
+                # quarter/OT scores will be filled later via get_scoring_periods_from_summary
         q_scores: List[int] = []
-        for ls in c.get("linescores", []):
-            q_scores.append(safe_int(ls.get("value"), 0))
+
 
         teams.append(
             {
@@ -320,6 +421,15 @@ def extract_game_meta(summary: Dict) -> Dict:
         )
 
     teams_sorted = sorted(teams, key=lambda t: t["home_away"] != "away")
+        # Fill quarter scores (and OT if it exists) for both teams
+    period_labels, periods_by_abbr = get_scoring_periods_from_summary(meta_event_id)
+
+    for t in teams_sorted:
+        ab = t.get("abbr") or ""
+        t["quarter_scores"] = periods_by_abbr.get(ab, [])
+
+    return {"teams": teams_sorted, "completed": completed, "period_labels": period_labels}
+
     return {"teams": teams_sorted, "completed": completed}
 
 
@@ -441,20 +551,27 @@ def make_poster_style_image(
     ax_q.text(0.5, 0.86, "SCORING BY QUARTER", ha="center", va="center",
               fontsize=13, fontweight="bold", color=style["accent"])
 
-    x_positions = [0.18, 0.36, 0.52, 0.68, 0.84]
-    labels = ["TEAM", "1Q", "2Q", "3Q", "4Q"]
+    # Dynamically space columns depending on whether OT exists
+n_cols = 1 + len(period_labels)  # TEAM + periods
+left, right = 0.14, 0.90
+step = (right - left) / (n_cols - 1)
+x_positions = [left + i * step for i in range(n_cols)]
+
+    period_labels = meta.get("period_labels", ["1Q", "2Q", "3Q", "4Q"])
+labels = ["TEAM"] + period_labels
+
     for x, lbl in zip(x_positions, labels):
         ax_q.text(x, 0.68, lbl, ha="center", va="center",
                   fontsize=11, color=style["text_secondary"])
 
     def row_scores(team: Dict, y_pos: float):
         abbr = team["abbr"] or ""
-        q_scores = team.get("quarter_scores") or []
-        q_scores = (q_scores + [0, 0, 0, 0])[:4]
-        ax_q.text(x_positions[0], y_pos, abbr, ha="center", va="center",
-                  fontsize=11, color=style["text_primary"])
-        for i in range(4):
+               q_scores = team.get("quarter_scores") or []
+        q_scores = (q_scores + [0] * len(period_labels))[:len(period_labels)]
+        ...
+        for i in range(len(period_labels)):
             ax_q.text(x_positions[i + 1], y_pos, str(q_scores[i]),
+
                       ha="center", va="center", fontsize=11,
                       color=style["text_secondary"])
 
@@ -560,7 +677,8 @@ def make_poster_style_image(
 def generate_poster_for_game(game_id: str, out_dir: str) -> Tuple[bool, str]:
     try:
         summary = fetch_summary(game_id)
-        meta = extract_game_meta(summary)
+        meta = extract_game_meta(summary, game_id)
+
         offensive_leaders = extract_all_team_leaders(summary)
         defensive_leaders = extract_all_defensive_leaders(summary)
         yardage = extract_team_yardage(summary)
