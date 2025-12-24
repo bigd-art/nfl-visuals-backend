@@ -2,14 +2,14 @@ import os
 import re
 import sys
 import argparse
+import gc  # Added for manual garbage collection
 from io import BytesIO
 from typing import Dict, List, Optional, Tuple
 
 import requests
-
 import matplotlib
-# Add this before importing pyplot
-matplotlib.use('Agg')
+# Force the non-interactive Agg backend to reduce memory overhead
+matplotlib.use('Agg') 
 import matplotlib.pyplot as plt
 from matplotlib import gridspec, patches
 from PIL import Image
@@ -74,7 +74,8 @@ def fetch_logo_image(url: Optional[str]) -> Optional[Image.Image]:
     if not url:
         return None
     try:
-        resp = requests.get(url, timeout=15)
+        # Using stream=True helps avoid loading the entire payload into a raw buffer first
+        resp = requests.get(url, timeout=15, stream=True)
         resp.raise_for_status()
         return Image.open(BytesIO(resp.content)).convert("RGBA")
     except Exception:
@@ -82,7 +83,6 @@ def fetch_logo_image(url: Optional[str]) -> Optional[Image.Image]:
 
 
 def scoreboard_url(year: int, week: int, seasontype: int) -> str:
-    # seasontype: 1=preseason, 2=regular season, 3=postseason
     return f"https://www.espn.com/nfl/scoreboard/_/week/{week}/year/{year}/seasontype/{seasontype}"
 
 
@@ -368,7 +368,6 @@ def make_poster_style_image(
 ) -> None:
     teams = meta["teams"]
     if len(teams) < 2:
-        print("Not a standard two-team game, skipping.")
         return
 
     away, home = teams[0], teams[1]
@@ -396,29 +395,26 @@ def make_poster_style_image(
     ax_top.set_facecolor(style["top_band_color"])
     ax_top.add_patch(
         patches.FancyBboxPatch(
-            (0.02, 0.08),
-            0.96,
-            0.84,
-            boxstyle="round,pad=0.03",
-            linewidth=0,
+            (0.02, 0.08), 0.96, 0.84,
+            boxstyle="round,pad=0.03", linewidth=0,
             facecolor=style["top_band_color"],
         )
     )
 
+    # LOGO MANAGEMENT: Close both images immediately after rendering to the Axes
     away_logo = fetch_logo_image(away["logo_url"])
-    home_logo = fetch_logo_image(home["logo_url"])
-
     if away_logo is not None:
         logo_ax = fig.add_axes([0.07, 0.78, 0.14, 0.14])
         logo_ax.imshow(away_logo)
         logo_ax.axis("off")
-        away_logo.close() # Close PIL object after it's handed to the axes
+        away_logo.close()  # Clean up
 
+    home_logo = fetch_logo_image(home["logo_url"])
     if home_logo is not None:
         logo_ax = fig.add_axes([0.79, 0.78, 0.14, 0.14])
         logo_ax.imshow(home_logo)
         logo_ax.axis("off")
-        home_logo.close() # Close PIL object after it's handed to the axes
+        home_logo.close()  # Clean up
 
     ax_top.text(0.18, 0.55, f"{away['abbr'] or ''}", ha="center", va="center",
                 fontsize=28, fontweight="bold", color=style["text_secondary"])
@@ -443,7 +439,6 @@ def make_poster_style_image(
     # QUARTERS
     ax_q = fig.add_subplot(gs[1])
     ax_q.axis("off")
-    ax_q.set_facecolor(style["middle_band_color"])
     ax_q.text(0.5, 0.86, "SCORING BY QUARTER", ha="center", va="center",
               fontsize=13, fontweight="bold", color=style["accent"])
 
@@ -470,102 +465,62 @@ def make_poster_style_image(
     # TOTAL YARDS
     ax_ty = fig.add_subplot(gs[2])
     ax_ty.axis("off")
-    ax_ty.set_facecolor(style["middle_band_color"])
     ax_ty.text(0.5, 0.75, "TOTAL YARDS", ha="center", va="center",
                fontsize=13, fontweight="bold", color=style["accent"])
     ax_ty.text(
-        0.5,
-        0.42,
+        0.5, 0.42,
         f"{away['abbr']}: {away_yards['total_yards']}    |    {home['abbr']}: {home_yards['total_yards']}",
-        ha="center",
-        va="center",
-        fontsize=12,
-        color=style["text_primary"],
+        ha="center", va="center", fontsize=12, color=style["text_primary"],
     )
 
     # TEAM LEADERS
     ax_leaders = fig.add_subplot(gs[3])
     ax_leaders.axis("off")
-    ax_leaders.set_facecolor(style["bottom_band_color"])
-
-    ax_leaders.text(
-        0.5, 1.08, "TEAM LEADERS",
-        ha="center", va="top",
-        fontsize=14, fontweight="bold",
-        color=style["text_primary"],
-        clip_on=False,
-    )
+    ax_leaders.text(0.5, 1.08, "TEAM LEADERS", ha="center", va="top",
+                    fontsize=14, fontweight="bold", color=style["text_primary"])
 
     def render_offensive(off_dict: Dict) -> List[str]:
         p = off_dict.get("passing_leader") or {}
         r = off_dict.get("rushing_leader") or {}
         rc = off_dict.get("receiving_leader") or {}
         lines = []
-        lines.append(
-            f"PASS: {p.get('name','N/A')} – {p.get('yards',0)} YDS, {p.get('td',0)} TD, {p.get('ints',0)} INT"
-            if p else "PASS: N/A"
-        )
-        lines.append(
-            f"RUSH: {r.get('name','N/A')} – {r.get('yards',0)} YDS, {r.get('td',0)} TD"
-            if r else "RUSH: N/A"
-        )
-        lines.append(
-            f"REC: {rc.get('name','N/A')} – {rc.get('yards',0)} YDS, {rc.get('td',0)} TD"
-            if rc else "REC: N/A"
-        )
+        lines.append(f"PASS: {p.get('name','N/A')} – {p.get('yards',0)} YDS, {p.get('td',0)} TD" if p else "PASS: N/A")
+        lines.append(f"RUSH: {r.get('name','N/A')} – {r.get('yards',0)} YDS, {r.get('td',0)} TD" if r else "RUSH: N/A")
+        lines.append(f"REC: {rc.get('name','N/A')} – {rc.get('yards',0)} YDS, {rc.get('td',0)} TD" if rc else "REC: N/A")
         return lines
 
     def render_defensive(def_dict: Dict) -> List[str]:
         lines = []
-        t = def_dict.get("tackles_leader")
-        s = def_dict.get("sacks_leader")
-        i = def_dict.get("ints_leader")
+        t, s, i = def_dict.get("tackles_leader"), def_dict.get("sacks_leader"), def_dict.get("ints_leader")
         if t: lines.append(f"TACKLES: {t['name']} – {t['tackles']}")
         if s: lines.append(f"SACKS: {s['name']} – {s['sacks']}")
         if i: lines.append(f"INTERCEPTIONS: {i['name']} – {i['ints']}")
         return lines
 
-    def render_team_column(x_center: float, team_label: str, off_dict: Dict, def_dict: Dict) -> None:
+    def render_team_column(x_center: float, team_label: str, off_dict: Dict, def_dict: Dict):
         y_team = 0.90
-        y_off_label = 0.82
-        y_off_lines = [0.74, 0.66, 0.58]
-        y_def_label = 0.46
-        y_def_lines = [0.38, 0.30, 0.22]
-
-        ax_leaders.text(x_center, y_team, team_label, ha="center", va="center",
-                        fontsize=12, color=style["accent"])
-
-        ax_leaders.text(x_center, y_off_label, "OFFENSIVE TEAM LEADERS",
-                        ha="center", va="center", fontsize=10,
-                        fontweight="bold", color=style["text_secondary"])
-        for y, line in zip(y_off_lines, render_offensive(off_dict)):
-            ax_leaders.text(x_center, y, line, ha="center", va="center",
-                            fontsize=9.5, color=style["text_secondary"])
-
-        ax_leaders.text(x_center, y_def_label, "DEFENSIVE TEAM LEADERS",
-                        ha="center", va="center", fontsize=10,
-                        fontweight="bold", color=style["text_secondary"])
-        dlines = render_defensive(def_dict)
-        if not dlines:
-            ax_leaders.text(x_center, y_def_lines[0], "N/A", ha="center", va="center",
-                            fontsize=9.5, color=style["text_muted"])
-        else:
-            for y, line in zip(y_def_lines, dlines):
-                ax_leaders.text(x_center, y, line, ha="center", va="center",
-                                fontsize=9.5, color=style["text_secondary"])
+        ax_leaders.text(x_center, y_team, team_label, ha="center", va="center", fontsize=12, color=style["accent"])
+        for idx, line in enumerate(render_offensive(off_dict)):
+            ax_leaders.text(x_center, 0.74 - (idx * 0.08), line, ha="center", va="center", fontsize=9.5, color=style["text_secondary"])
+        for idx, line in enumerate(render_defensive(def_dict)):
+            ax_leaders.text(x_center, 0.38 - (idx * 0.08), line, ha="center", va="center", fontsize=9.5, color=style["text_secondary"])
 
     render_team_column(0.25, away["name"], away_off, away_def)
     render_team_column(0.75, home["name"], home_off, home_def)
 
+    # FINAL SAVE AND CLEANUP
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    
+    # tight_layout can sometimes be a memory hog; using manual spacing in GridSpec is safer
+    # but we'll call it once here.
     plt.tight_layout()
-    plt.savefig(output_path, dpi=150, facecolor=fig.get_facecolor(), bbox_inches="tight")
-
-    # Explicitly clear the figure and axes
+    plt.savefig(output_path, dpi=140, facecolor=fig.get_facecolor(), bbox_inches="tight")
+    
+    # Aggressive memory cleanup for the figure
     fig.clf()
     plt.close(fig)
-    import gc
-    gc.collect() # Force garbage collection for the Image objects
+    gc.collect()
+
 
 def generate_poster_for_game(game_id: str, out_dir: str) -> Tuple[bool, str]:
     try:
@@ -601,33 +556,27 @@ def main():
         game_ids = game_ids[: args.limit]
 
     if not game_ids:
-        print("No gameIds found. ESPN page format may have changed.")
+        print("No gameIds found.")
         sys.exit(1)
 
     out_dir = os.path.join("game_visuals", f"{args.year}_week{args.week}")
     os.makedirs(out_dir, exist_ok=True)
 
-    print(f"Found {len(game_ids)} games. Saving to: {out_dir}")
-
     ok = 0
-    fails = []
     for gid in game_ids:
         success, msg = generate_poster_for_game(gid, out_dir)
         if success:
             ok += 1
             print(f"[OK]  {msg}")
         else:
-            fails.append(msg)
             print(f"[FAIL] {msg}")
+        
+        # Periodic garbage collection between games
+        gc.collect()
 
     print(f"\nDone. Success: {ok}/{len(game_ids)}")
-    if fails:
-        print("\nFailures:")
-        for f in fails:
-            print(" -", f)
 
 
 if __name__ == "__main__":
     main()
-
 
