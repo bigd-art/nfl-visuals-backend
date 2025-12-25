@@ -4,6 +4,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 from app.generator.week_posters import generate_week
+from app.generator.favorite_team_poster import generate_favorite_team_poster
 from app.services.storage_supabase import upload_file_return_url
 
 app = FastAPI()
@@ -12,6 +13,13 @@ class WeekRequest(BaseModel):
     year: int
     week: int
     seasontype: int = 2  # 1=preseason, 2=regular, 3=postseason
+
+class FavoriteTeamRequest(BaseModel):
+    year: int
+    week: int
+    seasontype: int = 2
+    team: str  # e.g. "SEA"
+
 
 @app.get("/health")
 def health():
@@ -46,5 +54,44 @@ def generate_week_endpoint(req: WeekRequest):
         "seasontype": req.seasontype,
         "count": len(urls),
         "images": urls,
+    }
+    
+@app.post("/generate-favorite-team")
+def generate_favorite_team_endpoint(req: FavoriteTeamRequest):
+    # 1) Generate ONE poster locally
+    try:
+        png_path = generate_favorite_team_poster(
+            req.year,
+            req.week,
+            req.seasontype,
+            req.team,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Generator failed: {e}")
+
+    if not os.path.exists(png_path):
+        raise HTTPException(status_code=500, detail=f"PNG not found: {png_path}")
+
+    # 2) Upload PNG to Supabase
+    storage_key = (
+        f"posters/{req.year}/week{req.week}/favorite/{req.team.upper()}/"
+        f"{os.path.basename(png_path)}"
+    )
+
+    try:
+        url = upload_file_return_url(
+            local_path=png_path,
+            storage_key=storage_key,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Upload failed: {e}")
+
+    return {
+        "year": req.year,
+        "week": req.week,
+        "seasontype": req.seasontype,
+        "team": req.team.upper(),
+        "count": 1,
+        "images": [url],
     }
 
