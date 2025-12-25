@@ -1,7 +1,7 @@
 import os
 from typing import Dict, List
 
-# Import only from your existing week script (UNCHANGED)
+# Import ONLY from your existing week script (week_posters.py stays untouched)
 from app.generator.week_posters import (
     fetch_url,
     fetch_summary,
@@ -9,6 +9,15 @@ from app.generator.week_posters import (
     extract_game_ids_from_scoreboard_html,
     generate_poster_for_game,
 )
+
+
+def _normalize_team_abbr(team: str) -> str:
+    t = (team or "").strip().upper()
+    if not t:
+        raise ValueError("team is required (e.g., SEA, DAL, KC).")
+    if not (2 <= len(t) <= 4) or not t.isalpha():
+        raise ValueError("team must be a 2–4 letter abbreviation (e.g., SEA, KC, LAR).")
+    return t
 
 
 def _extract_team_abbrs_from_summary(summary: Dict) -> List[str]:
@@ -26,9 +35,7 @@ def find_game_for_team_in_week(year: int, week: int, seasontype: int, team_abbr:
     """
     Finds the first gameId in the given week where team_abbr participates.
     """
-    team_abbr = (team_abbr or "").strip().upper()
-    if not team_abbr:
-        raise ValueError("team is required (e.g., SEA, DAL, KC).")
+    team_abbr = _normalize_team_abbr(team_abbr)
 
     url = scoreboard_url(year, week, seasontype)
     html = fetch_url(url)
@@ -37,7 +44,7 @@ def find_game_for_team_in_week(year: int, week: int, seasontype: int, team_abbr:
     if not game_ids:
         raise RuntimeError("No gameIds found. ESPN scoreboard format may have changed.")
 
-    # Iterate gameIds and check the ESPN summary until the team is found
+    # Iterate gameIds and check ESPN summary until the favorite team is found
     for gid in game_ids:
         try:
             s = fetch_summary(gid)
@@ -49,30 +56,29 @@ def find_game_for_team_in_week(year: int, week: int, seasontype: int, team_abbr:
 
     raise RuntimeError(
         f"No game found for team '{team_abbr}' in year={year}, week={week}, seasontype={seasontype}. "
-        "Check the abbreviation and that the team played that week."
+        "Double-check the abbreviation and confirm the team played that week."
     )
 
 
 def generate_favorite_team_poster(
     year: int,
     week: int,
-    seasontype: int,
-    team: str,
+    seasontype: int = 2,
+    team: str = "",
 ) -> str:
     """
     Generates ONE poster for the user's favorite team in the given week.
     Returns the output PNG path.
     """
-    team = (team or "").strip().upper()
-    game_id = find_game_for_team_in_week(year, week, seasontype, team)
+    team_abbr = _normalize_team_abbr(team)
+    game_id = find_game_for_team_in_week(year, week, seasontype, team_abbr)
 
-    out_dir = os.path.join("game_visuals", f"{year}_week{week}", team)
+    out_dir = os.path.join("game_visuals", f"{year}_week{week}", team_abbr)
     os.makedirs(out_dir, exist_ok=True)
 
     success, msg = generate_poster_for_game(game_id, out_dir)
     if not success:
-        raise RuntimeError(msg)
+        raise RuntimeError(f"Poster generation failed: {msg}")
 
     # msg is the PNG path when success=True
     return msg
-
