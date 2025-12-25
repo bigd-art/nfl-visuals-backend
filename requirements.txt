@@ -4,4 +4,5 @@ pydantic
 requests
 matplotlib
 pillow
+supabase
 
