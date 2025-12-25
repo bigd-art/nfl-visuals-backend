@@ -66,25 +66,38 @@ def get_public_url(storage_key: str) -> str:
     Assumes the bucket is PUBLIC.
     """
     return supabase.storage.from_(SUPABASE_BUCKET).get_public_url(storage_key)
-def cached_urls_for_prefix(prefix: str) -> List[str]:
-    """
-    If PNGs exist under prefix, return their public URLs.
-    Otherwise return [].
-    """
-    keys = list_files_by_prefix(prefix)
-    png_keys = [k for k in keys if k.lower().endswith(".png")]
-    return [get_public_url(k) for k in png_keys]
-# --- DEBUG PROOF (safe to remove later) ---
-STORAGE_SUPABASE_VERSION = "v3_has_cached_urls_for_prefix"
-
-from typing import List
 
 def cached_urls_for_prefix(prefix: str) -> List[str]:
-    # minimal safe implementation (won't crash import)
+    """
+    List public URLs for all PNG objects under a Supabase Storage prefix.
+    Prefix MUST behave like a folder.
+    """
+    # normalize prefix to folder semantics
+    prefix = prefix.lstrip("/")
+    if not prefix.endswith("/"):
+        prefix += "/"
+
+    print(f"[cached_urls_for_prefix] LIST prefix={prefix}")
+
     try:
-        keys = list_files_by_prefix(prefix)
-        png_keys = [k for k in keys if k.lower().endswith(".png")]
-        return [get_public_url(k) for k in png_keys]
-    except Exception:
+        objects = supabase.storage.from_(SUPABASE_BUCKET).list(path=prefix)
+    except Exception as e:
+        print(f"[cached_urls_for_prefix] ERROR {e}")
         return []
+
+    if not objects:
+        print(f"[cached_urls_for_prefix] EMPTY prefix={prefix}")
+        return []
+
+    urls = []
+    for obj in objects:
+        name = obj.get("name")
+        if not name or not name.lower().endswith(".png"):
+            continue
+
+        storage_key = f"{prefix}{name}"
+        urls.append(get_public_url(storage_key))
+
+    print(f"[cached_urls_for_prefix] FOUND {len(urls)} files")
+    return urls
 
