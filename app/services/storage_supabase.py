@@ -36,18 +36,16 @@ from typing import List
 
 
 def list_files_by_prefix(prefix: str, limit: int = 200) -> List[str]:
-    """
-    List files under a storage prefix (folder).
-    Example prefix: 'posters/2025/week13'
-    """
     folder = prefix.strip("/")
 
     try:
-        res = supabase.storage.from_(SUPABASE_BUCKET).list(
-            path=folder,
-            options={"limit": limit},
-        )
-    except Exception:
+        # Most compatible form across supabase-py versions:
+        res = supabase.storage.from_(SUPABASE_BUCKET).list(folder, {"limit": limit})
+    except TypeError:
+        # Fallback for clients that require keyword args:
+        res = supabase.storage.from_(SUPABASE_BUCKET).list(path=folder, options={"limit": limit})
+    except Exception as e:
+        print(f"[list_files_by_prefix] ERROR folder={folder} err={e}")
         return []
 
     keys = []
@@ -57,6 +55,7 @@ def list_files_by_prefix(prefix: str, limit: int = 200) -> List[str]:
             continue
         keys.append(f"{folder}/{name}")
 
+    print(f"[list_files_by_prefix] folder={folder} count={len(keys)}")
     return keys
 
 
