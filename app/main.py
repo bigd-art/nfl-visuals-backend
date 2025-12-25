@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from app.generator.week_posters import generate_week
 from app.generator.favorite_team_poster import generate_favorite_team_poster
 from app.services.storage_supabase import upload_file_return_url
+from app.services.storage_supabase import cached_urls_for_prefix
 
 app = FastAPI()
 
@@ -27,6 +28,19 @@ def health():
 
 @app.post("/generate-week")
 def generate_week_endpoint(req: WeekRequest):
+    # 0) CACHE CHECK (won't break scaling)
+    cache_prefix = f"posters/{req.year}/week{req.week}"
+    cached = cached_urls_for_prefix(cache_prefix)
+    if cached:
+        return {
+            "year": req.year,
+            "week": req.week,
+            "seasontype": req.seasontype,
+            "count": len(cached),
+            "images": cached,
+            "cached": True,
+        }
+
     # 1) Generate posters locally
     try:
         out_dir = generate_week(req.year, req.week, req.seasontype)
@@ -58,13 +72,29 @@ def generate_week_endpoint(req: WeekRequest):
     
 @app.post("/generate-favorite-team")
 def generate_favorite_team_endpoint(req: FavoriteTeamRequest):
+    team_upper = req.team.upper()
+
+    # 0) CACHE CHECK (won't break scaling)
+    cache_prefix = f"posters/{req.year}/week{req.week}/favorite/{team_upper}"
+    cached = cached_urls_for_prefix(cache_prefix)
+    if cached:
+        return {
+            "year": req.year,
+            "week": req.week,
+            "seasontype": req.seasontype,
+            "team": team_upper,
+            "count": len(cached),
+            "images": cached,
+            "cached": True,
+        }
+
     # 1) Generate ONE poster locally
     try:
         png_path = generate_favorite_team_poster(
             req.year,
             req.week,
             req.seasontype,
-            req.team,
+            team_upper,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Generator failed: {e}")
@@ -74,7 +104,7 @@ def generate_favorite_team_endpoint(req: FavoriteTeamRequest):
 
     # 2) Upload PNG to Supabase
     storage_key = (
-        f"posters/{req.year}/week{req.week}/favorite/{req.team.upper()}/"
+        f"posters/{req.year}/week{req.week}/favorite/{team_upper}/"
         f"{os.path.basename(png_path)}"
     )
 
@@ -90,8 +120,9 @@ def generate_favorite_team_endpoint(req: FavoriteTeamRequest):
         "year": req.year,
         "week": req.week,
         "seasontype": req.seasontype,
-        "team": req.team.upper(),
+        "team": team_upper,
         "count": 1,
         "images": [url],
+        "cached": False,
     }
 
