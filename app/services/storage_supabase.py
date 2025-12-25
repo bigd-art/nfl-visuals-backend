@@ -38,24 +38,31 @@ from typing import List
 def list_files_by_prefix(prefix: str, limit: int = 200) -> List[str]:
     folder = prefix.strip("/")
 
-    try:
-        # Most compatible form across supabase-py versions:
-        res = supabase.storage.from_(SUPABASE_BUCKET).list(folder, {"limit": limit})
-    except TypeError:
-        # Fallback for clients that require keyword args:
-        res = supabase.storage.from_(SUPABASE_BUCKET).list(path=folder, options={"limit": limit})
-    except Exception as e:
-        print(f"[list_files_by_prefix] ERROR folder={folder} err={e}")
-        return []
+    print(f"[list_files_by_prefix] folder={folder}")
 
-    keys = []
+    try:
+        # try common supabase-py signature
+        try:
+            res = supabase.storage.from_(SUPABASE_BUCKET).list(folder, {"limit": limit})
+        except TypeError:
+            # fallback signature
+            res = supabase.storage.from_(SUPABASE_BUCKET).list(path=folder, options={"limit": limit})
+
+        print(f"[list_files_by_prefix] raw_res={res}")
+
+    except Exception as e:
+        # IMPORTANT: do not silently return [] — this hides the actual problem
+        print(f"[list_files_by_prefix] ERROR folder={folder} err={repr(e)}")
+        raise
+
+    keys: List[str] = []
     for item in res or []:
         name = item.get("name")
         if not name:
             continue
         keys.append(f"{folder}/{name}")
 
-    print(f"[list_files_by_prefix] folder={folder} count={len(keys)}")
+    print(f"[list_files_by_prefix] keys_count={len(keys)}")
     return keys
 
 
