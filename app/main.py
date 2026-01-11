@@ -1,192 +1,275 @@
-import glob
+# app/main.py
 import os
+import glob
 import time
-from typing import List
+from typing import List, Dict, Any, Literal
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 from app.generator.week_posters import generate_week
 from app.generator.favorite_team_poster import generate_favorite_team_poster
-from app.services.storage_supabase import upload_file_return_url, cached_urls_for_prefix
+
+from app.services.storage_supabase import (
+    upload_file_return_url,
+    cached_urls_for_prefix,
+)
 
 app = FastAPI()
 
 
-# ---------------- Request Models ----------------
+# =========================
+# Helpers
+# =========================
+
+def _week_folder(week: int) -> str:
+    return f"week{str(week).zfill(2)}"
+
+
+def _kind_from_seasontype(seasontype: int) -> Literal["regular", "playoffs"]:
+    # 2 = regular, 3 = playoffs
+    return "regular" if int(seasontype) == 2 else "playoffs"
+
+
+def _prefix_week(year: int, kind: str, week: int) -> str:
+    # ONE TRUE SCHEMA (DO NOT CHANGE)
+    # posters_v3/{year}/{regular|playoffs}/weekXX/
+    return f"posters_v3/{year}/{kind}/{_week_folder(week)}/"
+
+
+def _prefix_favorite(year: int, kind: str, week: int, team: str) -> str:
+    team = team.strip().upper()
+    return f"posters_v3/{year}/{kind}/{_week_folder(week)}/favorite/{team}/"
+
+
+def _upload_all_pngs(out_dir: str, prefix: str) -> List[str]:
+    pngs = sorted(glob.glob(os.path.join(out_dir, "*.png")))
+    if not pngs:
+        raise HTTPException(status_code=500, detail=f"No PNGs found in output dir: {out_dir}")
+
+    urls: List[str] = []
+    for p in pngs:
+        key = f"{prefix}{os.path.basename(p)}"
+        url = upload_file_return_url(p, key)
+        urls.append(url)
+
+    urls.sort()
+    return urls
+
+
+# =========================
+# Request Models
+# =========================
 
 class WeekRequest(BaseModel):
     year: int
     week: int
-    # ESPN: 1=preseason, 2=regular, 3=postseason
-    seasontype: int = 2
 
 
 class FavoriteTeamRequest(BaseModel):
     year: int
     week: int
-    seasontype: int = 2
-    team: str  # e.g. "SEA"
+    team: str
 
 
-# ---------------- Health ----------------
+# =========================
+# Health
+# =========================
 
 @app.get("/health")
 def health():
     return {"ok": True}
 
 
-# ---------------- Helpers ----------------
+# =========================
+# REGULAR SEASON
+# =========================
 
-def _validate(year: int, week: int, seasontype: int) -> None:
-    if year < 2002 or year > 2035:
-        raise HTTPException(status_code=400, detail="Year must be between 2002 and 2035.")
-    if week < 1 or week > 23:
-        raise HTTPException(status_code=400, detail="Week must be between 1 and 23.")
-    if seasontype not in (1, 2, 3):
-        raise HTTPException(status_code=400, detail="seasontype must be 1, 2, or 3.")
-
-
-def _week_folder(week: int) -> str:
-    return f"week{str(week).zfill(2)}"
-
-
-def _list_pngs(out_dir: str) -> List[str]:
-    if not out_dir or not os.path.isdir(out_dir):
-        return []
-    return sorted(glob.glob(os.path.join(out_dir, "*.png")))
-
-
-def _norm_team(team: str) -> str:
-    t = (team or "").strip().upper()
-    if not t or not t.isalpha() or len(t) < 2 or len(t) > 4:
-        raise HTTPException(status_code=400, detail="Team must be 2–4 letters (e.g., SEA, KC, LAR).")
-    return t
-
-
-# ---------------- Week Posters ----------------
-
-@app.post("/generate-week")
-def generate_week_endpoint(req: WeekRequest):
-    _validate(req.year, req.week, req.seasontype)
-
+@app.post("/generate-week-regular")
+def generate_week_regular(req: WeekRequest) -> Dict[str, Any]:
     t0 = time.time()
-    week_folder = _week_folder(req.week)
+    kind = "regular"
+    prefix = _prefix_week(req.year, kind, req.week)
 
-    # IMPORTANT: include seasontype in the path to prevent regular/playoff collisions
-    cache_prefix = f"posters_v2/{req.year}/seasontype{req.seasontype}/{week_folder}/"
-    print(f"[generate-week] cache check prefix={cache_prefix}")
-
-    cached = cached_urls_for_prefix(cache_prefix)
+    cached = cached_urls_for_prefix(prefix)
     if cached:
-        dt_ms = int((time.time() - t0) * 1000)
-        print(f"[generate-week] CACHE HIT count={len(cached)} ms={dt_ms}")
         return {
             "cache_hit": True,
-            "cache_prefix": cache_prefix,
             "year": req.year,
             "week": str(req.week).zfill(2),
-            "seasontype": req.seasontype,
+            "kind": kind,
+            "prefix": prefix,
             "count": len(cached),
             "images": cached,
-            "timing_ms": dt_ms,
+            "timing_ms": int((time.time() - t0) * 1000),
         }
 
-    print(f"[generate-week] CACHE MISS prefix={cache_prefix}")
-
-    gen0 = time.time()
-    try:
-        out_dir = generate_week(req.year, req.week, req.seasontype)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Generator failed: {e}")
-    gen_ms = int((time.time() - gen0) * 1000)
-
-    pngs = _list_pngs(out_dir)
-    if not pngs:
-        raise HTTPException(status_code=500, detail=f"No posters generated in: {out_dir}")
-
-    up0 = time.time()
-    urls: List[str] = []
-    for p in pngs:
-        key = f"{cache_prefix}{os.path.basename(p)}"
-        urls.append(upload_file_return_url(p, key))
-    upload_ms = int((time.time() - up0) * 1000)
-
-    total_ms = int((time.time() - t0) * 1000)
-    print(f"[generate-week] DONE gen_ms={gen_ms} upload_ms={upload_ms} total_ms={total_ms} count={len(urls)}")
+    # IMPORTANT: seasontype=2 for regular
+    out_dir = generate_week(req.year, req.week, 2)
+    urls = _upload_all_pngs(out_dir, prefix)
 
     return {
         "cache_hit": False,
-        "cache_prefix": cache_prefix,
         "year": req.year,
         "week": str(req.week).zfill(2),
-        "seasontype": req.seasontype,
+        "kind": kind,
+        "prefix": prefix,
         "count": len(urls),
         "images": urls,
-        "timing_ms": total_ms,
-        "gen_ms": gen_ms,
-        "upload_ms": upload_ms,
+        "timing_ms": int((time.time() - t0) * 1000),
     }
 
 
-# ---------------- Favorite Team ----------------
-
-@app.post("/generate-favorite-team")
-def generate_favorite_team_endpoint(req: FavoriteTeamRequest):
-    team = _norm_team(req.team)
-    _validate(req.year, req.week, req.seasontype)
-
+@app.post("/generate-favorite-regular")
+def generate_favorite_regular(req: FavoriteTeamRequest) -> Dict[str, Any]:
     t0 = time.time()
-    week_folder = _week_folder(req.week)
-    cache_prefix = f"posters_v2/{req.year}/seasontype{req.seasontype}/{week_folder}/favorite/{team}/"
-    print(f"[favorite-team] cache check prefix={cache_prefix}")
+    kind = "regular"
+    prefix = _prefix_favorite(req.year, kind, req.week, req.team)
 
-    cached = cached_urls_for_prefix(cache_prefix)
+    cached = cached_urls_for_prefix(prefix)
     if cached:
-        dt_ms = int((time.time() - t0) * 1000)
-        print(f"[favorite-team] CACHE HIT count={len(cached)} ms={dt_ms}")
         return {
             "cache_hit": True,
-            "cache_prefix": cache_prefix,
             "year": req.year,
             "week": str(req.week).zfill(2),
-            "seasontype": req.seasontype,
-            "team": team,
+            "kind": kind,
+            "team": req.team.strip().upper(),
+            "prefix": prefix,
             "count": len(cached),
             "images": cached,
-            "timing_ms": dt_ms,
+            "timing_ms": int((time.time() - t0) * 1000),
         }
 
-    print(f"[favorite-team] CACHE MISS prefix={cache_prefix}")
-
-    gen0 = time.time()
-    try:
-        png_path = generate_favorite_team_poster(req.year, req.week, req.seasontype, team)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Favorite team generator failed: {e}")
-    gen_ms = int((time.time() - gen0) * 1000)
-
+    # IMPORTANT: seasontype=2 for regular
+    png_path = generate_favorite_team_poster(req.year, req.week, 2, req.team.strip().upper())
     if not png_path or not os.path.exists(png_path):
         raise HTTPException(status_code=500, detail="Favorite team poster was not generated.")
 
-    up0 = time.time()
-    key = f"{cache_prefix}{os.path.basename(png_path)}"
+    key = f"{prefix}{os.path.basename(png_path)}"
     url = upload_file_return_url(png_path, key)
-    upload_ms = int((time.time() - up0) * 1000)
-
-    total_ms = int((time.time() - t0) * 1000)
-    print(f"[favorite-team] DONE gen_ms={gen_ms} upload_ms={upload_ms} total_ms={total_ms}")
 
     return {
         "cache_hit": False,
-        "cache_prefix": cache_prefix,
         "year": req.year,
         "week": str(req.week).zfill(2),
-        "seasontype": req.seasontype,
-        "team": team,
+        "kind": kind,
+        "team": req.team.strip().upper(),
+        "prefix": prefix,
         "count": 1,
         "images": [url],
-        "timing_ms": total_ms,
-        "gen_ms": gen_ms,
-        "upload_ms": upload_ms,
+        "timing_ms": int((time.time() - t0) * 1000),
     }
+
+
+# =========================
+# PLAYOFFS
+# =========================
+
+@app.post("/generate-week-playoffs")
+def generate_week_playoffs(req: WeekRequest) -> Dict[str, Any]:
+    t0 = time.time()
+    kind = "playoffs"
+    prefix = _prefix_week(req.year, kind, req.week)
+
+    cached = cached_urls_for_prefix(prefix)
+    if cached:
+        return {
+            "cache_hit": True,
+            "year": req.year,
+            "week": str(req.week).zfill(2),
+            "kind": kind,
+            "prefix": prefix,
+            "count": len(cached),
+            "images": cached,
+            "timing_ms": int((time.time() - t0) * 1000),
+        }
+
+    # IMPORTANT: seasontype=3 for playoffs
+    out_dir = generate_week(req.year, req.week, 3)
+    urls = _upload_all_pngs(out_dir, prefix)
+
+    return {
+        "cache_hit": False,
+        "year": req.year,
+        "week": str(req.week).zfill(2),
+        "kind": kind,
+        "prefix": prefix,
+        "count": len(urls),
+        "images": urls,
+        "timing_ms": int((time.time() - t0) * 1000),
+    }
+
+
+@app.post("/generate-favorite-playoffs")
+def generate_favorite_playoffs(req: FavoriteTeamRequest) -> Dict[str, Any]:
+    t0 = time.time()
+    kind = "playoffs"
+    prefix = _prefix_favorite(req.year, kind, req.week, req.team)
+
+    cached = cached_urls_for_prefix(prefix)
+    if cached:
+        return {
+            "cache_hit": True,
+            "year": req.year,
+            "week": str(req.week).zfill(2),
+            "kind": kind,
+            "team": req.team.strip().upper(),
+            "prefix": prefix,
+            "count": len(cached),
+            "images": cached,
+            "timing_ms": int((time.time() - t0) * 1000),
+        }
+
+    # IMPORTANT: seasontype=3 for playoffs
+    png_path = generate_favorite_team_poster(req.year, req.week, 3, req.team.strip().upper())
+    if not png_path or not os.path.exists(png_path):
+        raise HTTPException(status_code=500, detail="Favorite team poster was not generated.")
+
+    key = f"{prefix}{os.path.basename(png_path)}"
+    url = upload_file_return_url(png_path, key)
+
+    return {
+        "cache_hit": False,
+        "year": req.year,
+        "week": str(req.week).zfill(2),
+        "kind": kind,
+        "team": req.team.strip().upper(),
+        "prefix": prefix,
+        "count": 1,
+        "images": [url],
+        "timing_ms": int((time.time() - t0) * 1000),
+    }
+
+
+# =========================
+# Backwards-compatible endpoints
+# =========================
+
+class OldWeekRequest(BaseModel):
+    year: int
+    week: int
+    seasontype: int = 2  # 2=regular, 3=playoffs
+
+
+class OldFavoriteRequest(BaseModel):
+    year: int
+    week: int
+    seasontype: int = 2
+    team: str
+
+
+@app.post("/generate-week")
+def generate_week_old(req: OldWeekRequest):
+    kind = _kind_from_seasontype(req.seasontype)
+    if kind == "regular":
+        return generate_week_regular(WeekRequest(year=req.year, week=req.week))
+    return generate_week_playoffs(WeekRequest(year=req.year, week=req.week))
+
+
+@app.post("/generate-favorite-team")
+def generate_favorite_old(req: OldFavoriteRequest):
+    kind = _kind_from_seasontype(req.seasontype)
+    if kind == "regular":
+        return generate_favorite_regular(FavoriteTeamRequest(year=req.year, week=req.week, team=req.team))
+    return generate_favorite_playoffs(FavoriteTeamRequest(year=req.year, week=req.week, team=req.team))
+
