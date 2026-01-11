@@ -1,4 +1,5 @@
 import os
+import shutil
 import re
 import sys
 import argparse
@@ -715,28 +716,6 @@ def main():
         print("No gameIds found. ESPN page format may have changed.")
         sys.exit(1)
 
-    out_dir = os.path.join("game_visuals", f"{args.year}_week{args.week}")
-    os.makedirs(out_dir, exist_ok=True)
-
-    print(f"Found {len(game_ids)} games. Saving to: {out_dir}")
-
-    ok = 0
-    fails = []
-    for gid in game_ids:
-        success, msg = generate_poster_for_game(gid, out_dir)
-        if success:
-            ok += 1
-            print(f"[OK]  {msg}")
-        else:
-            fails.append(msg)
-            print(f"[FAIL] {msg}")
-
-    print(f"\nDone. Success: {ok}/{len(game_ids)}")
-    if fails:
-        print("\nFailures:")
-        for f in fails:
-            print(" -", f)
-
 
 def generate_week(year: int, week: int, seasontype: int = 2, limit: int = 0) -> str:
     """
@@ -753,7 +732,11 @@ def generate_week(year: int, week: int, seasontype: int = 2, limit: int = 0) -> 
     if not game_ids:
         raise RuntimeError("No gameIds found. ESPN page format may have changed.")
 
-    out_dir = os.path.join("game_visuals", f"{year}_week{week}")
+    kind = "regular" if seasontype == 2 else "playoffs" 
+    out_dir = os.path.join("game_visuals", str(year), kind, f"week{str(week).zfill(2)}")
+
+    # ALWAYS start clean so we don't upload leftover PNGs from a previous run
+    shutil.rmtree(out_dir, ignore_errors=True)
     os.makedirs(out_dir, exist_ok=True)
 
     for gid in game_ids:
