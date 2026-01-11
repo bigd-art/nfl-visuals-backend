@@ -1,4 +1,5 @@
 import os
+import shutil
 from typing import Dict, List
 
 # Import ONLY from your existing week script (unchanged)
@@ -60,7 +61,22 @@ def generate_favorite_team_poster(
     team_abbr = _normalize_team_abbr(team)
     game_id = find_game_for_team_in_week(year, week, seasontype, team_abbr)
 
-    out_dir = os.path.join("game_visuals", f"{year}_week{week}", team_abbr)
+
+    kind = "regular" if seasontype == 2 else "playoffs"
+    week_folder = f"week{str(week).zfill(2)}"
+    team = team.strip().upper()
+
+    out_dir = os.path.join(
+    "game_visuals",
+    str(year),
+    kind,
+    week_folder,
+    "favorite",
+    team
+)
+
+    # CRITICAL: remove leftovers from previous runs
+    shutil.rmtree(out_dir, ignore_errors=True)
     os.makedirs(out_dir, exist_ok=True)
 
     success, msg = generate_poster_for_game(game_id, out_dir)
