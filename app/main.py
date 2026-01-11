@@ -54,8 +54,8 @@ def generate_week_endpoint(req: WeekRequest):
     week_str = str(req.week).zfill(2)
 
     # IMPORTANT: cache prefix MUST be a folder (trailing slash)
-    cache_prefix = f"posters/{req.year}/week{week_str}/"
-    print(f"[generate-week] cache check prefix={cache_prefix}")
+cache_prefix = f"posters/{req.year}/seasontype{req.seasontype}/week{week_str}/"
+   print(f"[generate-week] cache check prefix={cache_prefix}")
 
     cached = cached_urls_for_prefix(cache_prefix)
     if cached:
@@ -90,7 +90,7 @@ def generate_week_endpoint(req: WeekRequest):
     urls: List[str] = []
     up0 = time.time()
     for path in pngs:
-        storage_key = f"{cache_prefix}{os.path.basename(path)}"
+storage_key = f"posters/{req.year}/seasontype{req.seasontype}/week{week_str}/week_{i}.png"
         url = upload_file_return_url(path, storage_key)
         urls.append(url)
     upload_ms = int((time.time() - up0) * 1000)
@@ -127,7 +127,7 @@ def generate_favorite_team_endpoint(req: FavoriteTeamRequest):
     week_str = str(req.week).zfill(2)
 
     # 🚨 THIS WAS THE BUG — MUST END WITH "/"
-    cache_prefix = f"posters/{req.year}/week{week_str}/favorite/{team}/"
+cache_prefix = f"posters/{req.year}/seasontype{req.seasontype}/week{week_str}/favorite/{team}/"
     print(f"[favorite-team] cache check prefix={cache_prefix}")
 
     cached = cached_urls_for_prefix(cache_prefix)
@@ -162,7 +162,7 @@ def generate_favorite_team_endpoint(req: FavoriteTeamRequest):
     if not os.path.exists(png_path):
         raise HTTPException(status_code=500, detail="PNG not found")
 
-    storage_key = f"{cache_prefix}{os.path.basename(png_path)}"
+storage_key = f"posters/{req.year}/seasontype{req.seasontype}/week{week_str}/favorite/{team}/poster.png"
 
     up0 = time.time()
     url = upload_file_return_url(png_path, storage_key)
