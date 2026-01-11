@@ -74,7 +74,7 @@ def generate_week_endpoint(req: WeekRequest):
     week_folder = _week_folder(req.week)
 
     # IMPORTANT: include seasontype in the path to prevent regular/playoff collisions
-    cache_prefix = f"posters/{req.year}/seasontype{req.seasontype}/{week_folder}/"
+    cache_prefix = f"posters_v2/{req.year}/seasontype{req.seasontype}/{week_folder}/"
     print(f"[generate-week] cache check prefix={cache_prefix}")
 
     cached = cached_urls_for_prefix(cache_prefix)
@@ -138,8 +138,7 @@ def generate_favorite_team_endpoint(req: FavoriteTeamRequest):
 
     t0 = time.time()
     week_folder = _week_folder(req.week)
-
-    cache_prefix = f"posters/{req.year}/seasontype{req.seasontype}/{week_folder}/favorite/{team}/"
+    cache_prefix = f"posters_v2/{req.year}/seasontype{req.seasontype}/{week_folder}/favorite/{team}/"
     print(f"[favorite-team] cache check prefix={cache_prefix}")
 
     cached = cached_urls_for_prefix(cache_prefix)
