@@ -9,3 +9,5 @@ __pycache__/
 
 __pycache__/
 *.pyc
+regen_all_log.jsonl
+regenerate_all.py
