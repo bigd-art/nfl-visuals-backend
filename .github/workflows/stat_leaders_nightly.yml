@@ -37,6 +37,13 @@ jobs:
 
           print("It's 1 AM New York. Continuing.")
           PY
+      - name: Debug - list stat leaders files
+        run: |
+          pwd
+          ls -la
+          ls -la app || true
+          ls -la app/generator || true
+          find app -maxdepth 4 -type f -name "run_nightly.py" -print || true
 
       - name: Generate + Upload Stat Leaders
         env:
