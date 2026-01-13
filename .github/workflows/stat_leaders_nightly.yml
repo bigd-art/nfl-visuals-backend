@@ -45,5 +45,3 @@ jobs:
           SUPABASE_BUCKET: ${{ secrets.SUPABASE_BUCKET }}
         run: |
           python app/generator/stat_leaders/run_nightly.py
-
-
