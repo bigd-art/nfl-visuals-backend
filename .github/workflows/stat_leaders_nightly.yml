@@ -44,6 +44,6 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           SUPABASE_BUCKET: ${{ secrets.SUPABASE_BUCKET }}
         run: |
-  python app/generator/stat_leaders/run_nightly.py
+          python app/generator/stat_leaders/run_nightly.py
 
 
