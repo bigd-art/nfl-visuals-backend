@@ -1,6 +1,6 @@
 import os
 import re
-import argparse
+import tempfile
 from io import StringIO
 from datetime import datetime
 from typing import List, Optional, Tuple, Union, Dict
@@ -9,10 +9,11 @@ import requests
 import pandas as pd
 from PIL import Image, ImageDraw, ImageFont
 
-# ----------------------------
-# Config
-# ----------------------------
+# ✅ use your existing Supabase helpers (same ones used in main.py)
+from app.services.storage_supabase import upload_file_return_url, cached_urls_for_prefix
+
 TOP_N = 10
+Number = Union[int, float]
 
 HEADERS = {
     "User-Agent": (
@@ -21,8 +22,6 @@ HEADERS = {
     )
 }
 
-Number = Union[int, float]
-
 TEAM_ABBRS = {
     "ARI","ATL","BAL","BUF","CAR","CHI","CIN","CLE","DAL","DEN","DET","GB","HOU","IND",
     "JAX","KC","LAC","LAR","LV","MIA","MIN","NE","NO","NYG","NYJ","PHI","PIT","SEA",
@@ -30,19 +29,78 @@ TEAM_ABBRS = {
 }
 TEAM_PATTERN = re.compile(r"(" + "|".join(sorted(TEAM_ABBRS, key=len, reverse=True)) + r")$")
 
-# These keys MUST stay stable (Expo uses them to match posters)
+# (stable_key, display_title, url_key)
 CATEGORIES = [
-    ("passing_yards", "Passing Yards", "passing_yards", ["YDS", "PASS YDS", "Pass YDS"], "int"),
-    ("passing_tds", "Passing TDs", "passing_tds", ["TD", "PASS TD", "Pass TD"], "int"),
-    ("interceptions_thrown", "Interceptions Thrown", "interceptions", ["INT", "Interceptions"], "int"),
-    ("rushing_yards", "Rushing Yards", "rushing_yards", ["YDS", "RUSH YDS", "Rush YDS"], "int"),
-    ("rushing_tds", "Rushing TDs", "rushing_tds", ["TD", "RUSH TD", "Rush TD"], "int"),
-    ("receiving_yards", "Receiving Yards", "receiving_yards", ["YDS", "REC YDS", "Rec YDS"], "int"),
-    ("receiving_tds", "Receiving TDs", "receiving_tds", ["TD", "REC TD", "Rec TD"], "int"),
-    ("sacks", "Sacks", "sacks", ["SACK", "Sacks SACK", "Sacks"], "float1"),
-    ("tackles", "Tackles", "totalTackles", ["TOT", "Tackles TOT", "Total", "Tackles"], "int"),
-    ("interceptions", "Interceptions (Defense)", "defensive_interceptions", ["INT", "Interceptions INT", "Interceptions"], "int"),
+    ("passing_yards", "Passing Yards", "passing_yards"),
+    ("passing_tds", "Passing TDs", "passing_tds"),
+    ("interceptions_thrown", "Interceptions Thrown", "interceptions_thrown"),
+    ("rushing_yards", "Rushing Yards", "rushing_yards"),
+    ("rushing_tds", "Rushing TDs", "rushing_tds"),
+    ("receiving_yards", "Receiving Yards", "receiving_yards"),
+    ("receiving_tds", "Receiving TDs", "receiving_tds"),
+    ("sacks", "Sacks", "sacks"),
+    ("tackles", "Tackles", "tackles"),
+    ("interceptions_def", "Interceptions", "interceptions_def"),
 ]
+
+# ----------------------------
+# URL builder (regular vs playoffs)
+# seasontype: 2=regular, 3=postseason
+# ----------------------------
+def build_urls(season: int, seasontype: int) -> Dict[str, Tuple[str, List[str], str]]:
+    st = int(seasontype)
+    return {
+        "passing_yards": (
+            f"https://www.espn.com/nfl/stats/player/_/season/{season}/seasontype/{st}",
+            ["YDS", "PASS YDS", "Pass YDS"],
+            "int",
+        ),
+        "passing_tds": (
+            f"https://www.espn.com/nfl/stats/player/_/season/{season}/seasontype/{st}/table/passing/sort/passingTouchdowns/dir/desc",
+            ["TD", "PASS TD", "Pass TD"],
+            "int",
+        ),
+        "interceptions_thrown": (
+            f"https://www.espn.com/nfl/stats/player/_/season/{season}/seasontype/{st}/table/passing/sort/interceptions/dir/desc",
+            ["INT", "Interceptions"],
+            "int",
+        ),
+        "rushing_yards": (
+            f"https://www.espn.com/nfl/stats/player/_/stat/rushing/season/{season}/seasontype/{st}",
+            ["YDS", "RUSH YDS", "Rush YDS"],
+            "int",
+        ),
+        "rushing_tds": (
+            f"https://www.espn.com/nfl/stats/player/_/stat/rushing/season/{season}/seasontype/{st}/table/rushing/sort/rushingTouchdowns/dir/desc",
+            ["TD", "RUSH TD", "Rush TD"],
+            "int",
+        ),
+        "receiving_yards": (
+            f"https://www.espn.com/nfl/stats/player/_/stat/receiving/season/{season}/seasontype/{st}",
+            ["YDS", "REC YDS", "Rec YDS"],
+            "int",
+        ),
+        "receiving_tds": (
+            f"https://www.espn.com/nfl/stats/player/_/stat/receiving/season/{season}/seasontype/{st}/table/receiving/sort/receivingTouchdowns/dir/desc",
+            ["TD", "REC TD", "Rec TD"],
+            "int",
+        ),
+        "sacks": (
+            f"https://www.espn.com/nfl/stats/player/_/view/defense/season/{season}/seasontype/{st}/table/defensive/sort/sacks/dir/desc",
+            ["SACK", "Sacks SACK", "Sacks"],
+            "float1",
+        ),
+        "tackles": (
+            f"https://www.espn.com/nfl/stats/player/_/view/defense/season/{season}/seasontype/{st}/table/defensive/sort/totalTackles/dir/desc",
+            ["TOT", "Tackles TOT", "Total", "Tackles"],
+            "int",
+        ),
+        "interceptions_def": (
+            f"https://www.espn.com/nfl/stats/player/_/view/defense/season/{season}/seasontype/{st}/table/defensiveInterceptions/sort/interceptions/dir/desc",
+            ["INT", "Interceptions INT", "Interceptions"],
+            "int",
+        ),
+    }
 
 # ----------------------------
 # String normalization (fix glued TEAM)
@@ -136,6 +194,7 @@ def stitch_tables_if_needed(name_t: Optional[pd.DataFrame], stat_t: pd.DataFrame
     cmap = col_lookup(list(stat_t.columns))
     if "name" in cmap:
         return stat_t
+
     if name_t is None:
         return stat_t
 
@@ -200,68 +259,7 @@ def topN_from_url(url: str, stat_candidates: List[str], mode: str, topn: int) ->
     return out
 
 # ----------------------------
-# URL builder (regular vs playoffs)
-# seasontype: 2=regular, 3=postseason
-# ----------------------------
-def build_urls(season: int, seasontype: int) -> Dict[str, Tuple[str, List[str], str]]:
-    st = int(seasontype)
-
-    urls = {
-        "passing_yards": (
-            f"https://www.espn.com/nfl/stats/player/_/season/{season}/seasontype/{st}",
-            ["YDS", "PASS YDS", "Pass YDS"],
-            "int",
-        ),
-        "passing_tds": (
-            f"https://www.espn.com/nfl/stats/player/_/season/{season}/seasontype/{st}/table/passing/sort/passingTouchdowns/dir/desc",
-            ["TD", "PASS TD", "Pass TD"],
-            "int",
-        ),
-        "interceptions": (
-            f"https://www.espn.com/nfl/stats/player/_/season/{season}/seasontype/{st}/table/passing/sort/interceptions/dir/desc",
-            ["INT", "Interceptions"],
-            "int",
-        ),
-        "rushing_yards": (
-            f"https://www.espn.com/nfl/stats/player/_/stat/rushing/season/{season}/seasontype/{st}",
-            ["YDS", "RUSH YDS", "Rush YDS"],
-            "int",
-        ),
-        "rushing_tds": (
-            f"https://www.espn.com/nfl/stats/player/_/stat/rushing/season/{season}/seasontype/{st}/table/rushing/sort/rushingTouchdowns/dir/desc",
-            ["TD", "RUSH TD", "Rush TD"],
-            "int",
-        ),
-        "receiving_yards": (
-            f"https://www.espn.com/nfl/stats/player/_/stat/receiving/season/{season}/seasontype/{st}",
-            ["YDS", "REC YDS", "Rec YDS"],
-            "int",
-        ),
-        "receiving_tds": (
-            f"https://www.espn.com/nfl/stats/player/_/stat/receiving/season/{season}/seasontype/{st}/table/receiving/sort/receivingTouchdowns/dir/desc",
-            ["TD", "REC TD", "Rec TD"],
-            "int",
-        ),
-        "sacks": (
-            f"https://www.espn.com/nfl/stats/player/_/view/defense/season/{season}/seasontype/{st}/table/defensive/sort/sacks/dir/desc",
-            ["SACK", "Sacks SACK", "Sacks"],
-            "float1",
-        ),
-        "totalTackles": (
-            f"https://www.espn.com/nfl/stats/player/_/view/defense/season/{season}/seasontype/{st}/table/defensive/sort/totalTackles/dir/desc",
-            ["TOT", "Tackles TOT", "Total", "Tackles"],
-            "int",
-        ),
-        "defensive_interceptions": (
-            f"https://www.espn.com/nfl/stats/player/_/view/defense/season/{season}/seasontype/{st}/table/defensiveInterceptions/sort/interceptions/dir/desc",
-            ["INT", "Interceptions INT", "Interceptions"],
-            "int",
-        ),
-    }
-    return urls
-
-# ----------------------------
-# Phone-friendly poster drawing
+# Poster drawing (phone friendly)
 # ----------------------------
 def load_font(size: int, bold: bool = False):
     candidates = [
@@ -281,47 +279,29 @@ def fmt_value(val: Number, mode: str) -> str:
         return f"{float(val):.1f}"
     return str(int(val))
 
-def draw_phone_poster(
-    out_path: str,
-    title: str,
-    subtitle: str,
-    items: List[Tuple[int, str, Number]],
-    mode: str,
-):
-    # Phone-first canvas
+def draw_phone_poster(out_path: str, category_title: str, subtitle: str,
+                      items: List[Tuple[int, str, Number]], mode: str):
     W, H = 1080, 1920
     img = Image.new("RGB", (W, H), (10, 10, 14))
     d = ImageDraw.Draw(img)
 
-    # BIG readable fonts
     title_font = load_font(72, bold=True)
     sub_font = load_font(34, bold=False)
-
-    card_title_font = load_font(46, bold=True)
+    card_title_font = load_font(52, bold=True)
     row_font = load_font(40, bold=False)
     rank_font = load_font(40, bold=True)
 
-    # Header
     d.text((70, 60), "NFL Statistical Leaders", font=title_font, fill=(245, 245, 245))
     d.text((70, 145), subtitle, font=sub_font, fill=(170, 170, 185))
 
-    # Card (big, minimal padding, fills screen)
     x0, y0 = 60, 240
     x1, y1 = W - 60, H - 120
+    d.rounded_rectangle([x0, y0, x1, y1], radius=34, fill=(20, 20, 28), outline=(60, 60, 85), width=3)
 
-    d.rounded_rectangle(
-        [x0, y0, x1, y1],
-        radius=34,
-        fill=(20, 20, 28),
-        outline=(60, 60, 85),
-        width=3,
-    )
+    d.text((x0 + 40, y0 + 30), category_title, font=card_title_font, fill=(240, 240, 245))
 
-    d.text((x0 + 40, y0 + 30), title, font=card_title_font, fill=(240, 240, 245))
-
-    # Rows
-    top_y = y0 + 110
-    line_h = 86  # big spacing so it doesn't blur when scaled
+    top_y = y0 + 120
+    line_h = 86
     left_pad = x0 + 40
     right_pad = x1 - 40
 
@@ -330,14 +310,9 @@ def draw_phone_poster(
         if y > y1 - 80:
             break
 
-        # rank
         d.text((left_pad, y), f"{rank}.", font=rank_font, fill=(230, 230, 238))
+        d.text((left_pad + 70, y), display_name, font=row_font, fill=(220, 220, 230))
 
-        # name
-        name_x = left_pad + 70
-        d.text((name_x, y), display_name, font=row_font, fill=(220, 220, 230))
-
-        # value right aligned
         val_txt = fmt_value(val, mode)
         tw = d.textlength(val_txt, font=row_font)
         d.text((right_pad - tw, y), val_txt, font=row_font, fill=(220, 220, 230))
@@ -345,47 +320,56 @@ def draw_phone_poster(
     img.save(out_path, "PNG")
 
 # ----------------------------
-# Main generation
+# ✅ Main: cache + generate + upload
 # ----------------------------
-def generate_all(season: int, seasontype: int, outdir: str, topn: int = TOP_N):
-    os.makedirs(outdir, exist_ok=True)
+def generate_stat_leaders_and_upload(season: int, seasontype: int) -> List[str]:
+    """
+    Returns Supabase public URLs for all 10 category posters.
+    Uses cache first; if cached exists, returns cached URLs.
+    """
 
-    phase = "Regular Season" if int(seasontype) == 2 else "Postseason"
+    seasontype = int(seasontype)
+    tag = "reg" if seasontype == 2 else "post"
+
+    # ✅ One true schema for stat leaders
+    # posters_v3/stat_leaders/{year}/{regular|playoffs}/
+    kind = "regular" if seasontype == 2 else "playoffs"
+    prefix = f"posters_v3/stat_leaders/{season}/{kind}/"
+
+    # ✅ cache check
+    cached = cached_urls_for_prefix(prefix)
+    if cached:
+        cached.sort()
+        return cached
+
+    # ✅ build subtitle
+    phase = "Regular Season" if seasontype == 2 else "Postseason"
     updated = datetime.now().strftime("%b %d, %Y • %I:%M %p")
     subtitle = f"Season {season} • {phase} • Updated {updated}"
 
     urls = build_urls(season, seasontype)
 
-    for key, label, url_key, candidates, mode in CATEGORIES:
-        url, stat_cands, mode2 = urls[url_key]
-        # (use candidates passed here if you want, but url map is authoritative)
-        items = topN_from_url(url, stat_cands, mode2, topn)
+    # ✅ temp output dir (Render-safe)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        local_paths: List[str] = []
 
-        # IMPORTANT: version bump so cache doesn't serve old posters
-        tag = "reg" if int(seasontype) == 2 else "post"
-        out_path = os.path.join(outdir, f"stat_leader_{key}_{season}_{tag}_v2.png")
+        for stable_key, display_title, url_key in CATEGORIES:
+            url, stat_candidates, mode = urls[url_key]
+            items = topN_from_url(url, stat_candidates, mode, TOP_N)
 
-        draw_phone_poster(out_path, label, subtitle, items, mode2)
+            # ✅ version bump so old cache images are not reused
+            filename = f"stat_leader_{stable_key}_{season}_{tag}_v2.png"
+            out_path = os.path.join(tmpdir, filename)
 
-    return outdir
+            draw_phone_poster(out_path, display_title, subtitle, items, mode)
+            local_paths.append(out_path)
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--season", type=int, default=2025)
-    ap.add_argument("--seasontype", type=int, default=2, help="2=regular, 3=postseason")
-    ap.add_argument("--outdir", type=str, default=os.path.join(os.path.expanduser("~"), "Desktop"))
-    ap.add_argument("--topn", type=int, default=10)
-    args = ap.parse_args()
+        # ✅ upload everything
+        uploaded_urls: List[str] = []
+        for p in local_paths:
+            key = f"{prefix}{os.path.basename(p)}"
+            u = upload_file_return_url(p, key)
+            uploaded_urls.append(u)
 
-    print("Generating phone-friendly stat leader posters...")
-    outdir = generate_all(args.season, args.seasontype, args.outdir, args.topn)
-
-    print("\nDONE ✅")
-    # Print paths so you can confirm in terminal / logs
-    tag = "reg" if int(args.seasontype) == 2 else "post"
-    for key, *_ in CATEGORIES:
-        p = os.path.join(outdir, f"stat_leader_{key}_{args.season}_{tag}_v2.png")
-        print(p)
-
-if __name__ == "__main__":
-    main()
+        uploaded_urls.sort()
+        return uploaded_urls
