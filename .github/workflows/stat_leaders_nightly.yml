@@ -2,7 +2,7 @@ name: Nightly Stat Leaders
 
 on:
   schedule:
-    - cron: "0 5 * * *"
+    # Runs daily at 1:00 AM New York (6:00 UTC)
     - cron: "0 6 * * *"
   workflow_dispatch:
 
@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout repo
         uses: actions/checkout@v4
 
       - name: Set up Python
@@ -24,32 +24,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run only at 1 AM New York (DST-safe)
-        run: |
-          python - <<'PY'
-          from datetime import datetime
-          from zoneinfo import ZoneInfo
-
-          now = datetime.now(ZoneInfo("America/New_York"))
-          if now.hour != 1:
-              print("Not 1 AM New York. Exiting.")
-              raise SystemExit(0)
-
-          print("It's 1 AM New York. Continuing.")
-          PY
-      - name: Debug - list stat leaders files
-        run: |
-          pwd
-          ls -la
-          ls -la app || true
-          ls -la app/generator || true
-          find app -maxdepth 4 -type f -name "run_nightly.py" -print || true
-
       - name: Generate + Upload Stat Leaders
         env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          SUPABASE_BUCKET: ${{ secrets.SUPABASE_BUCKET }}
+          SUPABASE_URL: ${{ secrets.https://rojsabkwywygludonpdf.supabase.co }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJvanNhYmt3eXd5Z2x1ZG9ucGRmIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2NjUxMTA2NSwiZXhwIjoyMDgyMDg3MDY1fQ.7HIE5trccv7GDqxVZGDw9kBFLi1PVhuCQTNYUkpoL_k }}
+          SUPABASE_BUCKET: ${{ secrets.nfl-posters }}
         run: |
-          python app/generator/week_posters.py
-
+          python app/generator/stat_leaders/run_nightly.py
