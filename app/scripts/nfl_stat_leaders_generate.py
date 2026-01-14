@@ -1,7 +1,9 @@
+# app/scripts/nfl_stat_leaders_generate.py
 import os
 import re
 import argparse
 from io import StringIO
+from datetime import datetime
 from typing import List, Optional, Tuple, Union
 
 import requests
@@ -24,16 +26,17 @@ TEAM_ABBRS = {
     "JAX","KC","LAC","LAR","LV","MIA","MIN","NE","NO","NYG","NYJ","PHI","PIT","SEA",
     "SF","TB","TEN","WAS","WSH"
 }
+
 TEAM_ALT = "|".join(sorted(TEAM_ABBRS, key=len, reverse=True))
 TEAM_END_RE = re.compile(rf"^(?P<name>.*?)(?P<team>{TEAM_ALT})(?P<trail>[\s\W]*)$")
 
 
 # ----------------------------
-# String normalization (HARDENED)
+# String normalization (fix glued TEAM)
 # ----------------------------
 def normalize_spaces(s: str) -> str:
     s = str(s)
-    s = re.sub(r"[\u200b\u200c\u200d\ufeff]", "", s)  # zero-width
+    s = re.sub(r"[\u200b\u200c\u200d\ufeff]", "", s)  # zero-width chars
     s = s.replace("\u00a0", " ").replace("\u2009", " ").replace("\u202f", " ")
     s = s.replace("\u00ad", "")  # soft hyphen
     s = re.sub(r"\s+", " ", s).strip()
@@ -52,8 +55,7 @@ def enforce_space_before_team(s: str) -> str:
 
 
 # ----------------------------
-# ESPN URLs (Regular vs Postseason)
-# seasontype: 2 = regular, 3 = postseason
+# ESPN URLs (seasontype: 2 regular, 3 postseason)
 # ----------------------------
 def build_urls(season: int, seasontype: int):
     base_player = f"https://www.espn.com/nfl/stats/player/_/season/{season}/seasontype/{seasontype}"
@@ -273,10 +275,10 @@ def load_font(size: int, bold: bool = False):
     ]
     for p in candidates:
         try:
-            return __import__("PIL.ImageFont").ImageFont.truetype(p, size=size)
+            return ImageFont.truetype(p, size=size)
         except Exception:
             pass
-    return __import__("PIL.ImageFont").ImageFont.load_default()
+    return ImageFont.load_default()
 
 
 def fmt_value(val: Number, mode: str) -> str:
@@ -285,10 +287,20 @@ def fmt_value(val: Number, mode: str) -> str:
     return str(int(val))
 
 
-def draw_poster(out_path: str, title: str, subtitle: str,
-                sections: List[Tuple[str, List[Tuple[int, str, Number]], str]],
-                cols: int, rows: int, height: int,
-                sub_size: int, head_size: int, row_size: int, line_h: int, y_start_offset: int):
+def draw_poster(
+    out_path: str,
+    title: str,
+    subtitle: str,
+    sections: List[Tuple[str, List[Tuple[int, str, Number]], str]],
+    cols: int,
+    rows: int,
+    height: int,
+    sub_size: int,
+    head_size: int,
+    row_size: int,
+    line_h: int,
+    y_start_offset: int,
+):
     W, H = 1400, height
     img = Image.new("RGB", (W, H), (12, 12, 16))
     d = ImageDraw.Draw(img)
@@ -316,8 +328,13 @@ def draw_poster(out_path: str, title: str, subtitle: str,
         x1 = x0 + box_w
         y1 = y0 + box_h
 
-        d.rounded_rectangle([x0, y0, x1, y1], radius=22,
-                            fill=(20, 20, 28), outline=(45, 45, 60), width=2)
+        d.rounded_rectangle(
+            [x0, y0, x1, y1],
+            radius=22,
+            fill=(20, 20, 28),
+            outline=(45, 45, 60),
+            width=2,
+        )
         d.text((x0 + 18, y0 + 14), sec_title, font=head_font, fill=(240, 240, 245))
 
         y = y0 + y_start_offset
@@ -340,17 +357,16 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--season", type=int, default=2025)
     ap.add_argument("--seasontype", type=int, default=2, choices=[2, 3], help="2=Regular, 3=Postseason")
-    ap.add_argument("--weeklabel", type=str, default="Week 18")
     ap.add_argument("--outdir", type=str, default=os.path.join(os.path.expanduser("~"), "Desktop"))
     args = ap.parse_args()
 
     season = args.season
     seasontype = args.seasontype
-    weeklabel = args.weeklabel
     outdir = args.outdir
 
     phase = "Regular Season" if seasontype == 2 else "Postseason"
-    subtitle = f"Season {season} • {phase} • Through {weeklabel}"
+    updated = datetime.now().strftime("%b %d, %Y • %I:%M %p")
+    subtitle = f"Season {season} • {phase} • Updated {updated}"
 
     URLS = build_urls(season, seasontype)
 
@@ -363,13 +379,13 @@ def main():
         "Receiving Yards",
         "Receiving TDs",
     ]
-    offense_sections = []
+    offense_sections: List[Tuple[str, List[Tuple[int, str, Number]], str]] = []
     for t in offense_titles:
         url, cand, mode = URLS[t]
         offense_sections.append((t, topN_from_url(url, cand, mode), mode))
 
     defense_titles = ["Sacks", "Tackles", "Interceptions (Defense)"]
-    defense_sections = []
+    defense_sections: List[Tuple[str, List[Tuple[int, str, Number]], str]] = []
     for t in defense_titles:
         url, cand, mode = URLS[t]
         label = t.replace(" (Defense)", "")
@@ -379,13 +395,35 @@ def main():
     out_off = os.path.join(outdir, f"offense_stat_leaders_{season}_{tag}.png")
     out_def = os.path.join(outdir, f"defense_stat_leaders_{season}_{tag}.png")
 
-    draw_poster(out_off, "Offensive Statistical Leaders", subtitle,
-                offense_sections, cols=2, rows=4, height=2000,
-                sub_size=28, head_size=32, row_size=26, line_h=33, y_start_offset=64)
+    draw_poster(
+        out_off,
+        "Offensive Statistical Leaders",
+        subtitle,
+        offense_sections,
+        cols=2,
+        rows=4,
+        height=2000,
+        sub_size=28,
+        head_size=32,
+        row_size=26,
+        line_h=33,
+        y_start_offset=64,
+    )
 
-    draw_poster(out_def, "Defensive Statistical Leaders", subtitle,
-                defense_sections, cols=1, rows=3, height=1800,
-                sub_size=30, head_size=36, row_size=30, line_h=38, y_start_offset=72)
+    draw_poster(
+        out_def,
+        "Defensive Statistical Leaders",
+        subtitle,
+        defense_sections,
+        cols=1,
+        rows=3,
+        height=1800,
+        sub_size=30,
+        head_size=36,
+        row_size=30,
+        line_h=38,
+        y_start_offset=72,
+    )
 
     print("\nDONE ✅")
     print(out_off)
