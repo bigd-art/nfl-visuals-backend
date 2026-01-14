@@ -30,6 +30,7 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           SUPABASE_BUCKET: ${{ secrets.SUPABASE_BUCKET }}
         run: |
-          python scripts/make_2025_leaders_posters_no_pandas.py
+          python app/generator/nfl-stat-leaders-2025-wk18-v2/make_stat_leaders_posters_v9.py
+
 
           
