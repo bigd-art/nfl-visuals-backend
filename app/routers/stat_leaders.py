@@ -1,121 +1,66 @@
 # app/routers/stat_leaders.py
 
-import os
-import subprocess
-import tempfile
+from typing import Dict, Any, List
 import time
-from typing import Dict, Any
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from app.services.storage_supabase import (
-    upload_file_return_url,
-    cached_urls_for_prefix,
-)
+from app.services.storage_supabase import cached_urls_for_prefix
+from app.scripts.stat_leaders_phone_v2 import generate_stat_leaders_and_upload
 
-router = APIRouter()
+router = APIRouter(prefix="/stat-leaders", tags=["Stat Leaders"])
 
-
-# =========================
-# Request model
-# =========================
 
 class StatLeadersRequest(BaseModel):
-    year: int
-    seasontype: int  # 2 = regular, 3 = playoffs
+    season: int
+    seasontype: int = 2  # 2=regular, 3=playoffs
 
-
-# =========================
-# Helpers
-# =========================
 
 def _kind(seasontype: int) -> str:
     return "regular" if int(seasontype) == 2 else "playoffs"
 
 
-def _leaders_prefix(year: int, kind: str) -> str:
-    # ONE TRUE SCHEMA
-    # posters_v3/{year}/{regular|playoffs}/leaders/
-    return f"posters_v3/{year}/{kind}/leaders/"
+def _prefix(season: int, seasontype: int) -> str:
+    # ONE TRUE SCHEMA:
+    # posters_v3/{season}/{regular|playoffs}/leaders/
+    return f"posters_v3/{season}/{_kind(seasontype)}/leaders/"
 
 
-# =========================
-# Endpoint
-# =========================
-
-@router.post("/generate-stat-leaders")
-def generate_stat_leaders(req: StatLeadersRequest) -> Dict[str, Any]:
+@router.post("/generate")
+def generate(req: StatLeadersRequest) -> Dict[str, Any]:
     t0 = time.time()
-
-    year = int(req.year)
+    season = int(req.season)
     seasontype = int(req.seasontype)
-    kind = _kind(seasontype)
-    prefix = _leaders_prefix(year, kind)
 
-    # 1) CACHE CHECK
-    cached = cached_urls_for_prefix(prefix)
+    if seasontype not in (2, 3):
+        raise HTTPException(status_code=400, detail="seasontype must be 2 (regular) or 3 (playoffs)")
+
+    prefix = _prefix(season, seasontype)
+
+    cached: List[str] = cached_urls_for_prefix(prefix)
     if cached:
         return {
             "cache_hit": True,
-            "year": year,
-            "kind": kind,
+            "season": season,
+            "seasontype": seasontype,
+            "prefix": prefix,
             "count": len(cached),
             "images": cached,
             "timing_ms": int((time.time() - t0) * 1000),
         }
 
-    # 2) GENERATE LOCALLY
-    with tempfile.TemporaryDirectory() as tmpdir:
-        script_path = os.path.join(
-            os.getcwd(),
-            "app",
-            "scripts",
-            "stat_leaders_single_posters.py",
-        )
-
-        if not os.path.exists(script_path):
-            raise HTTPException(status_code=500, detail="Stat leaders script not found.")
-
-        cmd = [
-            "python3",
-            script_path,
-            "--season", str(year),
-            "--seasontype", str(seasontype),
-            "--outdir", tmpdir,
-        ]
-
-        proc = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-        )
-
-        if proc.returncode != 0:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Stat leaders generation failed:\n{proc.stderr}",
-            )
-
-        # 3) UPLOAD ALL PNGS
-        pngs = sorted(
-            f for f in os.listdir(tmpdir) if f.lower().endswith(".png")
-        )
-
-        if not pngs:
-            raise HTTPException(status_code=500, detail="No stat leader PNGs generated.")
-
-        urls = []
-        for fname in pngs:
-            local_path = os.path.join(tmpdir, fname)
-            key = f"{prefix}{fname}"
-            url = upload_file_return_url(local_path, key)
-            urls.append(url)
+    # This function should:
+    # - generate the 10 phone-friendly posters
+    # - upload them to Supabase under the SAME prefix schema
+    # - return the final public URLs
+    urls = generate_stat_leaders_and_upload(season=season, seasontype=seasontype)
 
     return {
         "cache_hit": False,
-        "year": year,
-        "kind": kind,
+        "season": season,
+        "seasontype": seasontype,
+        "prefix": prefix,
         "count": len(urls),
         "images": urls,
         "timing_ms": int((time.time() - t0) * 1000),
