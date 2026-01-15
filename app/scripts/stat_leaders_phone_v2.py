@@ -1,17 +1,18 @@
-# nfl_stat_leaders_single_posters.py
-# Creates ONE poster PER category (10 total) and saves them to Desktop (or --outdir)
-
 import os
 import re
-import argparse
+import tempfile
 from io import StringIO
 from datetime import datetime
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union, Dict
 
 import requests
 import pandas as pd
 from PIL import Image, ImageDraw, ImageFont
 
+# ✅ use your existing Supabase helpers (same ones used in main.py)
+from app.services.storage_supabase import upload_file_return_url, cached_urls_for_prefix
+
+TOP_N = 10
 Number = Union[int, float]
 
 HEADERS = {
@@ -21,8 +22,6 @@ HEADERS = {
     )
 }
 
-TOP_N_DEFAULT = 10
-
 TEAM_ABBRS = {
     "ARI","ATL","BAL","BUF","CAR","CHI","CIN","CLE","DAL","DEN","DET","GB","HOU","IND",
     "JAX","KC","LAC","LAR","LV","MIA","MIN","NE","NO","NYG","NYJ","PHI","PIT","SEA",
@@ -30,85 +29,88 @@ TEAM_ABBRS = {
 }
 TEAM_PATTERN = re.compile(r"(" + "|".join(sorted(TEAM_ABBRS, key=len, reverse=True)) + r")$")
 
-CATEGORY_SPECS = [
-    ("Passing Yards", "passingYards", ["YDS", "PASS YDS", "Pass YDS"], "int"),
-    ("Passing TDs", "passingTouchdowns", ["TD", "PASS TD", "Pass TD"], "int"),
-    ("Interceptions Thrown", "interceptions", ["INT", "Interceptions"], "int"),
-    ("Rushing Yards", "rushingYards", ["YDS", "RUSH YDS", "Rush YDS"], "int"),
-    ("Rushing TDs", "rushingTouchdowns", ["TD", "RUSH TD", "Rush TD"], "int"),
-    ("Receiving Yards", "receivingYards", ["YDS", "REC YDS", "Rec YDS"], "int"),
-    ("Receiving TDs", "receivingTouchdowns", ["TD", "REC TD", "Rec TD"], "int"),
-    ("Sacks", "sacks", ["SACK", "Sacks SACK", "Sacks"], "float1"),
-    ("Tackles", "totalTackles", ["TOT", "Tackles TOT", "Total", "Tackles"], "int"),
-    ("Interceptions (Defense)", "defInterceptions", ["INT", "Interceptions INT", "Interceptions"], "int"),
+# (stable_key, display_title, url_key)
+CATEGORIES = [
+    ("passing_yards", "Passing Yards", "passing_yards"),
+    ("passing_tds", "Passing TDs", "passing_tds"),
+    ("interceptions_thrown", "Interceptions Thrown", "interceptions_thrown"),
+    ("rushing_yards", "Rushing Yards", "rushing_yards"),
+    ("rushing_tds", "Rushing TDs", "rushing_tds"),
+    ("receiving_yards", "Receiving Yards", "receiving_yards"),
+    ("receiving_tds", "Receiving TDs", "receiving_tds"),
+    ("sacks", "Sacks", "sacks"),
+    ("tackles", "Tackles", "tackles"),
+    ("interceptions_def", "Interceptions", "interceptions_def"),
 ]
 
-
-def build_urls(season: int, seasontype: int) -> dict:
-    base = f"https://www.espn.com/nfl/stats/player/_/season/{season}/seasontype/{seasontype}"
+# ----------------------------
+# URL builder (regular vs playoffs)
+# seasontype: 2=regular, 3=postseason
+# ----------------------------
+def build_urls(season: int, seasontype: int) -> Dict[str, Tuple[str, List[str], str]]:
+    st = int(seasontype)
     return {
-        "passingYards": (base, ["YDS", "PASS YDS", "Pass YDS"], "int"),
-        "passingTouchdowns": (
-            f"{base}/table/passing/sort/passingTouchdowns/dir/desc",
+        "passing_yards": (
+            f"https://www.espn.com/nfl/stats/player/_/season/{season}/seasontype/{st}",
+            ["YDS", "PASS YDS", "Pass YDS"],
+            "int",
+        ),
+        "passing_tds": (
+            f"https://www.espn.com/nfl/stats/player/_/season/{season}/seasontype/{st}/table/passing/sort/passingTouchdowns/dir/desc",
             ["TD", "PASS TD", "Pass TD"],
             "int",
         ),
-        "interceptions": (
-            f"{base}/table/passing/sort/interceptions/dir/desc",
+        "interceptions_thrown": (
+            f"https://www.espn.com/nfl/stats/player/_/season/{season}/seasontype/{st}/table/passing/sort/interceptions/dir/desc",
             ["INT", "Interceptions"],
             "int",
         ),
-
-        "rushingYards": (
-            f"https://www.espn.com/nfl/stats/player/_/stat/rushing/season/{season}/seasontype/{seasontype}",
+        "rushing_yards": (
+            f"https://www.espn.com/nfl/stats/player/_/stat/rushing/season/{season}/seasontype/{st}",
             ["YDS", "RUSH YDS", "Rush YDS"],
             "int",
         ),
-        "rushingTouchdowns": (
-            f"https://www.espn.com/nfl/stats/player/_/stat/rushing/season/{season}/seasontype/{seasontype}/table/rushing/sort/rushingTouchdowns/dir/desc",
+        "rushing_tds": (
+            f"https://www.espn.com/nfl/stats/player/_/stat/rushing/season/{season}/seasontype/{st}/table/rushing/sort/rushingTouchdowns/dir/desc",
             ["TD", "RUSH TD", "Rush TD"],
             "int",
         ),
-
-        "receivingYards": (
-            f"https://www.espn.com/nfl/stats/player/_/stat/receiving/season/{season}/seasontype/{seasontype}",
+        "receiving_yards": (
+            f"https://www.espn.com/nfl/stats/player/_/stat/receiving/season/{season}/seasontype/{st}",
             ["YDS", "REC YDS", "Rec YDS"],
             "int",
         ),
-        "receivingTouchdowns": (
-            f"https://www.espn.com/nfl/stats/player/_/stat/receiving/season/{season}/seasontype/{seasontype}/table/receiving/sort/receivingTouchdowns/dir/desc",
+        "receiving_tds": (
+            f"https://www.espn.com/nfl/stats/player/_/stat/receiving/season/{season}/seasontype/{st}/table/receiving/sort/receivingTouchdowns/dir/desc",
             ["TD", "REC TD", "Rec TD"],
             "int",
         ),
-
         "sacks": (
-            f"https://www.espn.com/nfl/stats/player/_/view/defense/season/{season}/seasontype/{seasontype}/table/defensive/sort/sacks/dir/desc",
+            f"https://www.espn.com/nfl/stats/player/_/view/defense/season/{season}/seasontype/{st}/table/defensive/sort/sacks/dir/desc",
             ["SACK", "Sacks SACK", "Sacks"],
             "float1",
         ),
-        "totalTackles": (
-            f"https://www.espn.com/nfl/stats/player/_/view/defense/season/{season}/seasontype/{seasontype}/table/defensive/sort/totalTackles/dir/desc",
+        "tackles": (
+            f"https://www.espn.com/nfl/stats/player/_/view/defense/season/{season}/seasontype/{st}/table/defensive/sort/totalTackles/dir/desc",
             ["TOT", "Tackles TOT", "Total", "Tackles"],
             "int",
         ),
-        "defInterceptions": (
-            f"https://www.espn.com/nfl/stats/player/_/view/defense/season/{season}/seasontype/{seasontype}/table/defensiveInterceptions/sort/interceptions/dir/desc",
+        "interceptions_def": (
+            f"https://www.espn.com/nfl/stats/player/_/view/defense/season/{season}/seasontype/{st}/table/defensiveInterceptions/sort/interceptions/dir/desc",
             ["INT", "Interceptions INT", "Interceptions"],
             "int",
         ),
     }
 
-
 # ----------------------------
-# String normalization (team spacing fix)
+# String normalization (fix glued TEAM)
 # ----------------------------
 def normalize_spaces(s: str) -> str:
     s = str(s)
-    s = re.sub(r"[\u200b\u200c\u200d\ufeff]", "", s)  # zero-width chars
+    s = re.sub(r"[\u200b\u200c\u200d\ufeff]", "", s)
     s = s.replace("\u00a0", " ").replace("\u2009", " ").replace("\u202f", " ")
     s = re.sub(r"\s+", " ", s).strip()
     return s
-
 
 def enforce_space_before_team(s: str) -> str:
     s = normalize_spaces(s)
@@ -119,7 +121,6 @@ def enforce_space_before_team(s: str) -> str:
     name_part = s[: -len(team)].strip()
     name_part = re.sub(r"[^\w\.\-'\s]+$", "", name_part).strip()
     return f"{name_part} {team}".strip()
-
 
 # ----------------------------
 # Table parsing helpers
@@ -132,7 +133,6 @@ def flatten_columns(df: pd.DataFrame) -> pd.DataFrame:
         ]
     df.columns = [str(c).strip() for c in df.columns]
     return df
-
 
 def safe_float(x) -> Optional[float]:
     if x is None:
@@ -149,24 +149,20 @@ def safe_float(x) -> Optional[float]:
     except ValueError:
         return None
 
-
 def safe_int(x) -> Optional[int]:
     f = safe_float(x)
     if f is None:
         return None
     return int(round(f))
 
-
 def col_lookup(cols: List[str]) -> dict:
     return {str(c).strip().lower(): c for c in cols}
-
 
 def fetch_tables(url: str) -> List[pd.DataFrame]:
     r = requests.get(url, headers=HEADERS, timeout=30)
     r.raise_for_status()
     tables = pd.read_html(StringIO(r.text))
     return [flatten_columns(t.copy()) for t in tables]
-
 
 def pick_name_table(tables: List[pd.DataFrame]) -> Optional[pd.DataFrame]:
     for t in tables:
@@ -179,7 +175,6 @@ def pick_name_table(tables: List[pd.DataFrame]) -> Optional[pd.DataFrame]:
             return t
     return None
 
-
 def find_stat_table(tables: List[pd.DataFrame], candidates: List[str]) -> Optional[pd.DataFrame]:
     cand_l = {c.strip().lower() for c in candidates}
     for t in tables:
@@ -190,12 +185,10 @@ def find_stat_table(tables: List[pd.DataFrame], candidates: List[str]) -> Option
                     return t
     return None
 
-
 def pick_widest_table(tables: List[pd.DataFrame]) -> Optional[pd.DataFrame]:
     if not tables:
         return None
     return sorted(tables, key=lambda d: d.shape[1], reverse=True)[0]
-
 
 def stitch_tables_if_needed(name_t: Optional[pd.DataFrame], stat_t: pd.DataFrame) -> pd.DataFrame:
     cmap = col_lookup(list(stat_t.columns))
@@ -213,7 +206,6 @@ def stitch_tables_if_needed(name_t: Optional[pd.DataFrame], stat_t: pd.DataFrame
 
     return stat_t
 
-
 def choose_stat_col(df: pd.DataFrame, candidates: List[str]) -> str:
     cols = list(df.columns)
     cols_l = [str(c).strip().lower() for c in cols]
@@ -230,18 +222,15 @@ def choose_stat_col(df: pd.DataFrame, candidates: List[str]) -> str:
 
     raise RuntimeError(f"Stat column not found. Candidates={candidates}. Columns={list(df.columns)}")
 
-
-def topN_from_url(url: str, stat_candidates: List[str], mode: str, top_n: int) -> List[Tuple[int, str, Number]]:
+def topN_from_url(url: str, stat_candidates: List[str], mode: str, topn: int) -> List[Tuple[int, str, Number]]:
     tables = fetch_tables(url)
     if not tables:
         raise RuntimeError(f"No tables found at: {url}")
 
     name_t = pick_name_table(tables)
-
     stat_t = find_stat_table(tables, stat_candidates)
     if stat_t is None:
         stat_t = pick_widest_table(tables)
-
     if stat_t is None:
         raise RuntimeError(f"Could not choose a stat table at: {url}")
 
@@ -260,7 +249,7 @@ def topN_from_url(url: str, stat_candidates: List[str], mode: str, top_n: int) -
     else:
         work["__val__"] = work[stat_col].map(safe_int)
 
-    work = work.dropna(subset=["__val__"]).sort_values("__val__", ascending=False).head(top_n)
+    work = work.dropna(subset=["__val__"]).sort_values("__val__", ascending=False).head(topn)
 
     out = []
     for i, rec in enumerate(work.to_dict("records"), start=1):
@@ -269,9 +258,8 @@ def topN_from_url(url: str, stat_candidates: List[str], mode: str, top_n: int) -
         out.append((i, display_name, rec["__val__"]))
     return out
 
-
 # ----------------------------
-# Poster drawing: single category poster (BIG text for phones)
+# Poster drawing (phone friendly)
 # ----------------------------
 def load_font(size: int, bold: bool = False):
     candidates = [
@@ -286,114 +274,102 @@ def load_font(size: int, bold: bool = False):
             pass
     return ImageFont.load_default()
 
-
 def fmt_value(val: Number, mode: str) -> str:
     if mode == "float1":
         return f"{float(val):.1f}"
     return str(int(val))
 
-
-def slugify(s: str) -> str:
-    s = s.lower().strip()
-    s = re.sub(r"[^a-z0-9]+", "_", s)
-    s = re.sub(r"_+", "_", s).strip("_")
-    return s
-
-
-def draw_single_category_poster(
-    out_path: str,
-    big_title: str,
-    subtitle: str,
-    category_title: str,
-    items: List[Tuple[int, str, Number]],
-    mode: str,
-):
-    # 1400 wide, tall, BIG fonts
-    W, H = 1400, 1800
-    img = Image.new("RGB", (W, H), (12, 12, 16))
+def draw_phone_poster(out_path: str, category_title: str, subtitle: str,
+                      items: List[Tuple[int, str, Number]], mode: str):
+    W, H = 1080, 1920
+    img = Image.new("RGB", (W, H), (10, 10, 14))
     d = ImageDraw.Draw(img)
 
-    title_font = load_font(68, bold=True)
-    sub_font = load_font(30, bold=False)
-    cat_font = load_font(54, bold=True)
+    title_font = load_font(72, bold=True)
+    sub_font = load_font(34, bold=False)
+    card_title_font = load_font(52, bold=True)
     row_font = load_font(40, bold=False)
+    rank_font = load_font(40, bold=True)
 
-    d.text((70, 50), big_title, font=title_font, fill=(245, 245, 245))
-    d.text((70, 130), subtitle, font=sub_font, fill=(185, 185, 195))
+    d.text((70, 60), "NFL Statistical Leaders", font=title_font, fill=(245, 245, 245))
+    d.text((70, 145), subtitle, font=sub_font, fill=(170, 170, 185))
 
-    x0, y0, x1, y1 = 70, 220, W - 70, H - 90
-    d.rounded_rectangle([x0, y0, x1, y1], radius=26, fill=(20, 20, 28), outline=(45, 45, 60), width=2)
+    x0, y0 = 60, 240
+    x1, y1 = W - 60, H - 120
+    d.rounded_rectangle([x0, y0, x1, y1], radius=34, fill=(20, 20, 28), outline=(60, 60, 85), width=3)
 
-    d.text((x0 + 26, y0 + 22), category_title, font=cat_font, fill=(240, 240, 245))
+    d.text((x0 + 40, y0 + 30), category_title, font=card_title_font, fill=(240, 240, 245))
 
-    y = y0 + 110
-    line_h = 62
+    top_y = y0 + 120
+    line_h = 86
+    left_pad = x0 + 40
+    right_pad = x1 - 40
 
-    for rank, name, val in items:
-        left_txt = f"{rank:>2}. {name}"
-        d.text((x0 + 26, y), left_txt, font=row_font, fill=(220, 220, 230))
+    for idx, (rank, display_name, val) in enumerate(items):
+        y = top_y + idx * line_h
+        if y > y1 - 80:
+            break
+
+        d.text((left_pad, y), f"{rank}.", font=rank_font, fill=(230, 230, 238))
+        d.text((left_pad + 70, y), display_name, font=row_font, fill=(220, 220, 230))
 
         val_txt = fmt_value(val, mode)
         tw = d.textlength(val_txt, font=row_font)
-        d.text((x1 - 26 - tw, y), val_txt, font=row_font, fill=(220, 220, 230))
-
-        y += line_h
-        if y > y1 - 40:
-            break
+        d.text((right_pad - tw, y), val_txt, font=row_font, fill=(220, 220, 230))
 
     img.save(out_path, "PNG")
 
+# ----------------------------
+# ✅ Main: cache + generate + upload
+# ----------------------------
+def generate_stat_leaders_and_upload(season: int, seasontype: int) -> List[str]:
+    """
+    Returns Supabase public URLs for all 10 category posters.
+    Uses cache first; if cached exists, returns cached URLs.
+    """
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--season", type=int, default=2025)
-    ap.add_argument("--seasontype", type=int, default=2, help="2=regular, 3=postseason")
-    ap.add_argument("--topn", type=int, default=TOP_N_DEFAULT)
-    ap.add_argument("--outdir", type=str, default="")
-    args = ap.parse_args()
+    seasontype = int(seasontype)
+    tag = "reg" if seasontype == 2 else "post"
 
-    season = int(args.season)
-    seasontype = int(args.seasontype)
-    topn = int(args.topn)
+    # ✅ One true schema for stat leaders
+    # posters_v3/stat_leaders/{year}/{regular|playoffs}/
+    kind = "regular" if seasontype == 2 else "playoffs"
+    prefix = f"posters_v3/stat_leaders/{season}/{kind}/"
 
+    # ✅ cache check
+    cached = cached_urls_for_prefix(prefix)
+    if cached:
+        cached.sort()
+        return cached
+
+    # ✅ build subtitle
     phase = "Regular Season" if seasontype == 2 else "Postseason"
     updated = datetime.now().strftime("%b %d, %Y • %I:%M %p")
     subtitle = f"Season {season} • {phase} • Updated {updated}"
 
-    outdir = args.outdir.strip() or os.path.join(os.path.expanduser("~"), "Desktop")
-    os.makedirs(outdir, exist_ok=True)
-
     urls = build_urls(season, seasontype)
 
-    print("\nGenerating single-category stat leader posters…\n")
+    # ✅ temp output dir (Render-safe)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        local_paths: List[str] = []
 
-    outputs = []
-    for pretty_name, key, candidates, mode in CATEGORY_SPECS:
-        url, _, _ = urls[key]
-        items = topN_from_url(url, candidates, mode, topn)
+        for stable_key, display_title, url_key in CATEGORIES:
+            url, stat_candidates, mode = urls[url_key]
+            items = topN_from_url(url, stat_candidates, mode, TOP_N)
 
-        safe_cat = slugify(pretty_name.replace("(Defense)", "").strip())
-        tag = "reg" if seasontype == 2 else "post"
-        out_path = os.path.join(outdir, f"stat_leader_{safe_cat}_{season}_{tag}.png")
+            # ✅ version bump so old cache images are not reused
+            filename = f"stat_leader_{stable_key}_{season}_{tag}_v2.png"
+            out_path = os.path.join(tmpdir, filename)
 
-        draw_single_category_poster(
-            out_path=out_path,
-            big_title="NFL Statistical Leaders",
-            subtitle=subtitle,
-            category_title=pretty_name.replace(" (Defense)", ""),
-            items=items,
-            mode=mode,
-        )
+            draw_phone_poster(out_path, display_title, subtitle, items, mode)
+            local_paths.append(out_path)
 
-        outputs.append(out_path)
-        print("✅", out_path)
+        # ✅ upload everything
+        uploaded_urls: List[str] = []
+        for p in local_paths:
+            key = f"{prefix}{os.path.basename(p)}"
+            u = upload_file_return_url(p, key)
+            uploaded_urls.append(u)
 
-    print("\nDONE ✅")
-    for p in outputs:
-        print(p)
-    print("")
-
-
-if __name__ == "__main__":
-    main()
-
+        uploaded_urls.sort()
+        return uploaded_urls
