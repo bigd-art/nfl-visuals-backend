@@ -2,8 +2,8 @@ name: Nightly Stat Leaders
 
 on:
   schedule:
-    # Runs daily at 1:00 AM New York (6:00 UTC)
-    - cron: "0 6 * * *"
+    # 1:05 AM UTC daily (adjust if you want)
+    - cron: "5 1 * * *"
   workflow_dispatch:
 
 jobs:
@@ -24,13 +24,22 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Generate + Upload Stat Leaders
+      - name: Generate + Upload Stat Leaders (Regular)
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           SUPABASE_BUCKET: ${{ secrets.SUPABASE_BUCKET }}
+          SEASON: "2025"
+          SEASONTYPE: "2"
         run: |
-          python app/generator/nfl-stat-leaders-2025-wk18-v2/make_stat_leaders_posters_v9.py
+          python app/scripts/stat_leaders_phone_v2.py
 
-
-          
+      - name: Generate + Upload Stat Leaders (Playoffs)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_BUCKET: ${{ secrets.SUPABASE_BUCKET }}
+          SEASON: "2025"
+          SEASONTYPE: "3"
+        run: |
+          python app/scripts/stat_leaders_phone_v2.py
