@@ -1,27 +1,13 @@
-# app/scripts/nfl_stat_leaders_generate.py
+# app/scripts/stat_leaders_phone_v2.py
 #
-# Based on your exact script:
-# - Same ESPN scraping / pandas.read_html logic
-# - Same name normalization (fix glued TEAM)
-# - CHANGED OUTPUT: 10 separate posters (one per category)
-# - Phone-sized posters: 1440 x 2560 (big + readable like earlier)
-# - Designed for GitHub/Render Linux (font fallback included)
+# Uses your exact ESPN scraping logic from nfl_stat_leaders_generate.py
+# but produces 10 separate PHONE-SIZED posters (1440x2560) and uploads them.
 #
-# Output filenames (and intended order):
-# 01_passing_yards.png
-# 02_passing_tds.png
-# 03_interceptions_thrown.png
-# 04_rushing_yards.png
-# 05_rushing_tds.png
-# 06_receiving_yards.png
-# 07_receiving_tds.png
-# 08_sacks.png
-# 09_tackles.png
-# 10_interceptions.png
+# IMPORTANT: This file MUST export `generate_stat_leaders_and_upload`
+# because app/routers/stat_leaders.py imports it.
 
 import os
 import re
-import argparse
 from io import StringIO
 from datetime import datetime
 from typing import List, Optional, Tuple, Union
@@ -29,6 +15,8 @@ from typing import List, Optional, Tuple, Union
 import requests
 import pandas as pd
 from PIL import Image, ImageDraw, ImageFont
+
+from app.services.storage_supabase import upload_file_return_url, cached_urls_for_prefix
 
 TOP_N = 10
 
@@ -46,7 +34,6 @@ TEAM_ABBRS = {
     "JAX","KC","LAC","LAR","LV","MIA","MIN","NE","NO","NYG","NYJ","PHI","PIT","SEA",
     "SF","TB","TEN","WAS","WSH"
 }
-
 TEAM_ALT = "|".join(sorted(TEAM_ABBRS, key=len, reverse=True))
 TEAM_END_RE = re.compile(rf"^(?P<name>.*?)(?P<team>{TEAM_ALT})(?P<trail>[\s\W]*)$")
 
@@ -138,7 +125,7 @@ def build_urls(season: int, seasontype: int):
 
 
 # ----------------------------
-# Table parsing helpers
+# Table parsing helpers (your exact logic)
 # ----------------------------
 def flatten_columns(df: pd.DataFrame) -> pd.DataFrame:
     if isinstance(df.columns, pd.MultiIndex):
@@ -288,9 +275,7 @@ def topN_from_url(url: str, stat_candidates: List[str], mode: str) -> List[Tuple
 # Poster drawing (PHONE BIG)
 # ----------------------------
 def load_font(size: int, bold: bool = False):
-    """
-    Works on Linux (GitHub Actions/Render) and Mac locally.
-    """
+    # Linux first (Render/GitHub Actions)
     candidates = []
     if bold:
         candidates += [
@@ -331,12 +316,10 @@ def draw_single_category_poster(
     items: List[Tuple[int, str, Number]],
     mode: str,
 ):
-    # Phone poster size
     W, H = 1440, 2560
     img = Image.new("RGB", (W, H), (12, 12, 16))
     d = ImageDraw.Draw(img)
 
-    # BIG typography (readable on phone)
     title_font = load_font(74, bold=True)
     sub_font = load_font(42, bold=False)
     row_name_font = load_font(52, bold=True)
@@ -344,27 +327,23 @@ def draw_single_category_poster(
     val_font = load_font(64, bold=True)
     rank_font = load_font(46, bold=True)
 
-    # Header
     margin_x = 90
     top_y = 140
+
     d.text((margin_x, top_y), category_title, font=title_font, fill=(245, 245, 245))
     d.text((margin_x, top_y + 92), subtitle, font=sub_font, fill=(180, 180, 190))
 
-    # Divider
     div_y = top_y + 240 - 35
     d.line((margin_x, div_y, W - margin_x, div_y), fill=(85, 85, 85), width=3)
 
-    # Rows
     row_h = 175
     start_y = top_y + 240
 
     for i, (rank, display_name, val) in enumerate(items, start=1):
         y = start_y + (i - 1) * row_h
 
-        # rank
         d.text((margin_x, y + 52), f"{rank}", font=rank_font, fill=(170, 170, 170))
 
-        # split name/team for nicer layout
         dn = str(display_name).strip()
         m = TEAM_END_RE.match(dn)
         if m:
@@ -378,77 +357,75 @@ def draw_single_category_poster(
         d.text((name_x, y + 32), nm, font=row_name_font, fill=(255, 255, 255))
         d.text((name_x, y + 98), tm, font=row_team_font, fill=(170, 170, 170))
 
-        # value right aligned
         val_txt = fmt_value(val, mode)
         tw = d.textlength(val_txt, font=val_font)
         d.text((W - margin_x - tw, y + 45), val_txt, font=val_font, fill=(255, 255, 255))
 
-        # row divider
         d.line((margin_x, y + row_h - 18, W - margin_x, y + row_h - 18), fill=(55, 55, 55), width=2)
 
     img.save(out_path, "PNG", optimize=True)
 
 
-def safe_slug(s: str) -> str:
-    s = s.lower().strip()
-    s = re.sub(r"[^a-z0-9]+", "_", s)
-    return s.strip("_") or "category"
+# ----------------------------
+# Supabase caching + public function for router
+# ----------------------------
+def _kind(seasontype: int) -> str:
+    return "regular" if int(seasontype) == 2 else "playoffs"
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--season", type=int, default=2025)
-    ap.add_argument("--seasontype", type=int, default=2, choices=[2, 3], help="2=Regular, 3=Postseason")
-    ap.add_argument(
-        "--outdir",
-        type=str,
-        default=os.path.join(os.path.expanduser("~"), "Desktop"),
-        help="Where to write PNGs (Render/GHA can point this to a temp folder).",
-    )
-    args = ap.parse_args()
+def _prefix(season: int, seasontype: int) -> str:
+    return f"stat_leaders_v2/{season}/{_kind(seasontype)}/"
 
-    season = args.season
-    seasontype = args.seasontype
-    outdir = args.outdir
-    os.makedirs(outdir, exist_ok=True)
 
-    phase = "Regular Season" if seasontype == 2 else "Postseason"
+def generate_stat_leaders_and_upload(season: int, seasontype: int) -> List[str]:
+    """
+    REQUIRED by app/routers/stat_leaders.py
+
+    Returns 10 URLs in this exact order:
+    passing yds, passing tds, interceptions thrown, rushing yds, rushing tds,
+    receiving yds, receiving tds, sacks, tackles, interceptions
+    """
+    prefix = _prefix(season, seasontype)
+    cached = cached_urls_for_prefix(prefix)
+    if cached:
+        # Cache might not return in order; sort by filename prefix 01..10
+        cached_sorted = sorted(cached, key=lambda u: os.path.basename(u).lower())
+        return cached_sorted
+
+    phase = "Regular Season" if int(seasontype) == 2 else "Postseason"
     updated = datetime.now().strftime("%b %d, %Y • %I:%M %p")
     subtitle = f"Season {season} • {phase} • Updated {updated}"
 
     URLS = build_urls(season, seasontype)
 
-    # Exact desired order
     ordered = [
-        ("Passing Yards", "01_passing_yards"),
-        ("Passing TDs", "02_passing_tds"),
-        ("Interceptions Thrown", "03_interceptions_thrown"),
-        ("Rushing Yards", "04_rushing_yards"),
-        ("Rushing TDs", "05_rushing_tds"),
-        ("Receiving Yards", "06_receiving_yards"),
-        ("Receiving TDs", "07_receiving_tds"),
-        ("Sacks", "08_sacks"),
-        ("Tackles", "09_tackles"),
-        ("Interceptions (Defense)", "10_interceptions"),
+        ("Passing Yards", "01_passing_yards", "Passing Yards"),
+        ("Passing TDs", "02_passing_tds", "Passing TDs"),
+        ("Interceptions Thrown", "03_interceptions_thrown", "Interceptions Thrown"),
+        ("Rushing Yards", "04_rushing_yards", "Rushing Yards"),
+        ("Rushing TDs", "05_rushing_tds", "Rushing TDs"),
+        ("Receiving Yards", "06_receiving_yards", "Receiving Yards"),
+        ("Receiving TDs", "07_receiving_tds", "Receiving TDs"),
+        ("Sacks", "08_sacks", "Sacks"),
+        ("Tackles", "09_tackles", "Tackles"),
+        ("Interceptions (Defense)", "10_interceptions", "Interceptions"),
     ]
 
-    print("")
-    print(f"Generating {len(ordered)} stat leader posters for season={season} seasontype={seasontype}…")
-    print("")
+    # Write locally to /tmp (Render) then upload
+    out_dir = "/tmp/stat_leaders"
+    os.makedirs(out_dir, exist_ok=True)
 
-    for title, outbase in ordered:
-        url, cand, mode = URLS[title]
+    urls: List[str] = []
+
+    for key_title, fname, poster_title in ordered:
+        url, cand, mode = URLS[key_title]
         items = topN_from_url(url, cand, mode)
 
-        # Display title for defense interceptions should be "Interceptions"
-        display_title = "Interceptions" if title == "Interceptions (Defense)" else title
+        local_path = os.path.join(out_dir, f"{fname}.png")
+        draw_single_category_poster(local_path, poster_title, subtitle, items, mode)
 
-        out_path = os.path.join(outdir, f"{outbase}.png")
-        draw_single_category_poster(out_path, display_title, subtitle, items, mode)
-        print(f"✅ {display_title} -> {out_path}")
+        storage_key = f"{prefix}{os.path.basename(local_path)}"
+        public_url = upload_file_return_url(local_path, storage_key)
+        urls.append(public_url)
 
-    print("\nDONE ✅\n")
-
-
-if __name__ == "__main__":
-    main()
+    return urls
