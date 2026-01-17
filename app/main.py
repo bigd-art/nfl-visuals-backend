@@ -15,11 +15,12 @@ from app.services.storage_supabase import (
     upload_file_return_url,
     cached_urls_for_prefix,
 )
-
+from app.routers.team_stat_leaders import router as team_stat_leaders_router
 from app.routers.stat_leaders import router as stat_leaders_router
 
 app = FastAPI()
 app.include_router(stat_leaders_router)
+app.include_router(team_stat_leaders_router)
 
 # =========================
 # Helpers
