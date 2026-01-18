@@ -296,3 +296,10 @@ def extract_team_leaders(team: str, outdir: str | None = None):
         "status": "ok",
         "team": team
     }
+def draw_leaders_grid_poster(*args, **kwargs):
+    """
+    Compatibility stub.
+    This function exists ONLY to satisfy router imports.
+    Actual poster drawing is handled elsewhere.
+    """
+    return None
