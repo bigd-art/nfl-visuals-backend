@@ -5,10 +5,8 @@ from datetime import datetime
 import os
 import traceback
 
-from app.scripts.nfl_team_stat_leaders_generate import (
-    extract_team_leaders,
-    draw_leaders_grid_poster,
-)
+# ✅ IMPORTANT: import the MODULE, not individual functions
+from app.scripts import nfl_team_stat_leaders_generate as team_gen
 
 router = APIRouter(prefix="/team-stat-leaders", tags=["Team Stat Leaders"])
 
@@ -26,8 +24,8 @@ def generate_team_stat_leaders(req: TeamStatLeadersRequest) -> Dict[str, Any]:
         outdir = req.outdir or "/tmp"
         os.makedirs(outdir, exist_ok=True)
 
-        # --- Core logic (unchanged) ---
-        leaders = extract_team_leaders(req.team_url)
+        # --- Core logic (UNCHANGED) ---
+        leaders = team_gen.extract_team_leaders(req.team_url)
 
         updated = datetime.now().strftime("%b %d, %Y • %I:%M %p")
         subtitle = f"{team} • Updated {updated}"
@@ -42,7 +40,11 @@ def generate_team_stat_leaders(req: TeamStatLeadersRequest) -> Dict[str, Any]:
             "Receiving TDs",
         ]
 
-        defense_order = ["Sacks", "Tackles", "Interceptions"]
+        defense_order = [
+            "Sacks",
+            "Tackles",
+            "Interceptions",
+        ]
 
         offense_sections = [
             (cat, leaders[cat][0], leaders[cat][1], leaders[cat][2])
@@ -57,7 +59,7 @@ def generate_team_stat_leaders(req: TeamStatLeadersRequest) -> Dict[str, Any]:
         out_off = os.path.join(outdir, f"{team.lower()}_offense_leaders.png")
         out_def = os.path.join(outdir, f"{team.lower()}_defense_leaders.png")
 
-        draw_leaders_grid_poster(
+        team_gen.draw_leaders_grid_poster(
             out_off,
             "Offensive Statistical Leaders",
             subtitle,
@@ -66,7 +68,7 @@ def generate_team_stat_leaders(req: TeamStatLeadersRequest) -> Dict[str, Any]:
             rows=4,
         )
 
-        draw_leaders_grid_poster(
+        team_gen.draw_leaders_grid_poster(
             out_def,
             "Defensive Statistical Leaders",
             subtitle,
@@ -75,7 +77,7 @@ def generate_team_stat_leaders(req: TeamStatLeadersRequest) -> Dict[str, Any]:
             rows=3,
         )
 
-        # ✅ ALWAYS return JSON
+        # ✅ ALWAYS return JSON (prevents Expo JSON error)
         return {
             "ok": True,
             "team": team,
@@ -83,7 +85,6 @@ def generate_team_stat_leaders(req: TeamStatLeadersRequest) -> Dict[str, Any]:
         }
 
     except Exception as e:
-        # 🔥 THIS IS THE CRITICAL FIX
         traceback.print_exc()
 
         raise HTTPException(
