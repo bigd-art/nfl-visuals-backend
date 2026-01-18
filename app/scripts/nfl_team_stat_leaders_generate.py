@@ -250,3 +250,30 @@ def draw_leaders_grid_poster(team: str, team_url: str, out_dir: Optional[str] = 
     draw_team_poster(out_def, "Defensive Team Leaders", subtitle, leaders["defense"])
 
     return out_off, out_def
+    def extract_team_leaders(team: str, outdir: str):
+    """
+    FastAPI entrypoint wrapper.
+    Matches the router import exactly.
+    """
+    class Args:
+        pass
+
+    args = Args()
+    args.team = team
+
+    # temporarily override argv behavior
+    import sys
+    old_argv = sys.argv
+    sys.argv = ["script", "--team", team]
+
+    try:
+        main()
+    finally:
+        sys.argv = old_argv
+
+    return {
+        "team": team,
+        "status": "ok",
+        "outdir": outdir,
+    }
+
