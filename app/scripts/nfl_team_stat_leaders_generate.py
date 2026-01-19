@@ -1,18 +1,68 @@
+# app/generator/team_stat_leaders.py
+# ✅ Render-safe + ESPN-robust team leader posters
+# Fixes the “wrong data” issue by:
+# 1) NOT relying on hard-coded table indexes (ESPN table order shifts).
+# 2) Auto-detecting Passing/Rushing/Receiving/Defense tables by column signatures.
+# 3) Pairing the correct NAME table with the correct STAT table (by adjacency + validation).
+# 4) Dropping “Total/TEAM” rows and non-player rows defensively.
+# 5) Producing consistent leaders even if ESPN adds/removes columns.
+
+import os
 import re
 from io import StringIO
+from datetime import datetime
 from typing import Dict, List, Optional, Tuple, Union
 
 import requests
 import pandas as pd
 from PIL import Image, ImageDraw, ImageFont
 
-HEADERS = {"User-Agent": "Mozilla/5.0"}
 Number = Union[int, float]
 
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                  "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+}
 
-# -------------------------
-# Text + number helpers
-# -------------------------
+TEAM_TO_ESPN = {
+    "ARI": "ari/arizona-cardinals",
+    "ATL": "atl/atlanta-falcons",
+    "BAL": "bal/baltimore-ravens",
+    "BUF": "buf/buffalo-bills",
+    "CAR": "car/carolina-panthers",
+    "CHI": "chi/chicago-bears",
+    "CIN": "cin/cincinnati-bengals",
+    "CLE": "cle/cleveland-browns",
+    "DAL": "dal/dallas-cowboys",
+    "DEN": "den/denver-broncos",
+    "DET": "det/detroit-lions",
+    "GB": "gb/green-bay-packers",
+    "HOU": "hou/houston-texans",
+    "IND": "ind/indianapolis-colts",
+    "JAX": "jax/jacksonville-jaguars",
+    "KC": "kc/kansas-city-chiefs",
+    "LAC": "lac/los-angeles-chargers",
+    "LAR": "lar/los-angeles-rams",
+    "LV": "lv/las-vegas-raiders",
+    "MIA": "mia/miami-dolphins",
+    "MIN": "min/minnesota-vikings",
+    "NE": "ne/new-england-patriots",
+    "NO": "no/new-orleans-saints",
+    "NYG": "nyg/new-york-giants",
+    "NYJ": "nyj/new-york-jets",
+    "PHI": "phi/philadelphia-eagles",
+    "PIT": "pit/pittsburgh-steelers",
+    "SEA": "sea/seattle-seahawks",
+    "SF": "sf/san-francisco-49ers",
+    "TB": "tb/tampa-bay-buccaneers",
+    "TEN": "ten/tennessee-titans",
+    "WAS": "wsh/washington-commanders",
+    "WSH": "wsh/washington-commanders",
+}
+
+# -----------------------------
+# text + parsing helpers
+# -----------------------------
 def normalize_spaces(s: str) -> str:
     s = str(s)
     s = re.sub(r"[\u200b\u200c\u200d\ufeff]", "", s)
@@ -20,7 +70,6 @@ def normalize_spaces(s: str) -> str:
     s = s.replace("\u00ad", "")
     s = re.sub(r"\s+", " ", s).strip()
     return s
-
 
 def safe_float(x) -> Optional[float]:
     if x is None:
@@ -34,9 +83,8 @@ def safe_float(x) -> Optional[float]:
         return None
     try:
         return float(s)
-    except:
+    except Exception:
         return None
-
 
 def safe_int(x) -> Optional[int]:
     f = safe_float(x)
@@ -44,375 +92,365 @@ def safe_int(x) -> Optional[int]:
         return None
     return int(round(f))
 
-
 def flatten_columns(df: pd.DataFrame) -> pd.DataFrame:
+    # ESPN defense tables sometimes come as MultiIndex
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = [
             " ".join([str(x).strip() for x in tup if str(x).strip() and "Unnamed" not in str(x)]).strip()
             for tup in df.columns
         ]
-    df.columns = [normalize_spaces(c) for c in df.columns]
+    df.columns = [str(c).strip() for c in df.columns]
     return df
 
-
-def fetch_tables(url: str) -> List[pd.DataFrame]:
+def fetch_all_tables(url: str) -> List[pd.DataFrame]:
     r = requests.get(url, headers=HEADERS, timeout=30)
     r.raise_for_status()
-    tables = pd.read_html(StringIO(r.text))
-    return [flatten_columns(t.copy()) for t in tables]
+    return pd.read_html(StringIO(r.text))
 
-
-def looks_like_name_table(df: pd.DataFrame) -> bool:
-    # ESPN "name" tables usually have 1 column and are mostly strings (player names)
+def is_name_table(df: pd.DataFrame) -> bool:
+    # ESPN often renders a separate 1-col table containing player names.
     if df is None or df.empty:
         return False
-    if len(df.columns) > 2:
+    df = flatten_columns(df.copy())
+    # Name tables are usually 1 column and have mostly non-numeric strings
+    if df.shape[1] != 1:
         return False
-    # first col tends to be name-ish
-    col0 = normalize_spaces(df.columns[0]).lower()
-    return ("name" in col0) or (len(df.columns) == 1)
+    col = df.columns[0]
+    sample = df[col].astype(str).head(8).tolist()
+    # Avoid picking numeric-only tables
+    alpha_count = sum(bool(re.search(r"[A-Za-z]", s)) for s in sample)
+    return alpha_count >= max(1, len(sample) // 2)
 
+def colset(df: pd.DataFrame) -> set:
+    df = flatten_columns(df.copy())
+    return {str(c).strip().lower() for c in df.columns}
 
-def strip_total_rows(name_df: pd.DataFrame) -> pd.DataFrame:
-    if name_df is None or name_df.empty:
-        return name_df
-    col0 = name_df.columns[0]
-    s = name_df[col0].astype(str).map(normalize_spaces)
-    mask_total = s.str.lower().str.contains(r"\btotal\b", na=False)
-    return name_df.loc[~mask_total].reset_index(drop=True)
-
-
-def pick_col_fuzzy(df: pd.DataFrame, patterns: List[str]) -> Optional[str]:
+def classify_stats_table(df: pd.DataFrame) -> Optional[str]:
     """
-    Return the first matching column name given a list of patterns.
-    Patterns are checked as:
-      - exact match
-      - substring match
-      - regex search
+    Returns: "pass" | "rush" | "rec" | "def" | None
+    Classification uses column signatures that ESPN keeps fairly stable.
     """
     if df is None or df.empty:
         return None
+    cols = colset(df)
 
-    cols = list(df.columns)
-    cols_low = [normalize_spaces(c).lower() for c in cols]
+    # Passing tables usually include CMP/ATT/INT/RTG/QBR etc
+    pass_hits = 0
+    for k in ["cmp", "att", "pct", "yds", "td", "int", "rtg", "qbr"]:
+        pass_hits += 1 if any(k == c or c.endswith(f" {k}") or k in c for c in cols) else 0
 
-    for pat in patterns:
-        p = pat.lower().strip()
+    # Rushing tables often include ATT, YDS, AVG, TD, LNG (but not CMP/RTG/QBR)
+    rush_hits = 0
+    for k in ["att", "yds", "avg", "td", "lng"]:
+        rush_hits += 1 if any(k == c or k in c for c in cols) else 0
+    has_cmp = any("cmp" == c or "cmp" in c for c in cols)
+    has_rtg = any("rtg" == c or "rtg" in c for c in cols) or any("qbr" == c or "qbr" in c for c in cols)
 
-        # exact
-        for i, c in enumerate(cols_low):
-            if c == p:
-                return cols[i]
+    # Receiving tables often include REC, TGTS, YDS, AVG, TD, LNG
+    rec_hits = 0
+    for k in ["rec", "tgts", "yds", "avg", "td", "lng"]:
+        rec_hits += 1 if any(k == c or k in c for c in cols) else 0
 
-        # substring
-        for i, c in enumerate(cols_low):
-            if p in c:
-                return cols[i]
+    # Defense tables often include TOT, SOLO, AST, SACK, INT, FF
+    def_hits = 0
+    for k in ["tot", "solo", "ast", "sack", "int", "ff"]:
+        def_hits += 1 if any(k == c or k in c for c in cols) else 0
 
-        # regex
-        try:
-            rx = re.compile(p, re.IGNORECASE)
-            for i, c in enumerate(cols):
-                if rx.search(str(c)):
-                    return cols[i]
-        except:
-            pass
+    # Decide with priority (def is most distinct)
+    if def_hits >= 3 and ("sack" in " ".join(cols) or "tot" in " ".join(cols)):
+        return "def"
+
+    # Passing should strongly contain QB-only columns
+    if pass_hits >= 5 and (has_cmp or has_rtg):
+        return "pass"
+
+    # Receiving should contain rec/tgts
+    if rec_hits >= 4 and any("rec" == c or c.startswith("rec") or "rec" in c for c in cols):
+        return "rec"
+
+    # Rushing is often the remaining YDS/TD/ATT/AVG/LNG table without passing-only cols
+    if rush_hits >= 4 and not has_cmp and not has_rtg:
+        return "rush"
 
     return None
 
+def clean_name_series(name_s: pd.Series) -> pd.Series:
+    s = name_s.astype(str).map(normalize_spaces)
 
-def leader_from_two_tables(
+    # Drop obvious non-player / summary rows
+    bad = s.str.lower().str.contains(r"\b(total|team|opp|opponent)\b", na=False)
+    s = s[~bad].copy()
+
+    # Some ESPN rows can be empty
+    s = s[s.str.len() > 0]
+    return s.reset_index(drop=True)
+
+def pick_col_by_keywords(df: pd.DataFrame, keywords: List[str]) -> str:
+    cols = list(flatten_columns(df.copy()).columns)
+    lowmap = {c.lower(): c for c in cols}
+
+    # Exact / contains match across all keywords in order
+    for kw in keywords:
+        kw = kw.lower()
+        for low, orig in lowmap.items():
+            if low == kw or kw in low:
+                return orig
+
+    # As fallback, try "contains all tokens"
+    for low, orig in lowmap.items():
+        ok = True
+        for token in keywords:
+            token = token.lower()
+            if token not in low:
+                ok = False
+                break
+        if ok:
+            return orig
+
+    raise RuntimeError(f"Missing expected column for keywords={keywords}. Have columns={cols}")
+
+def leader_from_name_and_stats(
     name_df: pd.DataFrame,
     stat_df: pd.DataFrame,
     stat_col: str,
-    mode: str = "int",
+    mode: str,
 ) -> Tuple[str, Number]:
-    """
-    Returns (player_name, best_value).
-    Never crashes if there are missing values; will default to ('—', 0).
-    """
-    if name_df is None or stat_df is None or name_df.empty or stat_df.empty:
-        return "—", 0
+    name_df = flatten_columns(name_df.copy())
+    stat_df = flatten_columns(stat_df.copy())
 
-    # Align by row index
-    n = min(len(name_df), len(stat_df))
-    name_df = name_df.iloc[:n].reset_index(drop=True).copy()
-    stat_df = stat_df.iloc[:n].reset_index(drop=True).copy()
+    # Ensure first col of name_df is name
+    name_col = name_df.columns[0]
+    names = clean_name_series(name_df[name_col])
 
-    # Normalize + drop Total
-    name_df.iloc[:, 0] = name_df.iloc[:, 0].map(normalize_spaces)
-    name_df = strip_total_rows(name_df)
-    stat_df = stat_df.iloc[: len(name_df)].reset_index(drop=True)
+    # Align stats to the *same length* as names AFTER cleaning by dropping corresponding stat rows
+    # We do it by applying the same "bad row" mask on the original name series.
+    raw_names = name_df[name_col].astype(str).map(normalize_spaces)
+    bad_mask = raw_names.str.lower().str.contains(r"\b(total|team|opp|opponent)\b", na=False) | (raw_names.str.len() == 0)
 
-    if stat_col not in stat_df.columns:
-        return "—", 0
+    stat_df2 = stat_df.loc[~bad_mask].reset_index(drop=True).copy()
+    n = min(len(names), len(stat_df2))
+    names = names.iloc[:n].reset_index(drop=True)
+    stat_df2 = stat_df2.iloc[:n].reset_index(drop=True)
+
+    if stat_col not in stat_df2.columns:
+        raise RuntimeError(f"Expected stat col '{stat_col}' not found. Columns={list(stat_df2.columns)}")
 
     if mode == "float1":
-        vals = stat_df[stat_col].map(safe_float)
+        vals = stat_df2[stat_col].map(safe_float)
     else:
-        vals = stat_df[stat_col].map(safe_int)
+        vals = stat_df2[stat_col].map(safe_int)
 
     vals_num = pd.to_numeric(vals, errors="coerce")
-
-    # If all NaN, return default
     if vals_num.isna().all():
-        return normalize_spaces(name_df.iloc[0, 0]) if len(name_df) else "—", 0
+        raise RuntimeError(f"All values are NaN for '{stat_col}'")
 
-    # idxmax picks first max, good enough
-    best_i = int(vals_num.fillna(-1e18).idxmax())
-    best_val = vals_num.loc[best_i]
-    if pd.isna(best_val):
-        best_val = 0
-
-    who = normalize_spaces(name_df.iloc[best_i, 0]) if best_i < len(name_df) else "—"
+    best_i = int(vals_num.idxmax())
+    who = normalize_spaces(names.iloc[best_i])
+    best_val = vals_num.iloc[best_i]
     return who, best_val
 
-
-# -------------------------
-# ESPN table detection
-# -------------------------
-def find_stat_table(tables: List[pd.DataFrame], want_cols_any: List[str], want_cols_all: List[str]) -> Optional[int]:
-    """
-    Find index of table that contains:
-      - ALL of want_cols_all (fuzzy)
-      - ANY of want_cols_any (fuzzy)
-    """
-    for i, df in enumerate(tables):
-        cols_low = [normalize_spaces(c).lower() for c in df.columns]
-
-        # must contain all required
-        ok_all = True
-        for req in want_cols_all:
-            req = req.lower()
-            if not any(req == c or req in c for c in cols_low):
-                ok_all = False
-                break
-        if not ok_all:
-            continue
-
-        # must contain any optional hint
-        if want_cols_any:
-            ok_any = False
-            for hint in want_cols_any:
-                hint = hint.lower()
-                if any(hint == c or hint in c for c in cols_low):
-                    ok_any = True
-                    break
-            if not ok_any:
-                continue
-
-        return i
-
-    return None
-
-
-def get_name_table_for(tables: List[pd.DataFrame], stat_idx: int) -> Optional[pd.DataFrame]:
-    if stat_idx is None or stat_idx <= 0:
-        return None
-    cand = tables[stat_idx - 1]
-    if looks_like_name_table(cand):
-        # normalize first col name to "Name"
-        cand = cand.copy()
-        cand.columns = ["Name"] + list(cand.columns[1:])
-        return cand[["Name"]]
-    return None
-
-
-# -------------------------
-# Public API for router
-# -------------------------
-def extract_team_leaders(team_url: str) -> Dict[str, Tuple[str, str, str]]:
-    """
-    Returns dict:
-      category -> (player_name, team_abbr_placeholder, value_str)
-
-    Router expects leaders[cat][0], [1], [2]
-    """
-    tables = fetch_tables(team_url)
-
-    # Passing: needs YDS, TD, INT
-    pass_idx = find_stat_table(
-        tables,
-        want_cols_any=["cmp", "att", "yds", "td"],
-        want_cols_all=["yds", "td", "int"],
-    )
-
-    # Rushing: needs YDS, TD (and often ATT)
-    rush_idx = find_stat_table(
-        tables,
-        want_cols_any=["att", "car", "yds", "td"],
-        want_cols_all=["yds", "td"],
-    )
-
-    # Receiving: needs YDS, TD (and often REC)
-    rec_idx = find_stat_table(
-        tables,
-        want_cols_any=["rec", "tgts", "yds", "td"],
-        want_cols_all=["yds", "td"],
-    )
-
-    # Defense: needs some form of sacks/tackles/int
-    def_idx = find_stat_table(
-        tables,
-        want_cols_any=["tack", "sack", "int"],
-        want_cols_all=[],
-    )
-
-    pass_names = get_name_table_for(tables, pass_idx) if pass_idx is not None else None
-    rush_names = get_name_table_for(tables, rush_idx) if rush_idx is not None else None
-    rec_names = get_name_table_for(tables, rec_idx) if rec_idx is not None else None
-    def_names = get_name_table_for(tables, def_idx) if def_idx is not None else None
-
-    pass_stats = tables[pass_idx] if pass_idx is not None else None
-    rush_stats = tables[rush_idx] if rush_idx is not None else None
-    rec_stats = tables[rec_idx] if rec_idx is not None else None
-    def_stats = tables[def_idx] if def_idx is not None else None
-
-    # offense col selection (these are usually exactly named, but still keep fuzzy)
-    col_pass_yds = pick_col_fuzzy(pass_stats, ["yds", r"\byds\b"]) if pass_stats is not None else None
-    col_pass_td = pick_col_fuzzy(pass_stats, ["td", r"\btd\b"]) if pass_stats is not None else None
-    col_pass_int = pick_col_fuzzy(pass_stats, ["int", r"\bint\b"]) if pass_stats is not None else None
-
-    col_rush_yds = pick_col_fuzzy(rush_stats, ["yds", r"\byds\b"]) if rush_stats is not None else None
-    col_rush_td = pick_col_fuzzy(rush_stats, ["td", r"\btd\b"]) if rush_stats is not None else None
-
-    col_rec_yds = pick_col_fuzzy(rec_stats, ["yds", r"\byds\b"]) if rec_stats is not None else None
-    col_rec_td = pick_col_fuzzy(rec_stats, ["td", r"\btd\b"]) if rec_stats is not None else None
-
-    # defense fuzzy cols (THIS IS THE MAIN FIX)
-    # try many variations so it never fails
-    col_sack = pick_col_fuzzy(def_stats, [
-        "sack", "sacks", "sacks sack", "sacks\s+sack", r"\bsack(s)?\b", "sk",
-    ]) if def_stats is not None else None
-
-    col_tack = pick_col_fuzzy(def_stats, [
-        "tot", "total", "tackles", "tackles tot", "tackles\s+tot", r"\btot(al)?\b",
-    ]) if def_stats is not None else None
-
-    col_def_int = pick_col_fuzzy(def_stats, [
-        "interceptions", "interceptions int", r"\bint\b", "ints",
-    ]) if def_stats is not None else None
-
-    # compute leaders (never throws)
-    pass_yds_who, pass_yds = ("—", 0) if not (pass_names is not None and pass_stats is not None and col_pass_yds) else leader_from_two_tables(pass_names, pass_stats, col_pass_yds, "int")
-    pass_td_who, pass_td = ("—", 0) if not (pass_names is not None and pass_stats is not None and col_pass_td) else leader_from_two_tables(pass_names, pass_stats, col_pass_td, "int")
-    pass_int_who, pass_int = ("—", 0) if not (pass_names is not None and pass_stats is not None and col_pass_int) else leader_from_two_tables(pass_names, pass_stats, col_pass_int, "int")
-
-    rush_yds_who, rush_yds = ("—", 0) if not (rush_names is not None and rush_stats is not None and col_rush_yds) else leader_from_two_tables(rush_names, rush_stats, col_rush_yds, "int")
-    rush_td_who, rush_td = ("—", 0) if not (rush_names is not None and rush_stats is not None and col_rush_td) else leader_from_two_tables(rush_names, rush_stats, col_rush_td, "int")
-
-    rec_yds_who, rec_yds = ("—", 0) if not (rec_names is not None and rec_stats is not None and col_rec_yds) else leader_from_two_tables(rec_names, rec_stats, col_rec_yds, "int")
-    rec_td_who, rec_td = ("—", 0) if not (rec_names is not None and rec_stats is not None and col_rec_td) else leader_from_two_tables(rec_names, rec_stats, col_rec_td, "int")
-
-    sack_who, sack_val = ("—", 0) if not (def_names is not None and def_stats is not None and col_sack) else leader_from_two_tables(def_names, def_stats, col_sack, "float1")
-    tack_who, tack_val = ("—", 0) if not (def_names is not None and def_stats is not None and col_tack) else leader_from_two_tables(def_names, def_stats, col_tack, "int")
-    int_who, int_val = ("—", 0) if not (def_names is not None and def_stats is not None and col_def_int) else leader_from_two_tables(def_names, def_stats, col_def_int, "int")
-
-    # Router expects 3 values; we keep "team" placeholder as "" (you can display or ignore)
-    leaders: Dict[str, Tuple[str, str, str]] = {
-        "Passing Yards": (pass_yds_who, "", str(int(pass_yds))),
-        "Passing TDs": (pass_td_who, "", str(int(pass_td))),
-        "Interceptions Thrown": (pass_int_who, "", str(int(pass_int))),
-        "Rushing Yards": (rush_yds_who, "", str(int(rush_yds))),
-        "Rushing TDs": (rush_td_who, "", str(int(rush_td))),
-        "Receiving Yards": (rec_yds_who, "", str(int(rec_yds))),
-        "Receiving TDs": (rec_td_who, "", str(int(rec_td))),
-        "Sacks": (sack_who, "", f"{float(sack_val):.1f}"),
-        "Tackles": (tack_who, "", str(int(tack_val))),
-        "Interceptions": (int_who, "", str(int(int_val))),
-    }
-
-    return leaders
-
-
-# -------------------------
-# Poster drawing (grid)
-# -------------------------
-def load_font(size: int, bold: bool = False):
+# -----------------------------
+# poster rendering (Render-safe fonts)
+# -----------------------------
+def load_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
     candidates = [
+        # Render / Linux
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+        # mac fallback (dev)
         "/System/Library/Fonts/Supplemental/Arial Bold.ttf" if bold else "/System/Library/Fonts/Supplemental/Arial.ttf",
         "/Library/Fonts/Arial Bold.ttf" if bold else "/Library/Fonts/Arial.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
     ]
     for p in candidates:
         try:
             return ImageFont.truetype(p, size=size)
-        except:
+        except Exception:
             pass
     return ImageFont.load_default()
 
-
-def draw_leaders_grid_poster(
-    out_path: str,
-    title: str,
-    subtitle: str,
-    sections: List[Tuple[str, str, str, str]],
-    cols: int = 2,
-    rows: int = 4,
-):
-    """
-    sections: list of tuples: (category, player, team, value)
-    """
-    W, H = 1440, 2560
-    bg = (12, 12, 16)
-    card = (20, 20, 28)
-    border = (45, 45, 60)
-    txt = (235, 235, 245)
-    sub = (170, 170, 185)
-
-    img = Image.new("RGB", (W, H), bg)
+def draw_team_poster(out_path: str, title: str, subtitle: str, rows: List[Tuple[str, str, str]]):
+    W, H = 1400, 2400
+    img = Image.new("RGB", (W, H), (12, 12, 16))
     d = ImageDraw.Draw(img)
 
-    title_font = load_font(66, bold=True)
-    sub_font = load_font(28, bold=False)
-    cat_font = load_font(34, bold=True)
-    name_font = load_font(30, bold=False)
-    val_font = load_font(46, bold=True)
+    title_font = load_font(64, bold=True)
+    sub_font   = load_font(28, bold=False)
+    head_font  = load_font(34, bold=True)
+    name_font  = load_font(28, bold=False)
+    val_font   = load_font(30, bold=True)
 
-    d.text((70, 60), title, font=title_font, fill=txt)
-    d.text((70, 145), subtitle, font=sub_font, fill=sub)
+    d.text((70, 60), title, font=title_font, fill=(245,245,245))
+    d.text((70, 140), subtitle, font=sub_font, fill=(170,170,185))
 
-    # grid area
-    grid_x0, grid_y0 = 70, 230
-    grid_x1, grid_y1 = W - 70, H - 120
+    x0, y0 = 70, 220
+    x1, y1 = W - 70, H - 120
+    d.rounded_rectangle([x0, y0, x1, y1], radius=26, fill=(20,20,28), outline=(45,45,60), width=2)
 
-    d.rounded_rectangle([grid_x0, grid_y0, grid_x1, grid_y1], radius=26, fill=card, outline=border, width=2)
+    row_h = 240
+    pad_x = 40
+    for i, (label, who, val) in enumerate(rows):
+        ry = y0 + 30 + i * row_h
 
-    inner_pad = 30
-    gx0 = grid_x0 + inner_pad
-    gy0 = grid_y0 + inner_pad
-    gx1 = grid_x1 - inner_pad
-    gy1 = grid_y1 - inner_pad
+        d.text((x0 + pad_x, ry), label, font=head_font, fill=(235,235,245))
+        d.text((x0 + pad_x, ry + 55), who, font=name_font, fill=(170,170,185))
 
-    cell_w = (gx1 - gx0) / cols
-    cell_h = (gy1 - gy0) / rows
+        tw = d.textlength(val, font=val_font)
+        d.text((x1 - pad_x - tw, ry + 25), val, font=val_font, fill=(235,235,245))
 
-    for idx, (cat, player, team, value) in enumerate(sections):
-        r = idx // cols
-        c = idx % cols
-        if r >= rows:
-            break
-
-        x0 = gx0 + c * cell_w
-        y0 = gy0 + r * cell_h
-        x1 = x0 + cell_w
-        y1 = y0 + cell_h
-
-        # separators
-        if c > 0:
-            d.line([(x0, y0), (x0, y1)], fill=(35, 35, 48), width=2)
-        if r > 0:
-            d.line([(x0, y0), (x1, y0)], fill=(35, 35, 48), width=2)
-
-        pad = 26
-        cat = normalize_spaces(cat)
-        player = normalize_spaces(player)
-        value = normalize_spaces(value)
-
-        d.text((x0 + pad, y0 + 18), cat, font=cat_font, fill=txt)
-        d.text((x0 + pad, y0 + 68), player, font=name_font, fill=sub)
-
-        tw = d.textlength(value, font=val_font)
-        d.text((x1 - pad - tw, y0 + 28), value, font=val_font, fill=txt)
+        if i < len(rows) - 1:
+            d.line([(x0 + 25, ry + row_h - 25), (x1 - 25, ry + row_h - 25)], fill=(35,35,48), width=2)
 
     img.save(out_path, "PNG")
+
+# -----------------------------
+# core extraction (NO hard-coded table indexes)
+# -----------------------------
+def find_named_table_pairs(tables: List[pd.DataFrame]) -> Dict[str, Tuple[pd.DataFrame, pd.DataFrame]]:
+    """
+    Walk through all ESPN tables and build pairs (name_table, stats_table) for:
+    pass, rush, rec, def
+
+    ESPN often renders: [names] [stats] [names] [stats] ...
+    but can insert extra tables, so we classify the stats tables and then find
+    the nearest valid name-table directly preceding it.
+    """
+    pairs: Dict[str, Tuple[pd.DataFrame, pd.DataFrame]] = {}
+
+    # Precompute which indexes are name tables and stats categories
+    name_idx = set()
+    cat_at: Dict[int, str] = {}
+    for i, t in enumerate(tables):
+        try:
+            if is_name_table(t):
+                name_idx.add(i)
+            cat = classify_stats_table(t)
+            if cat:
+                cat_at[i] = cat
+        except Exception:
+            continue
+
+    # For each stats table, find the closest name table right before it.
+    for i, cat in cat_at.items():
+        if cat in pairs:
+            continue  # keep first valid
+        # walk backwards to find nearest name table
+        j = i - 1
+        while j >= 0:
+            if j in name_idx:
+                # validate that lengths are reasonably aligned
+                nlen = len(tables[j])
+                slen = len(tables[i])
+                if nlen >= 2 and slen >= 2:
+                    pairs[cat] = (tables[j], tables[i])
+                break
+            j -= 1
+
+    return pairs
+
+def build_team_leaders(team: str, team_url: Optional[str] = None) -> Tuple[List[Tuple[str,str,str]], List[Tuple[str,str,str]], str]:
+    """
+    Returns:
+      offense_rows, defense_rows, subtitle
+    """
+    t = team.strip().upper()
+    if team_url:
+        url = team_url
+    else:
+        if t not in TEAM_TO_ESPN:
+            raise ValueError(f"Unknown team '{t}'")
+        url = f"https://www.espn.com/nfl/team/stats/_/name/{TEAM_TO_ESPN[t]}"
+
+    tables = fetch_all_tables(url)
+    pairs = find_named_table_pairs(tables)
+
+    missing = [k for k in ["pass", "rush", "rec", "def"] if k not in pairs]
+    if missing:
+        # If ESPN changes markup, this message will tell you what's missing
+        raise RuntimeError(f"Could not detect required ESPN table(s): {missing}")
+
+    name_pass, pass_stats = pairs["pass"]
+    name_rush, rush_stats = pairs["rush"]
+    name_rec,  rec_stats  = pairs["rec"]
+    name_def,  def_stats  = pairs["def"]
+
+    pass_stats = flatten_columns(pass_stats)
+    rush_stats = flatten_columns(rush_stats)
+    rec_stats  = flatten_columns(rec_stats)
+    def_stats  = flatten_columns(def_stats)
+
+    # OFFENSE leaders (choose columns robustly)
+    col_pass_yds = pick_col_by_keywords(pass_stats, ["yds"])
+    col_pass_td  = pick_col_by_keywords(pass_stats, ["td"])
+    col_pass_int = pick_col_by_keywords(pass_stats, ["int"])
+
+    col_rush_yds = pick_col_by_keywords(rush_stats, ["yds"])
+    col_rush_td  = pick_col_by_keywords(rush_stats, ["td"])
+
+    col_rec_yds  = pick_col_by_keywords(rec_stats, ["yds"])
+    col_rec_td   = pick_col_by_keywords(rec_stats, ["td"])
+
+    pass_yds_who, pass_yds = leader_from_name_and_stats(name_pass, pass_stats, col_pass_yds, "int")
+    pass_td_who,  pass_td  = leader_from_name_and_stats(name_pass, pass_stats, col_pass_td,  "int")
+    pass_int_who, pass_int = leader_from_name_and_stats(name_pass, pass_stats, col_pass_int, "int")
+
+    rush_yds_who, rush_yds = leader_from_name_and_stats(name_rush, rush_stats, col_rush_yds, "int")
+    rush_td_who,  rush_td  = leader_from_name_and_stats(name_rush, rush_stats, col_rush_td,  "int")
+
+    rec_yds_who,  rec_yds  = leader_from_name_and_stats(name_rec,  rec_stats,  col_rec_yds,  "int")
+    rec_td_who,   rec_td   = leader_from_name_and_stats(name_rec,  rec_stats,  col_rec_td,   "int")
+
+    # DEFENSE leaders
+    # ESPN labels vary, so search by keywords
+    col_sack = pick_col_by_keywords(def_stats, ["sack"])
+    col_tot  = pick_col_by_keywords(def_stats, ["tot"])   # total tackles
+    col_int  = pick_col_by_keywords(def_stats, ["int"])   # interceptions
+
+    sack_who, sack_val = leader_from_name_and_stats(name_def, def_stats, col_sack, "float1")
+    tot_who,  tot_val  = leader_from_name_and_stats(name_def, def_stats, col_tot,  "int")
+    int_who,  int_val  = leader_from_name_and_stats(name_def, def_stats, col_int,  "int")
+
+    updated = datetime.now().strftime("%b %d, %Y • %I:%M %p")
+    subtitle = f"{t} • Updated {updated}"
+
+    offense_rows = [
+        ("Passing Yards",          pass_yds_who, str(int(pass_yds))),
+        ("Passing TDs",            pass_td_who,  str(int(pass_td))),
+        ("Interceptions Thrown",   pass_int_who, str(int(pass_int))),
+        ("Rushing Yards",          rush_yds_who, str(int(rush_yds))),
+        ("Rushing TDs",            rush_td_who,  str(int(rush_td))),
+        ("Receiving Yards",        rec_yds_who,  str(int(rec_yds))),
+        ("Receiving TDs",          rec_td_who,   str(int(rec_td))),
+    ]
+
+    defense_rows = [
+        ("Sacks",          sack_who, f"{float(sack_val):.1f}"),
+        ("Tackles",        tot_who,  str(int(tot_val))),
+        ("Interceptions",  int_who,  str(int(int_val))),
+    ]
+
+    return offense_rows, defense_rows, subtitle
+
+# -----------------------------
+# public generator API (for your FastAPI route)
+# -----------------------------
+def generate_team_stat_leader_posters(
+    team: str,
+    team_url: Optional[str] = None,
+    out_dir: str = "/tmp",
+) -> List[str]:
+    """
+    Creates 2 PNGs in out_dir and returns their file paths.
+    Your router should upload these to Supabase and return public URLs.
+    """
+    offense_rows, defense_rows, subtitle = build_team_leaders(team, team_url=team_url)
+
+    os.makedirs(out_dir, exist_ok=True)
+    t = team.strip().upper()
+
+    out_off = os.path.join(out_dir, f"team_offense_leaders_{t}.png")
+    out_def = os.path.join(out_dir, f"team_defense_leaders_{t}.png")
+
+    draw_team_poster(out_off, "Offensive Team Leaders", subtitle, offense_rows)
+    draw_team_poster(out_def, "Defensive Team Leaders", subtitle, defense_rows)
+
+    return [out_off, out_def]
