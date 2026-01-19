@@ -391,6 +391,118 @@ def extract_team_leaders(team_url: str) -> Dict[str, Tuple[str, str, str, str]]:
 # IMPORTANT:
 # KEEP YOUR EXISTING draw_leaders_grid_poster BELOW THIS LINE
 # Do NOT change it if you like the style.
+# ==========================================================
+# Compatibility wrapper
+# Your router expects team_gen.draw_leaders_grid_poster(...)
+# ==========================================================
+
+from PIL import Image, ImageDraw, ImageFont
+import os
+
+def _load_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
+    candidates = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+        "/System/Library/Fonts/Supplemental/Arial Bold.ttf" if bold else "/System/Library/Fonts/Supplemental/Arial.ttf",
+        "/Library/Fonts/Arial Bold.ttf" if bold else "/Library/Fonts/Arial.ttf",
+    ]
+    for p in candidates:
+        try:
+            return ImageFont.truetype(p, size=size)
+        except Exception:
+            pass
+    return ImageFont.load_default()
+
+def draw_leaders_grid_poster(
+    out_path: str,
+    title: str,
+    subtitle: str,
+    sections,
+    cols: int = 2,
+    rows: int = 4,
+):
+    """
+    sections is what your router builds:
+      (label, leaders[cat][0], leaders[cat][1], leaders[cat][2])
+
+    We accept either:
+      - (label, rank, name, value)  OR
+      - (label, rank, name, team, value)
+    """
+    W, H = 1400, 2400
+    img = Image.new("RGB", (W, H), (12, 12, 16))
+    d = ImageDraw.Draw(img)
+
+    title_font = _load_font(60, bold=True)
+    sub_font   = _load_font(28, bold=False)
+    head_font  = _load_font(30, bold=True)
+    name_font  = _load_font(26, bold=False)
+    val_font   = _load_font(34, bold=True)
+
+    d.text((70, 60), title, font=title_font, fill=(245, 245, 245))
+    d.text((70, 135), subtitle, font=sub_font, fill=(170, 170, 185))
+
+    pad = 60
+    top = 200
+    grid_x0, grid_y0 = pad, top
+    grid_x1, grid_y1 = W - pad, H - 120
+
+    d.rounded_rectangle([grid_x0, grid_y0, grid_x1, grid_y1], radius=26, fill=(20, 20, 28), outline=(45, 45, 60), width=2)
+
+    cell_w = (grid_x1 - grid_x0) / cols
+    cell_h = (grid_y1 - grid_y0) / rows
+
+    def _fit_text(text: str, max_w: float, font: ImageFont.FreeTypeFont) -> str:
+        t = str(text)
+        if d.textlength(t, font=font) <= max_w:
+            return t
+        # simple ellipsis trim
+        while len(t) > 3 and d.textlength(t + "…", font=font) > max_w:
+            t = t[:-1]
+        return t + "…"
+
+    for i, sec in enumerate(sections):
+        if i >= cols * rows:
+            break
+
+        # normalize section tuple
+        label = sec[0]
+        # accept 4-tuple or 5-tuple
+        if len(sec) == 4:
+            _, rank, name, value = sec
+            team = ""
+        else:
+            _, rank, name, team, value = sec
+
+        cx = grid_x0 + (i % cols) * cell_w
+        cy = grid_y0 + (i // cols) * cell_h
+
+        # cell padding
+        px = 26
+        py = 22
+
+        # divider lines
+        if (i % cols) != 0:
+            d.line([(cx, cy + 18), (cx, cy + cell_h - 18)], fill=(35, 35, 48), width=2)
+        if (i // cols) != 0:
+            d.line([(cx + 18, cy), (cx + cell_w - 18, cy)], fill=(35, 35, 48), width=2)
+
+        label_text = _fit_text(label, cell_w - 2 * px, head_font)
+        d.text((cx + px, cy + py), label_text, font=head_font, fill=(235, 235, 245))
+
+        who = f"{name}"
+        if team:
+            who = f"{name} • {team}"
+        who = _fit_text(who, cell_w - 2 * px, name_font)
+        d.text((cx + px, cy + py + 48), who, font=name_font, fill=(170, 170, 185))
+
+        val = str(value)
+        tw = d.textlength(val, font=val_font)
+        d.text((cx + cell_w - px - tw, cy + py + 10), val, font=val_font, fill=(235, 235, 245))
+
+    os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+    img.save(out_path, "PNG")
+
 # ----------------------------------------------------------
 
 # def draw_leaders_grid_poster(...):
