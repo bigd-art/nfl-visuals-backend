@@ -43,13 +43,15 @@ def generate_team_stat_leaders(req: TeamStatLeadersRequest) -> Dict[str, Any]:
         defense_order = ["Sacks", "Tackles", "Interceptions"]
 
         offense_sections = [
-            (cat, leaders[cat][0], leaders[cat][1], leaders[cat][2])
+            (cat, leaders[cat][0], leaders[cat][1], leaders[cat][3])
             for cat in offense_order
         ]
+
         defense_sections = [
-            (cat, leaders[cat][0], leaders[cat][1], leaders[cat][2])
+            (cat, leaders[cat][0], leaders[cat][1], leaders[cat][3])
             for cat in defense_order
         ]
+
 
         # 2) Render using your OLD poster style function
         out_off = os.path.join(outdir, f"{team.lower()}_offense_leaders.png")
