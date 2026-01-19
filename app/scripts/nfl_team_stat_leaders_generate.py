@@ -266,36 +266,57 @@ def leader_from_name_and_stats(
     stat_col: str,
     mode: str,
 ) -> Tuple[str, Number]:
-    name_df = flatten_columns(name_df.copy())
-    stat_df = flatten_columns(stat_df.copy())
+    name_df = flatten_columns(name_df.copy()).reset_index(drop=True)
+    stat_df = flatten_columns(stat_df.copy()).reset_index(drop=True)
+
+    # ESPN sometimes gives slightly different row counts between the name table and stat table.
+    # Force them to the same length BEFORE any masking.
+    n0 = min(len(name_df), len(stat_df))
+    if n0 <= 0:
+        raise RuntimeError("Empty name/stats table.")
+
+    name_df = name_df.iloc[:n0].reset_index(drop=True)
+    stat_df = stat_df.iloc[:n0].reset_index(drop=True)
 
     name_col = name_df.columns[0]
-    names = clean_name_series(name_df[name_col])
 
+    # Build a POSITIONAL bad-mask (no index alignment issues)
     raw_names = name_df[name_col].astype(str).map(normalize_spaces)
-    bad_mask = raw_names.str.lower().str.contains(r"\b(total|team|opp|opponent)\b", na=False) | (raw_names.str.len() == 0)
+    bad_mask = (
+        raw_names.str.lower().str.contains(r"\b(total|team|opp|opponent)\b", na=False)
+        | (raw_names.str.len() == 0)
+    ).to_numpy()  # <-- critical
 
-    stat_df2 = stat_df.loc[~bad_mask].reset_index(drop=True).copy()
-    n = min(len(names), len(stat_df2))
-    names = names.iloc[:n].reset_index(drop=True)
-    stat_df2 = stat_df2.iloc[:n].reset_index(drop=True)
+    # Apply mask positionally on BOTH
+    keep = ~bad_mask
+    name_keep = raw_names.iloc[keep].reset_index(drop=True)
+    stat_keep = stat_df.iloc[keep].reset_index(drop=True)
 
-    if stat_col not in stat_df2.columns:
-        raise RuntimeError(f"Expected stat col '{stat_col}' not found. Columns={list(stat_df2.columns)}")
+    # Clean names (after positional filtering)
+    name_keep = name_keep[name_keep.str.len() > 0].reset_index(drop=True)
+
+    # Now re-align again just in case cleaning changed counts
+    n = min(len(name_keep), len(stat_keep))
+    name_keep = name_keep.iloc[:n].reset_index(drop=True)
+    stat_keep = stat_keep.iloc[:n].reset_index(drop=True)
+
+    if stat_col not in stat_keep.columns:
+        raise RuntimeError(f"Expected stat col '{stat_col}' not found. Columns={list(stat_keep.columns)}")
 
     if mode == "float1":
-        vals = stat_df2[stat_col].map(safe_float)
+        vals = stat_keep[stat_col].map(safe_float)
     else:
-        vals = stat_df2[stat_col].map(safe_int)
+        vals = stat_keep[stat_col].map(safe_int)
 
     vals_num = pd.to_numeric(vals, errors="coerce")
     if vals_num.isna().all():
         raise RuntimeError(f"All values are NaN for '{stat_col}'")
 
     best_i = int(vals_num.idxmax())
-    who = normalize_spaces(names.iloc[best_i])
+    who = normalize_spaces(name_keep.iloc[best_i])
     best_val = vals_num.iloc[best_i]
     return who, best_val
+
 
 
 # -----------------------------
