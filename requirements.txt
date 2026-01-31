@@ -3,11 +3,9 @@ uvicorn
 pydantic
 requests
 matplotlib
-pillow
-supabase
+Pillow
 pandas
 lxml
 html5lib
-Pillow
-
-
+beautifulsoup4
+supabase
