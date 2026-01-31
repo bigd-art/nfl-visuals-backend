@@ -21,7 +21,6 @@ import requests
 
 Number = Union[int, float]
 
-# ESPN can be touchy in CI. These headers + retries help a lot.
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
@@ -32,6 +31,67 @@ HEADERS = {
     "Cache-Control": "no-cache",
     "Pragma": "no-cache",
 }
+
+# -----------------------------
+# Team -> ESPN code for URL
+# -----------------------------
+TEAM_ABBR_TO_ESPN_CODE = {
+    "ARI": "ari",
+    "ATL": "atl",
+    "BAL": "bal",
+    "BUF": "buf",
+    "CAR": "car",
+    "CHI": "chi",
+    "CIN": "cin",
+    "CLE": "cle",
+    "DAL": "dal",
+    "DEN": "den",
+    "DET": "det",
+    "GB": "gb",
+    "GNB": "gb",
+    "HOU": "hou",
+    "IND": "ind",
+    "JAX": "jax",
+    "KC": "kc",
+    "LAC": "lac",
+    "LAR": "lar",
+    "LV": "lv",
+    "MIA": "mia",
+    "MIN": "min",
+    "NE": "ne",
+    "NO": "no",
+    "NYG": "nyg",
+    "NYJ": "nyj",
+    "PHI": "phi",
+    "PIT": "pit",
+    "SEA": "sea",
+    "SF": "sf",
+    "TB": "tb",
+    "TEN": "ten",
+    "WAS": "wsh",
+    "WSH": "wsh",
+}
+
+def build_team_stats_url(team_abbr: str, year: int, seasontype: int) -> str:
+    """
+    Canonical ESPN team stats URL with explicit year + season type.
+    seasontype: 2=regular, 3=postseason
+    """
+    t = (team_abbr or "").strip().upper()
+    code = TEAM_ABBR_TO_ESPN_CODE.get(t)
+    if not code:
+        raise RuntimeError(f"Unknown team abbreviation '{team_abbr}'. Expected e.g. SEA, DAL, KC.")
+
+    st = int(seasontype)
+    if st not in (2, 3):
+        raise RuntimeError("seasontype must be 2 (regular) or 3 (postseason).")
+
+    y = int(year)
+    if y < 2002 or y > 2035:
+        raise RuntimeError("year must be between 2002 and 2035.")
+
+    return f"https://www.espn.com/nfl/team/stats/_/type/team/name/{code}/season/{y}/seasontype/{st}"
+
 
 # -----------------------------
 # basic helpers
@@ -71,9 +131,7 @@ def safe_int(x) -> Optional[int]:
 def flatten_columns(df: pd.DataFrame) -> pd.DataFrame:
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = [
-            " ".join(
-                [str(x).strip() for x in tup if str(x).strip() and "Unnamed" not in str(x)]
-            ).strip()
+            " ".join([str(x).strip() for x in tup if str(x).strip() and "Unnamed" not in str(x)]).strip()
             for tup in df.columns
         ]
     df.columns = [str(c).strip() for c in df.columns]
@@ -84,10 +142,6 @@ def flatten_columns(df: pd.DataFrame) -> pd.DataFrame:
 # fetch + read_html with retries
 # -----------------------------
 def fetch_html(team_url: str, timeout: int = 30, retries: int = 3) -> str:
-    """
-    ESPN may intermittently return blocked pages / partial HTML in CI.
-    We retry with backoff and validate we got something table-like.
-    """
     last_err = None
     session = requests.Session()
 
@@ -97,11 +151,7 @@ def fetch_html(team_url: str, timeout: int = 30, retries: int = 3) -> str:
             r.raise_for_status()
             html = r.text or ""
 
-            # Basic sanity checks: ESPN stat pages should contain tables somewhere.
-            # If we don't see any table markers, we may have been served a blocked/redirect page.
             if "<table" not in html.lower():
-                # Sometimes ESPN loads via scripts; but team stats pages typically still include tables.
-                # Provide a helpful error snippet.
                 snippet = normalize_spaces(html[:400])
                 raise RuntimeError(f"ESPN HTML contained no <table>. Snippet: {snippet}")
 
@@ -109,9 +159,7 @@ def fetch_html(team_url: str, timeout: int = 30, retries: int = 3) -> str:
 
         except Exception as e:
             last_err = e
-            # exponential-ish backoff
-            sleep_s = 1.5 * attempt
-            time.sleep(sleep_s)
+            time.sleep(1.5 * attempt)
 
     raise RuntimeError(f"Failed to fetch ESPN page after {retries} tries: {last_err}")
 
@@ -121,7 +169,6 @@ def fetch_tables(team_url: str) -> List[pd.DataFrame]:
     try:
         tables = pd.read_html(StringIO(html))
     except Exception as e:
-        # Add context to make CI failures obvious
         raise RuntimeError(f"pd.read_html failed. Ensure lxml/html5lib are installed. Error: {e}")
     if not tables:
         raise RuntimeError("pd.read_html returned 0 tables (unexpected for ESPN team stats page).")
@@ -140,7 +187,6 @@ def is_name_table(df: pd.DataFrame) -> bool:
     col = df.columns[0]
     sample = df[col].astype(str).head(10).tolist()
     alpha = sum(bool(re.search(r"[A-Za-z]", s)) for s in sample)
-    # Must have enough alpha strings to be a name list
     return alpha >= max(2, len(sample) // 2)
 
 
@@ -159,28 +205,27 @@ def classify_stats_table(df: pd.DataFrame) -> Optional[str]:
         return any(any(s in c for c in cols_norm) for s in substrs)
 
     # Defense signature
-    # ESPN defense tables often have: SOLO, AST, TOT, SACK, INT, FF ...
     def_hits = 0
     for k in ["solo", "ast", "tot", "tkl", "tack", "sack", "int", "ff"]:
         def_hits += 1 if has_any([k]) else 0
     if def_hits >= 3 and has_any(["sack"]):
         return "def"
 
-    # Passing signature: CMP, ATT, YDS, TD, INT, RTG/QBR
+    # Passing signature
     pass_hits = 0
     for k in ["cmp", "att", "yds", "td", "int", "rtg", "qbr", "pct"]:
         pass_hits += 1 if has_any([k]) else 0
     if pass_hits >= 5 and (has_any(["cmp"]) or has_any(["rtg", "qbr"])):
         return "pass"
 
-    # Receiving signature: REC, TGTS, YDS, TD
+    # Receiving signature
     rec_hits = 0
     for k in ["rec", "tgts", "yds", "td", "avg", "lng"]:
         rec_hits += 1 if has_any([k]) else 0
     if rec_hits >= 4 and has_any(["rec"]):
         return "rec"
 
-    # Rushing signature: ATT, YDS, AVG, TD, LNG (but not CMP/RTG)
+    # Rushing signature
     rush_hits = 0
     for k in ["att", "yds", "avg", "td", "lng"]:
         rush_hits += 1 if has_any([k]) else 0
@@ -213,11 +258,9 @@ def find_named_table_pairs(tables: List[pd.DataFrame]) -> Dict[str, Tuple[pd.Dat
         if cat in pairs:
             continue
 
-        # find nearest preceding name table
         j = stat_i - 1
         while j >= 0:
             if j in name_idx:
-                # Both should have at least 2 rows to be meaningful
                 if len(tables[j]) >= 2 and len(tables[stat_i]) >= 2:
                     pairs[cat] = (tables[j], tables[stat_i])
                 break
@@ -289,10 +332,6 @@ def pick_sack_col(df: pd.DataFrame) -> str:
 
 
 def pick_tackles_col(df: pd.DataFrame) -> str:
-    """
-    ESPN changes this a lot. We try:
-    TOT -> TKL -> TACK -> COMB -> anything containing tack/tkl/total.
-    """
     df = flatten_columns(df.copy())
     cols = list(df.columns)
     low = [_norm_col(c) for c in cols]
@@ -314,7 +353,84 @@ def pick_tackles_col(df: pd.DataFrame) -> str:
 
 
 # -----------------------------
-# leader extraction (fixes missing values)
+# NEW: Prefer names from inside stat table when available
+# -----------------------------
+def find_player_column(stat_df: pd.DataFrame) -> Optional[str]:
+    """
+    ESPN often includes player names inside the same stats table.
+    If we use that, we never get the 'wrong name right value' bug.
+    """
+    stat_df = flatten_columns(stat_df.copy())
+    cols = list(stat_df.columns)
+    low = [_norm_col(c) for c in cols]
+
+    # strong matches first
+    for i, c in enumerate(low):
+        if c in ("player", "players", "name"):
+            return cols[i]
+
+    # common ESPN variants
+    for i, c in enumerate(low):
+        if "player" in c or "name" in c:
+            return cols[i]
+
+    return None
+
+
+def leader_from_stats_table(
+    stat_df: pd.DataFrame,
+    player_col: str,
+    stat_col: str,
+    mode: str,  # "int" or "float1"
+) -> Tuple[str, Number]:
+    """
+    Leader from a single table containing player names + stat values.
+    This avoids mismatched name/stats tables.
+    """
+    stat_df = flatten_columns(stat_df.copy()).reset_index(drop=True)
+
+    if stat_df.empty:
+        raise RuntimeError("Empty stats table.")
+
+    if player_col not in stat_df.columns:
+        raise RuntimeError(f"Player column '{player_col}' not found in stats table.")
+
+    if stat_col not in stat_df.columns:
+        raise RuntimeError(f"Stat column '{stat_col}' not found in stats table.")
+
+    raw_names = stat_df[player_col].astype(str).map(normalize_spaces)
+
+    bad = (
+        raw_names.str.lower().str.contains(r"\b(total|team|opp|opponent)\b", na=False)
+        | (raw_names.str.len() == 0)
+    ).to_numpy()
+
+    keep = ~bad
+    names = raw_names.iloc[keep].reset_index(drop=True)
+    vals_src = stat_df[stat_col].iloc[keep].reset_index(drop=True)
+
+    if mode == "float1":
+        vals = vals_src.map(safe_float)
+    else:
+        vals = vals_src.map(safe_int)
+
+    vals_num = pd.to_numeric(vals, errors="coerce")
+
+    good = vals_num.notna().to_numpy()
+    names = names.iloc[good].reset_index(drop=True)
+    vals_num = vals_num.iloc[good].reset_index(drop=True)
+
+    if vals_num.empty:
+        raise RuntimeError(f"All values are NaN/empty for '{stat_col}' after cleaning.")
+
+    best_pos = int(vals_num.values.argmax())
+    who = normalize_spaces(names.iloc[best_pos])
+    best_val = vals_num.iloc[best_pos]
+    return who, best_val
+
+
+# -----------------------------
+# Original fallback method (name table + stats table)
 # -----------------------------
 def leader_from_name_and_stats(
     name_df: pd.DataFrame,
@@ -322,17 +438,12 @@ def leader_from_name_and_stats(
     stat_col: str,
     mode: str,  # "int" or "float1"
 ) -> Tuple[str, Number]:
-    """
-    Returns: (player_name, best_value)
-    Ensures name/stat alignment is purely positional (CI-safe).
-    """
     name_df = flatten_columns(name_df.copy()).reset_index(drop=True)
     stat_df = flatten_columns(stat_df.copy()).reset_index(drop=True)
 
     if name_df.empty or stat_df.empty:
         raise RuntimeError("Empty name or stats table.")
 
-    # Trim to same length first (positional)
     n0 = min(len(name_df), len(stat_df))
     name_df = name_df.iloc[:n0].reset_index(drop=True)
     stat_df = stat_df.iloc[:n0].reset_index(drop=True)
@@ -340,7 +451,6 @@ def leader_from_name_and_stats(
     name_col = name_df.columns[0]
     raw_names = name_df[name_col].astype(str).map(normalize_spaces)
 
-    # Build a boolean keep mask positionally
     bad = (
         raw_names.str.lower().str.contains(r"\b(total|team|opp|opponent)\b", na=False)
         | (raw_names.str.len() == 0)
@@ -348,14 +458,12 @@ def leader_from_name_and_stats(
 
     keep_mask = ~bad
 
-    # Apply mask positionally to BOTH frames
     names = raw_names.iloc[keep_mask].reset_index(drop=True)
     stats = stat_df.iloc[keep_mask].reset_index(drop=True)
 
     if stat_col not in stats.columns:
         raise RuntimeError(f"Expected stat col '{stat_col}' not found. Columns={list(stats.columns)}")
 
-    # Convert values
     if mode == "float1":
         vals = stats[stat_col].map(safe_float)
     else:
@@ -363,7 +471,6 @@ def leader_from_name_and_stats(
 
     vals_num = pd.to_numeric(vals, errors="coerce")
 
-    # Remove NaNs while keeping positional linkage
     good_idx = vals_num.notna().to_numpy()
     names = names.iloc[good_idx].reset_index(drop=True)
     vals_num = vals_num.iloc[good_idx].reset_index(drop=True)
@@ -371,16 +478,14 @@ def leader_from_name_and_stats(
     if vals_num.empty:
         raise RuntimeError(f"All values are NaN/empty for '{stat_col}' after cleaning.")
 
-    # Use argmax (position-based) — avoids idxmax index label weirdness
     best_pos = int(vals_num.values.argmax())
     who = normalize_spaces(names.iloc[best_pos])
     best_val = vals_num.iloc[best_pos]
-
     return who, best_val
 
 
 # -----------------------------
-# PUBLIC API (router uses this)
+# PUBLIC API
 # -----------------------------
 def extract_team_leaders(team_url: str) -> Dict[str, Tuple[str, str, str, str]]:
     tables = fetch_tables(team_url)
@@ -388,7 +493,6 @@ def extract_team_leaders(team_url: str) -> Dict[str, Tuple[str, str, str, str]]:
 
     missing = [k for k in ["pass", "rush", "rec", "def"] if k not in pairs]
     if missing:
-        # Provide some debugging help: count tables and show first few column sets
         sample_cols = []
         for i, t in enumerate(tables[:8]):
             try:
@@ -400,46 +504,72 @@ def extract_team_leaders(team_url: str) -> Dict[str, Tuple[str, str, str, str]]:
 
     name_pass, pass_stats = pairs["pass"]
     name_rush, rush_stats = pairs["rush"]
-    name_rec, rec_stats = pairs["rec"]
-    name_def, def_stats = pairs["def"]
+    name_rec,  rec_stats  = pairs["rec"]
+    name_def,  def_stats  = pairs["def"]
 
     pass_stats = flatten_columns(pass_stats)
     rush_stats = flatten_columns(rush_stats)
-    rec_stats = flatten_columns(rec_stats)
-    def_stats = flatten_columns(def_stats)
+    rec_stats  = flatten_columns(rec_stats)
+    def_stats  = flatten_columns(def_stats)
 
     # offense columns
     col_pass_yds = pick_yds_col(pass_stats)
-    col_pass_td = pick_td_col(pass_stats)
+    col_pass_td  = pick_td_col(pass_stats)
     col_pass_int = pick_int_col(pass_stats)
 
     col_rush_yds = pick_yds_col(rush_stats)
-    col_rush_td = pick_td_col(rush_stats)
+    col_rush_td  = pick_td_col(rush_stats)
 
-    col_rec_yds = pick_yds_col(rec_stats)
-    col_rec_td = pick_td_col(rec_stats)
+    col_rec_yds  = pick_yds_col(rec_stats)
+    col_rec_td   = pick_td_col(rec_stats)
 
     # defense columns
-    col_sack = pick_sack_col(def_stats)
-    col_tackles = pick_tackles_col(def_stats)
-    col_def_int = pick_int_col(def_stats)
+    col_sack     = pick_sack_col(def_stats)
+    col_tackles  = pick_tackles_col(def_stats)
+    col_def_int  = pick_int_col(def_stats)
 
-    # leaders
-    pass_yds_who, pass_yds = leader_from_name_and_stats(name_pass, pass_stats, col_pass_yds, "int")
-    pass_td_who, pass_td = leader_from_name_and_stats(name_pass, pass_stats, col_pass_td, "int")
-    pass_int_who, pass_int = leader_from_name_and_stats(name_pass, pass_stats, col_pass_int, "int")
+    # NEW: use player column inside stat table if present (prevents wrong defensive names)
+    pass_player_col = find_player_column(pass_stats)
+    rush_player_col = find_player_column(rush_stats)
+    rec_player_col  = find_player_column(rec_stats)
+    def_player_col  = find_player_column(def_stats)
 
-    rush_yds_who, rush_yds = leader_from_name_and_stats(name_rush, rush_stats, col_rush_yds, "int")
-    rush_td_who, rush_td = leader_from_name_and_stats(name_rush, rush_stats, col_rush_td, "int")
+    # Passing
+    if pass_player_col:
+        pass_yds_who, pass_yds = leader_from_stats_table(pass_stats, pass_player_col, col_pass_yds, "int")
+        pass_td_who,  pass_td  = leader_from_stats_table(pass_stats, pass_player_col, col_pass_td,  "int")
+        pass_int_who, pass_int = leader_from_stats_table(pass_stats, pass_player_col, col_pass_int, "int")
+    else:
+        pass_yds_who, pass_yds = leader_from_name_and_stats(name_pass, pass_stats, col_pass_yds, "int")
+        pass_td_who,  pass_td  = leader_from_name_and_stats(name_pass, pass_stats, col_pass_td,  "int")
+        pass_int_who, pass_int = leader_from_name_and_stats(name_pass, pass_stats, col_pass_int, "int")
 
-    rec_yds_who, rec_yds = leader_from_name_and_stats(name_rec, rec_stats, col_rec_yds, "int")
-    rec_td_who, rec_td = leader_from_name_and_stats(name_rec, rec_stats, col_rec_td, "int")
+    # Rushing
+    if rush_player_col:
+        rush_yds_who, rush_yds = leader_from_stats_table(rush_stats, rush_player_col, col_rush_yds, "int")
+        rush_td_who,  rush_td  = leader_from_stats_table(rush_stats, rush_player_col, col_rush_td,  "int")
+    else:
+        rush_yds_who, rush_yds = leader_from_name_and_stats(name_rush, rush_stats, col_rush_yds, "int")
+        rush_td_who,  rush_td  = leader_from_name_and_stats(name_rush, rush_stats, col_rush_td,  "int")
 
-    sack_who, sack_val = leader_from_name_and_stats(name_def, def_stats, col_sack, "float1")
-    tackles_who, tackles_val = leader_from_name_and_stats(name_def, def_stats, col_tackles, "int")
-    int_who, int_val = leader_from_name_and_stats(name_def, def_stats, col_def_int, "int")
+    # Receiving
+    if rec_player_col:
+        rec_yds_who, rec_yds = leader_from_stats_table(rec_stats, rec_player_col, col_rec_yds, "int")
+        rec_td_who,  rec_td  = leader_from_stats_table(rec_stats, rec_player_col, col_rec_td,  "int")
+    else:
+        rec_yds_who, rec_yds = leader_from_name_and_stats(name_rec, rec_stats, col_rec_yds, "int")
+        rec_td_who,  rec_td  = leader_from_name_and_stats(name_rec, rec_stats, col_rec_td,  "int")
 
-    # router expects: (rank, name, team, value) — team blank is fine
+    # Defense (this is the critical fix)
+    if def_player_col:
+        sack_who, sack_val     = leader_from_stats_table(def_stats, def_player_col, col_sack,    "float1")
+        tackles_who, tackles_val = leader_from_stats_table(def_stats, def_player_col, col_tackles, "int")
+        int_who, int_val       = leader_from_stats_table(def_stats, def_player_col, col_def_int, "int")
+    else:
+        sack_who, sack_val     = leader_from_name_and_stats(name_def, def_stats, col_sack,    "float1")
+        tackles_who, tackles_val = leader_from_name_and_stats(name_def, def_stats, col_tackles, "int")
+        int_who, int_val       = leader_from_name_and_stats(name_def, def_stats, col_def_int, "int")
+
     leaders: Dict[str, Tuple[str, str, str, str]] = {
         "Passing Yards": ("1", pass_yds_who, "", str(int(pass_yds))),
         "Passing TDs": ("1", pass_td_who, "", str(int(pass_td))),
@@ -484,14 +614,6 @@ def draw_leaders_grid_poster(
     cols: int = 2,
     rows: int = 4,
 ):
-    """
-    sections is what your router builds:
-      (label, leaders[cat][0], leaders[cat][1], leaders[cat][2])
-
-    We accept either:
-      - (label, rank, name, value)  OR
-      - (label, rank, name, team, value)
-    """
     W, H = 1400, 2400
     img = Image.new("RGB", (W, H), (12, 12, 16))
     d = ImageDraw.Draw(img)
