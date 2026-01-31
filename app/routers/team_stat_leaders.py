@@ -13,7 +13,14 @@ router = APIRouter(prefix="/team-stat-leaders", tags=["Team Stat Leaders"])
 
 class TeamStatLeadersRequest(BaseModel):
     team: str
-    team_url: str
+
+    # NEW: allow selecting regular vs postseason by year + seasontype
+    year: Optional[int] = None          # e.g. 2025
+    seasontype: Optional[int] = None    # 2 regular, 3 postseason
+
+    # Backward compatibility: older client can still send a full team_url
+    team_url: Optional[str] = None
+
     outdir: Optional[str] = None
 
 
@@ -24,10 +31,30 @@ def generate_team_stat_leaders(req: TeamStatLeadersRequest) -> Dict[str, Any]:
         outdir = req.outdir or "/tmp"
         os.makedirs(outdir, exist_ok=True)
 
-        leaders = team_gen.extract_team_leaders(req.team_url)
+        # Prefer server-built URL (stable + consistent)
+        year = None
+        seasontype = None
+
+        if req.year is not None and req.seasontype is not None:
+            year = int(req.year)
+            seasontype = int(req.seasontype)
+            team_url = team_gen.build_team_stats_url(team, year, seasontype)
+        elif req.team_url:
+            team_url = req.team_url
+        else:
+            raise RuntimeError("Missing inputs: provide (year + seasontype) OR team_url.")
+
+        # Scrape
+        leaders = team_gen.extract_team_leaders(team_url)
 
         updated = datetime.now().strftime("%b %d, %Y • %I:%M %p")
-        subtitle = f"{team} • Updated {updated}"
+        scope_label = "Regular Season" if seasontype == 2 else "Postseason" if seasontype == 3 else None
+        if year and scope_label:
+            subtitle = f"{team} • {year} {scope_label} • Updated {updated}"
+        elif year:
+            subtitle = f"{team} • {year} • Updated {updated}"
+        else:
+            subtitle = f"{team} • Updated {updated}"
 
         offense_order = [
             "Passing Yards",
@@ -40,7 +67,6 @@ def generate_team_stat_leaders(req: TeamStatLeadersRequest) -> Dict[str, Any]:
         ]
         defense_order = ["Sacks", "Tackles", "Interceptions"]
 
-        # Validate categories exist before building sections
         required = offense_order + defense_order
         missing = [k for k in required if k not in leaders]
         if missing:
@@ -52,6 +78,7 @@ def generate_team_stat_leaders(req: TeamStatLeadersRequest) -> Dict[str, Any]:
         out_off = os.path.join(outdir, f"{team.lower()}_offense_leaders.png")
         out_def = os.path.join(outdir, f"{team.lower()}_defense_leaders.png")
 
+        # Keep poster design identical
         team_gen.draw_leaders_grid_poster(
             out_off,
             "Offensive Statistical Leaders",
@@ -71,8 +98,13 @@ def generate_team_stat_leaders(req: TeamStatLeadersRequest) -> Dict[str, Any]:
         )
 
         ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-        key_off = f"team_leaders/{team}/{team.lower()}_offense_{ts}.png"
-        key_def = f"team_leaders/{team}/{team.lower()}_defense_{ts}.png"
+
+        # Separate keys so regular vs postseason never collide
+        year_part = str(year) if year else "year?"
+        st_part = f"st{seasontype}" if seasontype in (2, 3) else "st?"
+
+        key_off = f"team_leaders/{team}/{year_part}/{st_part}/{team.lower()}_offense_{ts}.png"
+        key_def = f"team_leaders/{team}/{year_part}/{st_part}/{team.lower()}_defense_{ts}.png"
 
         url_off = upload_file_return_url(out_off, key_off)
         url_def = upload_file_return_url(out_def, key_def)
@@ -80,6 +112,9 @@ def generate_team_stat_leaders(req: TeamStatLeadersRequest) -> Dict[str, Any]:
         return {
             "ok": True,
             "team": team,
+            "year": year,
+            "seasontype": seasontype,
+            "team_url": team_url,
             "images": [url_off, url_def],
             "keys": [key_off, key_def],
         }
@@ -91,7 +126,9 @@ def generate_team_stat_leaders(req: TeamStatLeadersRequest) -> Dict[str, Any]:
             detail={
                 "error": str(e),
                 "type": e.__class__.__name__,
-                "team": req.team,
-                "team_url": req.team_url,
+                "team": getattr(req, "team", None),
+                "team_url": getattr(req, "team_url", None),
+                "year": getattr(req, "year", None),
+                "seasontype": getattr(req, "seasontype", None),
             },
         )
