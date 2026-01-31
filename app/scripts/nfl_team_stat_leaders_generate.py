@@ -1,26 +1,22 @@
 # app/scripts/nfl_team_stat_leaders_generate.py
 # ==========================================================
-# ESPN Team Leaders scraper (Render/GitHub Actions safe)
+# ESPN Team Stat Leaders (Render-safe, CI-safe)
 #
-# Key fix:
-#   DO NOT pair separate [name] + [stats] tables.
-#   Instead scrape ESPN "table pages" where PLAYER + stats are in the SAME table:
-#     .../table/passing
-#     .../table/rushing
-#     .../table/receiving
-#     .../table/defensive
-#
-# Supports:
-#   season + seasontype (2=regular, 3=postseason)
-#   scope: "regular" | "playoffs" | "both"
+# Fixes:
+# - Wrong defensive player names (by using correct table views per stat)
+# - "Could not detect pass/rush/rec/def" (we don't rely on guessing all tables)
+# - "Could not find yards" (robust column pickers)
 #
 # Public API used by router:
-#   extract_team_leaders(team_url, season, seasontype) -> leaders dict
+#   leaders = extract_team_leaders(team="SEA", season=2025, seasontype=2)
+#
+# Poster renderer stays IDENTICAL below.
 # ==========================================================
 
 import os
 import re
 import time
+import argparse
 from io import StringIO
 from typing import Dict, List, Optional, Tuple, Union
 
@@ -34,15 +30,15 @@ HEADERS = {
         "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
         "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
     ),
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9",
     "Cache-Control": "no-cache",
     "Pragma": "no-cache",
 }
 
-# ----------------------------------------------------------
-# helpers
-# ----------------------------------------------------------
+# -----------------------------
+# text / number helpers
+# -----------------------------
 def normalize_spaces(s: str) -> str:
     s = str(s)
     s = re.sub(r"[\u200b\u200c\u200d\ufeff]", "", s)
@@ -78,9 +74,7 @@ def safe_int(x) -> Optional[int]:
 def flatten_columns(df: pd.DataFrame) -> pd.DataFrame:
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = [
-            " ".join(
-                [str(x).strip() for x in tup if str(x).strip() and "Unnamed" not in str(x)]
-            ).strip()
+            " ".join([str(x).strip() for x in tup if str(x).strip() and "Unnamed" not in str(x)]).strip()
             for tup in df.columns
         ]
     df.columns = [str(c).strip() for c in df.columns]
@@ -93,91 +87,87 @@ def _norm_col(c: str) -> str:
     return c
 
 
-def _strip_position(player_cell: str) -> str:
+# -----------------------------
+# robust column picker
+# -----------------------------
+def pick_col(df: pd.DataFrame, kind: str) -> str:
     """
-    ESPN player cells often look like: 'Ernest Jones IV LB' or 'Devon Witherspoon CB'
-    We keep it as-is (your posters show name + position which is fine),
-    but normalize whitespace.
+    kind: "name" | "yds" | "td" | "int" | "sack" | "tackles"
     """
-    return normalize_spaces(player_cell)
-
-
-def _looks_like_player_col(colname: str) -> bool:
-    c = _norm_col(colname)
-    return c in {"player", "name"} or "player" in c
-
-
-def _pick_col(df: pd.DataFrame, wants: List[str]) -> str:
-    """
-    Pick the best matching stat column from df.
-    wants are tokens like ["yds"], ["td"], ["int"], ["sack"], ["tot","tkl","tack"]
-    """
+    df = flatten_columns(df.copy())
     cols = list(df.columns)
     low = [_norm_col(c) for c in cols]
 
-    # exact-first
-    for w in wants:
-        w = _norm_col(w)
+    def first_where(pred):
         for i, c in enumerate(low):
-            if c == w:
+            if pred(c):
                 return cols[i]
+        return None
 
-    # token-based
-    for w in wants:
-        w = _norm_col(w)
-        for i, c in enumerate(low):
-            if re.search(rf"\b{re.escape(w)}\b", c):
-                return cols[i]
+    if kind == "name":
+        # ESPN usually has Name or PLAYER, but sometimes it's "Name  " etc.
+        c = first_where(lambda c: c == "name" or c == "player" or c.startswith("name"))
+        if c:
+            return c
+        # fallback: first column
+        return cols[0]
 
-    # contains-based
-    for w in wants:
-        w = _norm_col(w)
-        for i, c in enumerate(low):
-            if w in c:
-                return cols[i]
+    if kind == "yds":
+        c = first_where(lambda c: c == "yds")
+        if c:
+            return c
+        c = first_where(lambda c: "yds" in c and "yds/g" not in c and "/g" not in c)
+        if c:
+            return c
+        c = first_where(lambda c: "yds" in c)
+        if c:
+            return c
+        raise RuntimeError(f"Could not find YDS column. Columns={cols}")
 
-    raise RuntimeError(f"Could not find stat col for {wants}. Have columns: {cols}")
+    if kind == "td":
+        c = first_where(lambda c: c == "td")
+        if c:
+            return c
+        c = first_where(lambda c: re.search(r"\btd\b", c) and "td%" not in c)
+        if c:
+            return c
+        raise RuntimeError(f"Could not find TD column. Columns={cols}")
+
+    if kind == "int":
+        c = first_where(lambda c: c == "int")
+        if c:
+            return c
+        c = first_where(lambda c: re.search(r"\bint\b", c) and "int%" not in c)
+        if c:
+            return c
+        c = first_where(lambda c: "interception" in c)
+        if c:
+            return c
+        raise RuntimeError(f"Could not find INT column. Columns={cols}")
+
+    if kind == "sack":
+        c = first_where(lambda c: "sack" in c)
+        if c:
+            return c
+        raise RuntimeError(f"Could not find SACK column. Columns={cols}")
+
+    if kind == "tackles":
+        # Prefer total tackles
+        for target in ["tot", "total", "tkl", "tack", "combined", "comb"]:
+            c = first_where(lambda c, t=target: c == t)
+            if c:
+                return c
+        c = first_where(lambda c: any(x in c for x in ["tot", "total", "tkl", "tack", "combined", "comb"]))
+        if c:
+            return c
+        raise RuntimeError(f"Could not find TACKLES column. Columns={cols}")
+
+    raise RuntimeError(f"Unknown kind='{kind}'")
 
 
-# ----------------------------------------------------------
-# ESPN URL building
-# ----------------------------------------------------------
-def _extract_team_name_slug(team_url: str) -> str:
-    """
-    Accepts URLs like:
-      https://www.espn.com/nfl/team/stats/_/name/sea/seattle-seahawks
-      https://www.espn.com/nfl/team/stats/_/name/sea/table//sort/interceptions/dir/desc
-      https://www.espn.com/nfl/team/stats/_/name/sea/season/2025/seasontype/3
-    Returns:
-      'sea' (the ESPN team key)
-    """
-    m = re.search(r"/name/([a-z0-9]+)/", team_url, flags=re.IGNORECASE)
-    if not m:
-        # sometimes ends right after /name/sea
-        m = re.search(r"/name/([a-z0-9]+)(?:$|[/?#])", team_url, flags=re.IGNORECASE)
-    if not m:
-        raise RuntimeError(f"Could not parse team from team_url: {team_url}")
-    return m.group(1).lower()
-
-
-def build_table_url(team_url: str, season: int, seasontype: int, table: str) -> str:
-    """
-    Canonical, stable ESPN table page URL:
-      https://www.espn.com/nfl/team/stats/_/name/sea/season/2025/seasontype/2/table/defensive
-    """
-    team_key = _extract_team_name_slug(team_url)
-    table = table.strip().lower()
-    if table not in {"passing", "rushing", "receiving", "defensive"}:
-        raise ValueError(f"Invalid table={table}")
-    return (
-        f"https://www.espn.com/nfl/team/stats/_/name/{team_key}"
-        f"/season/{int(season)}/seasontype/{int(seasontype)}/table/{table}"
-    )
-
-
-# ----------------------------------------------------------
-# fetch + read_html (CI-safe retries)
-# ----------------------------------------------------------
+# -----------------------------
+# fetching with retries
+# -----------------------------
 def fetch_html(url: str, timeout: int = 30, retries: int = 4) -> str:
     last_err = None
     session = requests.Session()
@@ -187,160 +177,206 @@ def fetch_html(url: str, timeout: int = 30, retries: int = 4) -> str:
             r = session.get(url, headers=HEADERS, timeout=timeout, allow_redirects=True)
             r.raise_for_status()
             html = r.text or ""
-
-            # ESPN sometimes returns soft-block pages; table pages should include <table
             if "<table" not in html.lower():
-                snippet = normalize_spaces(html[:400])
+                snippet = normalize_spaces(html[:500])
                 raise RuntimeError(f"ESPN HTML had no <table>. Snippet: {snippet}")
-
             return html
         except Exception as e:
             last_err = e
-            time.sleep(1.25 * attempt)
+            time.sleep(1.5 * attempt)
 
-    raise RuntimeError(f"Failed to fetch ESPN after {retries} tries. Last error: {last_err}")
+    raise RuntimeError(f"Failed to fetch ESPN page after {retries} tries: {last_err}")
 
 
-def read_best_table(url: str) -> pd.DataFrame:
+def read_tables(url: str) -> List[pd.DataFrame]:
     html = fetch_html(url)
     try:
         tables = pd.read_html(StringIO(html))
     except Exception as e:
-        raise RuntimeError(f"pd.read_html failed for url={url}. Error: {e}")
-
+        raise RuntimeError(f"pd.read_html failed for URL={url}. Ensure lxml/html5lib installed. Error: {e}")
     if not tables:
-        raise RuntimeError(f"pd.read_html returned 0 tables for url={url}")
+        raise RuntimeError(f"pd.read_html returned 0 tables for URL={url}")
+    return tables
 
-    # Pick the biggest table that contains a player/name column
-    best = None
-    best_score = -1
-    for t in tables:
-        if t is None or t.empty:
+
+# -----------------------------
+# table selection
+# ESPN team pages usually render:
+#  - a 1-col Name table
+#  - an adjacent stats table
+# We find the best pair on the page by looking for a 1-col name table
+# followed immediately by a stats table containing a needed stat column.
+# -----------------------------
+def is_name_table(df: pd.DataFrame) -> bool:
+    if df is None or df.empty:
+        return False
+    df = flatten_columns(df.copy())
+    if df.shape[1] != 1:
+        return False
+    sample = df.iloc[:10, 0].astype(str).map(normalize_spaces).tolist()
+    alpha = sum(bool(re.search(r"[A-Za-z]", s)) for s in sample)
+    return alpha >= max(2, len(sample) // 2)
+
+
+def find_pair_for_stat(tables: List[pd.DataFrame], required_stat_kind: str) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Find (name_df, stat_df) such that:
+      - name_df is 1-col name table
+      - stat_df is next table and contains the required stat column kind
+    """
+    for i in range(len(tables) - 1):
+        a = tables[i]
+        b = tables[i + 1]
+        if not is_name_table(a):
             continue
-        tt = flatten_columns(t.copy())
-        cols = list(tt.columns)
-        has_player = any(_looks_like_player_col(c) for c in cols)
-        score = (len(tt) * len(cols)) + (100000 if has_player else 0)
-        if score > best_score:
-            best = tt
-            best_score = score
+        b2 = flatten_columns(b.copy())
+        try:
+            # just validate column exists
+            _ = pick_col(b2, required_stat_kind)
+            return a, b
+        except Exception:
+            continue
 
-    if best is None or best.empty:
-        raise RuntimeError(f"No usable table found for url={url}")
+    # If not found, raise with helpful debugging
+    debug = []
+    for i, t in enumerate(tables[:10]):
+        try:
+            tt = flatten_columns(t.copy())
+            debug.append((i, list(tt.columns)))
+        except Exception:
+            debug.append((i, ["<unreadable>"]))
+    raise RuntimeError(f"Could not find name+stats pair for kind='{required_stat_kind}'. Table columns sample: {debug}")
 
-    return best
 
-
-def leader_from_single_table(
-    df: pd.DataFrame,
-    player_col: str,
-    stat_col: str,
-    mode: str,  # "int" or "float1"
+def leader_from_pair(
+    name_df: pd.DataFrame,
+    stat_df: pd.DataFrame,
+    stat_kind: str,        # "yds" | "td" | "int" | "sack" | "tackles"
+    mode: str,             # "int" | "float1"
 ) -> Tuple[str, Number]:
-    """
-    Compute leader from a single table where player + stats exist together.
-    """
-    d = df.copy()
+    name_df = flatten_columns(name_df.copy()).reset_index(drop=True)
+    stat_df = flatten_columns(stat_df.copy()).reset_index(drop=True)
 
-    # clean player col
-    players = d[player_col].astype(str).map(_strip_position)
+    n0 = min(len(name_df), len(stat_df))
+    if n0 <= 0:
+        raise RuntimeError("Empty name/stats table after trim.")
 
-    # drop team/total/etc rows just in case
-    bad = players.str.lower().str.contains(r"\b(total|team|opp|opponent)\b", na=False) | (players.str.len() == 0)
-    d = d.loc[~bad].reset_index(drop=True)
-    players = players.loc[~bad].reset_index(drop=True)
+    name_df = name_df.iloc[:n0].reset_index(drop=True)
+    stat_df = stat_df.iloc[:n0].reset_index(drop=True)
+
+    name_col = name_df.columns[0]
+    raw_names = name_df[name_col].astype(str).map(normalize_spaces)
+
+    # Drop Total/TEAM rows positionally
+    bad = (
+        raw_names.str.lower().str.contains(r"\b(total|team|opp|opponent)\b", na=False)
+        | (raw_names.str.len() == 0)
+    ).to_numpy()
+
+    keep = ~bad
+    names = raw_names.iloc[keep].reset_index(drop=True)
+    stats = stat_df.iloc[keep].reset_index(drop=True)
+
+    stat_col = pick_col(stats, stat_kind)
 
     if mode == "float1":
-        vals = d[stat_col].map(safe_float)
+        vals = stats[stat_col].map(safe_float)
     else:
-        vals = d[stat_col].map(safe_int)
+        vals = stats[stat_col].map(safe_int)
 
     vals_num = pd.to_numeric(vals, errors="coerce")
+
     good = vals_num.notna().to_numpy()
-    players = players.iloc[good].reset_index(drop=True)
+    names = names.iloc[good].reset_index(drop=True)
     vals_num = vals_num.iloc[good].reset_index(drop=True)
 
     if vals_num.empty:
-        raise RuntimeError(f"All values empty/NaN for stat_col={stat_col}")
+        raise RuntimeError(f"No valid numeric values for stat_kind='{stat_kind}' col='{stat_col}'")
 
     best_pos = int(vals_num.values.argmax())
-    return players.iloc[best_pos], vals_num.iloc[best_pos]
+    return normalize_spaces(names.iloc[best_pos]), vals_num.iloc[best_pos]
 
 
-# ----------------------------------------------------------
-# PUBLIC API
-# ----------------------------------------------------------
-def extract_team_leaders(team_url: str, season: int, seasontype: int) -> Dict[str, Tuple[str, str, str, str]]:
+# -----------------------------
+# URL builder
+# -----------------------------
+def team_stats_url(team: str, season: int, seasontype: int, table: str, sort: str) -> str:
     """
-    Returns dict:
+    Example:
+    https://www.espn.com/nfl/team/stats/_/name/sea/season/2025/seasontype/3/table/defensive%2Cdefense/sort/interceptions/dir/desc
+    """
+    team_key = team.strip().lower()
+    return (
+        f"https://www.espn.com/nfl/team/stats/_/name/{team_key}"
+        f"/season/{season}/seasontype/{seasontype}"
+        f"/table/{table}/sort/{sort}/dir/desc"
+    )
+
+
+# -----------------------------
+# MAIN PUBLIC API
+# -----------------------------
+def extract_team_leaders(team: str, season: int, seasontype: int) -> Dict[str, Tuple[str, str, str, str]]:
+    """
+    Returns dict like:
       leaders["Passing Yards"] = ("1", "Player Name", "", "1234")
     """
-    # 1) Pull each table page (stable)
-    url_pass = build_table_url(team_url, season, seasontype, "passing")
-    url_rush = build_table_url(team_url, season, seasontype, "rushing")
-    url_rec  = build_table_url(team_url, season, seasontype, "receiving")
-    url_def  = build_table_url(team_url, season, seasontype, "defensive")
+    # OFFENSE: compute multiple stats from the correct table view
+    # Passing page (sorted by passing yards so the table is definitely the passing table)
+    passing_url = team_stats_url(team, season, seasontype, table="passing", sort="passingYards")
+    rushing_url = team_stats_url(team, season, seasontype, table="rushing", sort="rushingYards")
+    receiving_url = team_stats_url(team, season, seasontype, table="receiving", sort="receivingYards")
 
-    pass_df = read_best_table(url_pass)
-    rush_df = read_best_table(url_rush)
-    rec_df  = read_best_table(url_rec)
-    def_df  = read_best_table(url_def)
+    # DEFENSE: IMPORTANT — use separate defense views so columns match
+    sacks_url = team_stats_url(team, season, seasontype, table="defensive%2Cdefense", sort="sacks")
+    tackles_url = team_stats_url(team, season, seasontype, table="defensive%2Cdefense", sort="totalTackles")
+    ints_url = team_stats_url(team, season, seasontype, table="defensive%2Cdefense", sort="interceptions")
 
-    # 2) Identify player columns
-    def pick_player_col(df: pd.DataFrame) -> str:
-        cols = list(df.columns)
-        for c in cols:
-            if _looks_like_player_col(c):
-                return c
-        # fallback: first column
-        return cols[0]
+    # Passing leaders
+    pass_tables = read_tables(passing_url)
+    name_pass, pass_stats = find_pair_for_stat(pass_tables, "yds")
+    pass_yds_who, pass_yds = leader_from_pair(name_pass, pass_stats, "yds", "int")
+    pass_td_who, pass_td = leader_from_pair(name_pass, pass_stats, "td", "int")
+    pass_int_who, pass_int = leader_from_pair(name_pass, pass_stats, "int", "int")
 
-    p_player = pick_player_col(pass_df)
-    r_player = pick_player_col(rush_df)
-    rc_player = pick_player_col(rec_df)
-    d_player = pick_player_col(def_df)
+    # Rushing leaders
+    rush_tables = read_tables(rushing_url)
+    name_rush, rush_stats = find_pair_for_stat(rush_tables, "yds")
+    rush_yds_who, rush_yds = leader_from_pair(name_rush, rush_stats, "yds", "int")
+    rush_td_who, rush_td = leader_from_pair(name_rush, rush_stats, "td", "int")
 
-    # 3) Pick stat columns robustly
-    col_pass_yds = _pick_col(pass_df, ["yds"])
-    col_pass_td  = _pick_col(pass_df, ["td"])
-    col_pass_int = _pick_col(pass_df, ["int"])
+    # Receiving leaders
+    rec_tables = read_tables(receiving_url)
+    name_rec, rec_stats = find_pair_for_stat(rec_tables, "yds")
+    rec_yds_who, rec_yds = leader_from_pair(name_rec, rec_stats, "yds", "int")
+    rec_td_who, rec_td = leader_from_pair(name_rec, rec_stats, "td", "int")
 
-    col_rush_yds = _pick_col(rush_df, ["yds"])
-    col_rush_td  = _pick_col(rush_df, ["td"])
+    # Defense — sacks
+    sack_tables = read_tables(sacks_url)
+    name_def_s, def_s = find_pair_for_stat(sack_tables, "sack")
+    sack_who, sack_val = leader_from_pair(name_def_s, def_s, "sack", "float1")
 
-    col_rec_yds  = _pick_col(rec_df, ["yds"])
-    col_rec_td   = _pick_col(rec_df, ["td"])
+    # Defense — tackles
+    tack_tables = read_tables(tackles_url)
+    name_def_t, def_t = find_pair_for_stat(tack_tables, "tackles")
+    tackles_who, tackles_val = leader_from_pair(name_def_t, def_t, "tackles", "int")
 
-    col_sack     = _pick_col(def_df, ["sack", "sacks"])
-    col_tackles  = _pick_col(def_df, ["tot", "tkl", "tack", "combined"])
-    col_def_int  = _pick_col(def_df, ["int", "ints", "interceptions"])
-
-    # 4) Compute leaders (single-table = correct names)
-    pass_yds_who, pass_yds = leader_from_single_table(pass_df, p_player, col_pass_yds, "int")
-    pass_td_who, pass_td   = leader_from_single_table(pass_df, p_player, col_pass_td, "int")
-    pass_int_who, pass_int = leader_from_single_table(pass_df, p_player, col_pass_int, "int")
-
-    rush_yds_who, rush_yds = leader_from_single_table(rush_df, r_player, col_rush_yds, "int")
-    rush_td_who, rush_td   = leader_from_single_table(rush_df, r_player, col_rush_td, "int")
-
-    rec_yds_who, rec_yds   = leader_from_single_table(rec_df, rc_player, col_rec_yds, "int")
-    rec_td_who, rec_td     = leader_from_single_table(rec_df, rc_player, col_rec_td, "int")
-
-    sack_who, sack_val     = leader_from_single_table(def_df, d_player, col_sack, "float1")
-    tack_who, tack_val     = leader_from_single_table(def_df, d_player, col_tackles, "int")
-    int_who, int_val       = leader_from_single_table(def_df, d_player, col_def_int, "int")
+    # Defense — interceptions
+    int_tables = read_tables(ints_url)
+    name_def_i, def_i = find_pair_for_stat(int_tables, "int")
+    int_who, int_val = leader_from_pair(name_def_i, def_i, "int", "int")
 
     leaders: Dict[str, Tuple[str, str, str, str]] = {
-        "Passing Yards": ("1", str(pass_yds_who), "", str(int(pass_yds))),
-        "Passing TDs": ("1", str(pass_td_who), "", str(int(pass_td))),
-        "Interceptions Thrown": ("1", str(pass_int_who), "", str(int(pass_int))),
-        "Rushing Yards": ("1", str(rush_yds_who), "", str(int(rush_yds))),
-        "Rushing TDs": ("1", str(rush_td_who), "", str(int(rush_td))),
-        "Receiving Yards": ("1", str(rec_yds_who), "", str(int(rec_yds))),
-        "Receiving TDs": ("1", str(rec_td_who), "", str(int(rec_td))),
-        "Sacks": ("1", str(sack_who), "", f"{float(sack_val):.1f}"),
-        "Tackles": ("1", str(tack_who), "", str(int(tack_val))),
-        "Interceptions": ("1", str(int_who), "", str(int(int_val))),
+        "Passing Yards": ("1", pass_yds_who, "", str(int(pass_yds))),
+        "Passing TDs": ("1", pass_td_who, "", str(int(pass_td))),
+        "Interceptions Thrown": ("1", pass_int_who, "", str(int(pass_int))),
+        "Rushing Yards": ("1", rush_yds_who, "", str(int(rush_yds))),
+        "Rushing TDs": ("1", rush_td_who, "", str(int(rush_td))),
+        "Receiving Yards": ("1", rec_yds_who, "", str(int(rec_yds))),
+        "Receiving TDs": ("1", rec_td_who, "", str(int(rec_td))),
+        "Sacks": ("1", sack_who, "", f"{float(sack_val):.1f}"),
+        "Tackles": ("1", tackles_who, "", str(int(tackles_val))),
+        "Interceptions": ("1", int_who, "", str(int(int_val))),
     }
     return leaders
 
@@ -442,3 +478,57 @@ def draw_leaders_grid_poster(
 
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
     img.save(out_path, "PNG")
+
+
+# ==========================================================
+# LOCAL TEST HARNESS (Desktop)
+# ==========================================================
+def _build_sections(leaders: Dict[str, Tuple[str, str, str, str]]):
+    offense_order = [
+        "Passing Yards",
+        "Passing TDs",
+        "Interceptions Thrown",
+        "Rushing Yards",
+        "Rushing TDs",
+        "Receiving Yards",
+        "Receiving TDs",
+    ]
+    defense_order = ["Sacks", "Tackles", "Interceptions"]
+
+    offense_sections = [(cat, leaders[cat][0], leaders[cat][1], leaders[cat][3]) for cat in offense_order]
+    defense_sections = [(cat, leaders[cat][0], leaders[cat][1], leaders[cat][3]) for cat in defense_order]
+    return offense_sections, defense_sections
+
+
+def cli_main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--team", required=True, help="Team abbreviation like SEA")
+    ap.add_argument("--season", type=int, required=True, help="Season year like 2025")
+    ap.add_argument("--seasontype", type=int, choices=[2, 3], required=True, help="2=regular, 3=postseason")
+    ap.add_argument("--outdir", default=".", help="Output directory")
+    args = ap.parse_args()
+
+    team = args.team.upper().strip()
+    outdir = args.outdir
+    os.makedirs(outdir, exist_ok=True)
+
+    leaders = extract_team_leaders(team=team, season=args.season, seasontype=args.seasontype)
+
+    label = "Regular Season" if args.seasontype == 2 else "Postseason"
+    subtitle = f"{team} • {label} • Updated {time.strftime('%b %d, %Y • %I:%M %p')}"
+
+    off_sections, def_sections = _build_sections(leaders)
+
+    out_off = os.path.join(outdir, f"{team.lower()}_{args.season}_{args.seasontype}_offense.png")
+    out_def = os.path.join(outdir, f"{team.lower()}_{args.season}_{args.seasontype}_defense.png")
+
+    draw_leaders_grid_poster(out_off, "Offensive Statistical Leaders", subtitle, off_sections, cols=2, rows=4)
+    draw_leaders_grid_poster(out_def, "Defensive Statistical Leaders", subtitle, def_sections, cols=1, rows=3)
+
+    print("Wrote:")
+    print(" -", out_off)
+    print(" -", out_def)
+
+
+if __name__ == "__main__":
+    cli_main()
