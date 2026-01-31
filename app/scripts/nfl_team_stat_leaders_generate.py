@@ -1,16 +1,18 @@
 # app/scripts/nfl_team_stat_leaders_generate.py
 # ==========================================================
-# Render-safe ESPN Team Leaders scraper (FIXES "could not find tot")
+# Render-safe ESPN Team Leaders scraper
 #
-# Keeps your router API:
+# Public API used by router:
 #   leaders = extract_team_leaders(team_url)
 #   leaders["Sacks"] -> (rank, player, team, value)
 #
-# Keeps your existing poster renderer:
-#   draw_leaders_grid_poster(...)  <-- keep your old one below
+# Poster renderer must remain identical:
+#   draw_leaders_grid_poster(...)
 # ==========================================================
 
+import os
 import re
+import time
 from io import StringIO
 from typing import Dict, List, Optional, Tuple, Union
 
@@ -19,11 +21,16 @@ import requests
 
 Number = Union[int, float]
 
+# ESPN can be touchy in CI. These headers + retries help a lot.
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
         "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-    )
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Cache-Control": "no-cache",
+    "Pragma": "no-cache",
 }
 
 # -----------------------------
@@ -45,7 +52,6 @@ def safe_float(x) -> Optional[float]:
     if s == "" or s.lower() in {"nan", "none", "-"}:
         return None
     s = s.replace(",", "")
-    # keep digits, dot, minus
     s = re.sub(r"[^\d\.\-]", "", s)
     if s in {"", "-", "."}:
         return None
@@ -65,19 +71,66 @@ def safe_int(x) -> Optional[int]:
 def flatten_columns(df: pd.DataFrame) -> pd.DataFrame:
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = [
-            " ".join([str(x).strip() for x in tup if str(x).strip() and "Unnamed" not in str(x)]).strip()
+            " ".join(
+                [str(x).strip() for x in tup if str(x).strip() and "Unnamed" not in str(x)]
+            ).strip()
             for tup in df.columns
         ]
     df.columns = [str(c).strip() for c in df.columns]
     return df
 
 
+# -----------------------------
+# fetch + read_html with retries
+# -----------------------------
+def fetch_html(team_url: str, timeout: int = 30, retries: int = 3) -> str:
+    """
+    ESPN may intermittently return blocked pages / partial HTML in CI.
+    We retry with backoff and validate we got something table-like.
+    """
+    last_err = None
+    session = requests.Session()
+
+    for attempt in range(1, retries + 1):
+        try:
+            r = session.get(team_url, headers=HEADERS, timeout=timeout)
+            r.raise_for_status()
+            html = r.text or ""
+
+            # Basic sanity checks: ESPN stat pages should contain tables somewhere.
+            # If we don't see any table markers, we may have been served a blocked/redirect page.
+            if "<table" not in html.lower():
+                # Sometimes ESPN loads via scripts; but team stats pages typically still include tables.
+                # Provide a helpful error snippet.
+                snippet = normalize_spaces(html[:400])
+                raise RuntimeError(f"ESPN HTML contained no <table>. Snippet: {snippet}")
+
+            return html
+
+        except Exception as e:
+            last_err = e
+            # exponential-ish backoff
+            sleep_s = 1.5 * attempt
+            time.sleep(sleep_s)
+
+    raise RuntimeError(f"Failed to fetch ESPN page after {retries} tries: {last_err}")
+
+
 def fetch_tables(team_url: str) -> List[pd.DataFrame]:
-    r = requests.get(team_url, headers=HEADERS, timeout=30)
-    r.raise_for_status()
-    return pd.read_html(StringIO(r.text))
+    html = fetch_html(team_url)
+    try:
+        tables = pd.read_html(StringIO(html))
+    except Exception as e:
+        # Add context to make CI failures obvious
+        raise RuntimeError(f"pd.read_html failed. Ensure lxml/html5lib are installed. Error: {e}")
+    if not tables:
+        raise RuntimeError("pd.read_html returned 0 tables (unexpected for ESPN team stats page).")
+    return tables
 
 
+# -----------------------------
+# detect name tables + classify stat tables
+# -----------------------------
 def is_name_table(df: pd.DataFrame) -> bool:
     if df is None or df.empty:
         return False
@@ -85,17 +138,10 @@ def is_name_table(df: pd.DataFrame) -> bool:
     if df.shape[1] != 1:
         return False
     col = df.columns[0]
-    sample = df[col].astype(str).head(8).tolist()
+    sample = df[col].astype(str).head(10).tolist()
     alpha = sum(bool(re.search(r"[A-Za-z]", s)) for s in sample)
-    return alpha >= max(1, len(sample) // 2)
-
-
-def clean_name_series(name_s: pd.Series) -> pd.Series:
-    s = name_s.astype(str).map(normalize_spaces)
-    bad = s.str.lower().str.contains(r"\b(total|team|opp|opponent)\b", na=False)
-    s = s[~bad].copy()
-    s = s[s.str.len() > 0]
-    return s.reset_index(drop=True)
+    # Must have enough alpha strings to be a name list
+    return alpha >= max(2, len(sample) // 2)
 
 
 def classify_stats_table(df: pd.DataFrame) -> Optional[str]:
@@ -104,35 +150,41 @@ def classify_stats_table(df: pd.DataFrame) -> Optional[str]:
     """
     if df is None or df.empty:
         return None
+
     df = flatten_columns(df.copy())
     cols = [str(c).strip().lower() for c in df.columns]
+    cols_norm = [re.sub(r"\s+", " ", c) for c in cols]
 
-    # defense signature: tackles + sacks + ints often show up together
+    def has_any(substrs: List[str]) -> bool:
+        return any(any(s in c for c in cols_norm) for s in substrs)
+
+    # Defense signature
+    # ESPN defense tables often have: SOLO, AST, TOT, SACK, INT, FF ...
     def_hits = 0
-    for k in ["sack", "int", "solo", "ast", "tot", "tkl", "tack", "ff"]:
-        def_hits += 1 if any(k in c for c in cols) else 0
-    if def_hits >= 3 and any("sack" in c for c in cols):
+    for k in ["solo", "ast", "tot", "tkl", "tack", "sack", "int", "ff"]:
+        def_hits += 1 if has_any([k]) else 0
+    if def_hits >= 3 and has_any(["sack"]):
         return "def"
 
-    # passing: cmp/att/qbr/rtg
+    # Passing signature: CMP, ATT, YDS, TD, INT, RTG/QBR
     pass_hits = 0
-    for k in ["cmp", "att", "pct", "yds", "td", "int", "rtg", "qbr"]:
-        pass_hits += 1 if any(k == c or k in c for c in cols) else 0
-    if pass_hits >= 5 and (any("cmp" in c for c in cols) or any("rtg" in c or "qbr" in c for c in cols)):
+    for k in ["cmp", "att", "yds", "td", "int", "rtg", "qbr", "pct"]:
+        pass_hits += 1 if has_any([k]) else 0
+    if pass_hits >= 5 and (has_any(["cmp"]) or has_any(["rtg", "qbr"])):
         return "pass"
 
-    # receiving: rec/tgts
+    # Receiving signature: REC, TGTS, YDS, TD
     rec_hits = 0
-    for k in ["rec", "tgts", "yds", "avg", "td", "lng"]:
-        rec_hits += 1 if any(k == c or k in c for c in cols) else 0
-    if rec_hits >= 4 and any("rec" == c or "rec" in c for c in cols):
+    for k in ["rec", "tgts", "yds", "td", "avg", "lng"]:
+        rec_hits += 1 if has_any([k]) else 0
+    if rec_hits >= 4 and has_any(["rec"]):
         return "rec"
 
-    # rushing: att/yds/avg/td/lng (without passing-only cols)
+    # Rushing signature: ATT, YDS, AVG, TD, LNG (but not CMP/RTG)
     rush_hits = 0
     for k in ["att", "yds", "avg", "td", "lng"]:
-        rush_hits += 1 if any(k == c or k in c for c in cols) else 0
-    if rush_hits >= 4 and not any("cmp" in c for c in cols) and not any("rtg" in c or "qbr" in c for c in cols):
+        rush_hits += 1 if has_any([k]) else 0
+    if rush_hits >= 4 and not has_any(["cmp", "rtg", "qbr"]):
         return "rush"
 
     return None
@@ -141,11 +193,11 @@ def classify_stats_table(df: pd.DataFrame) -> Optional[str]:
 def find_named_table_pairs(tables: List[pd.DataFrame]) -> Dict[str, Tuple[pd.DataFrame, pd.DataFrame]]:
     """
     ESPN often renders: [names] [stats] [names] [stats] ...
-    We detect stat tables by signature and then grab the closest name table right before it.
+    We detect stat tables by signature and then grab the closest name table before it.
     """
     pairs: Dict[str, Tuple[pd.DataFrame, pd.DataFrame]] = {}
     name_idx = set()
-    cats: Dict[int, str] = {}
+    cat_at: Dict[int, str] = {}
 
     for i, t in enumerate(tables):
         try:
@@ -153,18 +205,21 @@ def find_named_table_pairs(tables: List[pd.DataFrame]) -> Dict[str, Tuple[pd.Dat
                 name_idx.add(i)
             cat = classify_stats_table(t)
             if cat:
-                cats[i] = cat
+                cat_at[i] = cat
         except Exception:
             continue
 
-    for i, cat in cats.items():
+    for stat_i, cat in cat_at.items():
         if cat in pairs:
             continue
-        j = i - 1
+
+        # find nearest preceding name table
+        j = stat_i - 1
         while j >= 0:
             if j in name_idx:
-                if len(tables[j]) >= 2 and len(tables[i]) >= 2:
-                    pairs[cat] = (tables[j], tables[i])
+                # Both should have at least 2 rows to be meaningful
+                if len(tables[j]) >= 2 and len(tables[stat_i]) >= 2:
+                    pairs[cat] = (tables[j], tables[stat_i])
                 break
             j -= 1
 
@@ -181,14 +236,13 @@ def _norm_col(c: str) -> str:
 
 
 def pick_td_col(df: pd.DataFrame) -> str:
-    # TD must be EXACT token, not LTD / TD%
     df = flatten_columns(df.copy())
     cols = list(df.columns)
     low = [_norm_col(c) for c in cols]
+
     for i, c in enumerate(low):
         if c == "td":
             return cols[i]
-    # token fallback (avoid ltd/td%)
     for i, c in enumerate(low):
         if re.search(r"\btd\b", c) and "td%" not in c and "ltd" not in c:
             return cols[i]
@@ -196,10 +250,10 @@ def pick_td_col(df: pd.DataFrame) -> str:
 
 
 def pick_int_col(df: pd.DataFrame) -> str:
-    # INT must be exact token, not INT%
     df = flatten_columns(df.copy())
     cols = list(df.columns)
     low = [_norm_col(c) for c in cols]
+
     for i, c in enumerate(low):
         if c == "int":
             return cols[i]
@@ -213,8 +267,9 @@ def pick_yds_col(df: pd.DataFrame) -> str:
     df = flatten_columns(df.copy())
     cols = list(df.columns)
     low = [_norm_col(c) for c in cols]
+
     for i, c in enumerate(low):
-        if c == "yds" or c.endswith(" yds") or re.fullmatch(r"yds", c):
+        if c == "yds":
             return cols[i]
     for i, c in enumerate(low):
         if "yds" in c:
@@ -226,8 +281,9 @@ def pick_sack_col(df: pd.DataFrame) -> str:
     df = flatten_columns(df.copy())
     cols = list(df.columns)
     low = [_norm_col(c) for c in cols]
+
     for i, c in enumerate(low):
-        if "sack" in c:  # sack, sacks
+        if "sack" in c:
             return cols[i]
     raise RuntimeError(f"Could not find SACK column. Columns={cols}")
 
@@ -241,18 +297,15 @@ def pick_tackles_col(df: pd.DataFrame) -> str:
     cols = list(df.columns)
     low = [_norm_col(c) for c in cols]
 
-    # preferred exacts
     for target in ["tot", "tkl", "tack", "combined", "comb", "total tackles", "tot tackles"]:
         for i, c in enumerate(low):
             if c == target:
                 return cols[i]
 
-    # token-based (safe-ish)
     for i, c in enumerate(low):
         if re.search(r"\b(tot|tkl|tack)\b", c):
             return cols[i]
 
-    # broad contains
     for i, c in enumerate(low):
         if "tack" in c or "tkl" in c or "total" in c:
             return cols[i]
@@ -260,63 +313,70 @@ def pick_tackles_col(df: pd.DataFrame) -> str:
     raise RuntimeError(f"Could not find tackles column (TOT/TKL/etc). Columns={cols}")
 
 
+# -----------------------------
+# leader extraction (fixes missing values)
+# -----------------------------
 def leader_from_name_and_stats(
     name_df: pd.DataFrame,
     stat_df: pd.DataFrame,
     stat_col: str,
-    mode: str,
+    mode: str,  # "int" or "float1"
 ) -> Tuple[str, Number]:
+    """
+    Returns: (player_name, best_value)
+    Ensures name/stat alignment is purely positional (CI-safe).
+    """
     name_df = flatten_columns(name_df.copy()).reset_index(drop=True)
     stat_df = flatten_columns(stat_df.copy()).reset_index(drop=True)
 
-    # ESPN sometimes gives slightly different row counts between the name table and stat table.
-    # Force them to the same length BEFORE any masking.
-    n0 = min(len(name_df), len(stat_df))
-    if n0 <= 0:
-        raise RuntimeError("Empty name/stats table.")
+    if name_df.empty or stat_df.empty:
+        raise RuntimeError("Empty name or stats table.")
 
+    # Trim to same length first (positional)
+    n0 = min(len(name_df), len(stat_df))
     name_df = name_df.iloc[:n0].reset_index(drop=True)
     stat_df = stat_df.iloc[:n0].reset_index(drop=True)
 
     name_col = name_df.columns[0]
-
-    # Build a POSITIONAL bad-mask (no index alignment issues)
     raw_names = name_df[name_col].astype(str).map(normalize_spaces)
-    bad_mask = (
+
+    # Build a boolean keep mask positionally
+    bad = (
         raw_names.str.lower().str.contains(r"\b(total|team|opp|opponent)\b", na=False)
         | (raw_names.str.len() == 0)
-    ).to_numpy()  # <-- critical
+    ).to_numpy()
 
-    # Apply mask positionally on BOTH
-    keep = ~bad_mask
-    name_keep = raw_names.iloc[keep].reset_index(drop=True)
-    stat_keep = stat_df.iloc[keep].reset_index(drop=True)
+    keep_mask = ~bad
 
-    # Clean names (after positional filtering)
-    name_keep = name_keep[name_keep.str.len() > 0].reset_index(drop=True)
+    # Apply mask positionally to BOTH frames
+    names = raw_names.iloc[keep_mask].reset_index(drop=True)
+    stats = stat_df.iloc[keep_mask].reset_index(drop=True)
 
-    # Now re-align again just in case cleaning changed counts
-    n = min(len(name_keep), len(stat_keep))
-    name_keep = name_keep.iloc[:n].reset_index(drop=True)
-    stat_keep = stat_keep.iloc[:n].reset_index(drop=True)
+    if stat_col not in stats.columns:
+        raise RuntimeError(f"Expected stat col '{stat_col}' not found. Columns={list(stats.columns)}")
 
-    if stat_col not in stat_keep.columns:
-        raise RuntimeError(f"Expected stat col '{stat_col}' not found. Columns={list(stat_keep.columns)}")
-
+    # Convert values
     if mode == "float1":
-        vals = stat_keep[stat_col].map(safe_float)
+        vals = stats[stat_col].map(safe_float)
     else:
-        vals = stat_keep[stat_col].map(safe_int)
+        vals = stats[stat_col].map(safe_int)
 
     vals_num = pd.to_numeric(vals, errors="coerce")
-    if vals_num.isna().all():
-        raise RuntimeError(f"All values are NaN for '{stat_col}'")
 
-    best_i = int(vals_num.idxmax())
-    who = normalize_spaces(name_keep.iloc[best_i])
-    best_val = vals_num.iloc[best_i]
+    # Remove NaNs while keeping positional linkage
+    good_idx = vals_num.notna().to_numpy()
+    names = names.iloc[good_idx].reset_index(drop=True)
+    vals_num = vals_num.iloc[good_idx].reset_index(drop=True)
+
+    if vals_num.empty:
+        raise RuntimeError(f"All values are NaN/empty for '{stat_col}' after cleaning.")
+
+    # Use argmax (position-based) — avoids idxmax index label weirdness
+    best_pos = int(vals_num.values.argmax())
+    who = normalize_spaces(names.iloc[best_pos])
+    best_val = vals_num.iloc[best_pos]
+
     return who, best_val
-
 
 
 # -----------------------------
@@ -328,7 +388,15 @@ def extract_team_leaders(team_url: str) -> Dict[str, Tuple[str, str, str, str]]:
 
     missing = [k for k in ["pass", "rush", "rec", "def"] if k not in pairs]
     if missing:
-        raise RuntimeError(f"Could not detect ESPN tables: {missing}")
+        # Provide some debugging help: count tables and show first few column sets
+        sample_cols = []
+        for i, t in enumerate(tables[:8]):
+            try:
+                tt = flatten_columns(t.copy())
+                sample_cols.append((i, list(tt.columns)[:8]))
+            except Exception:
+                sample_cols.append((i, ["<unreadable>"]))
+        raise RuntimeError(f"Could not detect ESPN tables: {missing}. Table samples: {sample_cols}")
 
     name_pass, pass_stats = pairs["pass"]
     name_rush, rush_stats = pairs["rush"]
@@ -340,7 +408,7 @@ def extract_team_leaders(team_url: str) -> Dict[str, Tuple[str, str, str, str]]:
     rec_stats = flatten_columns(rec_stats)
     def_stats = flatten_columns(def_stats)
 
-    # offense columns (strict)
+    # offense columns
     col_pass_yds = pick_yds_col(pass_stats)
     col_pass_td = pick_td_col(pass_stats)
     col_pass_int = pick_int_col(pass_stats)
@@ -351,7 +419,7 @@ def extract_team_leaders(team_url: str) -> Dict[str, Tuple[str, str, str, str]]:
     col_rec_yds = pick_yds_col(rec_stats)
     col_rec_td = pick_td_col(rec_stats)
 
-    # defense columns (robust)
+    # defense columns
     col_sack = pick_sack_col(def_stats)
     col_tackles = pick_tackles_col(def_stats)
     col_def_int = pick_int_col(def_stats)
@@ -371,7 +439,7 @@ def extract_team_leaders(team_url: str) -> Dict[str, Tuple[str, str, str, str]]:
     tackles_who, tackles_val = leader_from_name_and_stats(name_def, def_stats, col_tackles, "int")
     int_who, int_val = leader_from_name_and_stats(name_def, def_stats, col_def_int, "int")
 
-    # router expects: (rank, name, team, value)
+    # router expects: (rank, name, team, value) — team blank is fine
     leaders: Dict[str, Tuple[str, str, str, str]] = {
         "Passing Yards": ("1", pass_yds_who, "", str(int(pass_yds))),
         "Passing TDs": ("1", pass_td_who, "", str(int(pass_td))),
@@ -387,17 +455,12 @@ def extract_team_leaders(team_url: str) -> Dict[str, Tuple[str, str, str, str]]:
     return leaders
 
 
-# ----------------------------------------------------------
-# IMPORTANT:
-# KEEP YOUR EXISTING draw_leaders_grid_poster BELOW THIS LINE
-# Do NOT change it if you like the style.
 # ==========================================================
-# Compatibility wrapper
-# Your router expects team_gen.draw_leaders_grid_poster(...)
+# KEEP YOUR EXISTING draw_leaders_grid_poster BELOW THIS LINE
+# (Unchanged poster design)
 # ==========================================================
 
 from PIL import Image, ImageDraw, ImageFont
-import os
 
 def _load_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
     candidates = [
@@ -456,7 +519,6 @@ def draw_leaders_grid_poster(
         t = str(text)
         if d.textlength(t, font=font) <= max_w:
             return t
-        # simple ellipsis trim
         while len(t) > 3 and d.textlength(t + "…", font=font) > max_w:
             t = t[:-1]
         return t + "…"
@@ -465,9 +527,7 @@ def draw_leaders_grid_poster(
         if i >= cols * rows:
             break
 
-        # normalize section tuple
         label = sec[0]
-        # accept 4-tuple or 5-tuple
         if len(sec) == 4:
             _, rank, name, value = sec
             team = ""
@@ -477,11 +537,9 @@ def draw_leaders_grid_poster(
         cx = grid_x0 + (i % cols) * cell_w
         cy = grid_y0 + (i // cols) * cell_h
 
-        # cell padding
         px = 26
         py = 22
 
-        # divider lines
         if (i % cols) != 0:
             d.line([(cx, cy + 18), (cx, cy + cell_h - 18)], fill=(35, 35, 48), width=2)
         if (i // cols) != 0:
@@ -502,8 +560,3 @@ def draw_leaders_grid_poster(
 
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
     img.save(out_path, "PNG")
-
-# ----------------------------------------------------------
-
-# def draw_leaders_grid_poster(...):
-#     (leave your current implementation here unchanged)
