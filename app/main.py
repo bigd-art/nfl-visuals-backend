@@ -18,6 +18,10 @@ from app.services.storage_supabase import (
 from app.routers.team_stat_leaders import router as team_stat_leaders_router
 from app.routers.stat_leaders import router as stat_leaders_router
 
+from app.routers.standings import router as standings_router
+app.include_router(standings_router)
+
+
 app = FastAPI()
 app.include_router(stat_leaders_router)
 app.include_router(team_stat_leaders_router)
