@@ -1,19 +1,11 @@
 #!/usr/bin/env python3
 import argparse
-import os
 import sys
 from dataclasses import dataclass
 from typing import Any, Dict, List, Tuple, Optional
 
 import requests
 from PIL import Image, ImageDraw, ImageFont
-
-# Optional Supabase (only used when uploading)
-try:
-    from supabase import create_client
-except Exception:
-    create_client = None
-
 
 USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -23,45 +15,35 @@ USER_AGENT = (
 
 SITE_API = "https://site.api.espn.com/apis/v2/sports/football/nfl/standings"
 
-# ✅ HARDCODED DIVISIONS (East/North/South/West) by ESPN displayName
 TEAM_TO_DIV: Dict[str, str] = {
-    # AFC East
     "Buffalo Bills": "East",
     "Miami Dolphins": "East",
     "New England Patriots": "East",
     "New York Jets": "East",
-    # AFC North
     "Baltimore Ravens": "North",
     "Cincinnati Bengals": "North",
     "Cleveland Browns": "North",
     "Pittsburgh Steelers": "North",
-    # AFC South
     "Houston Texans": "South",
     "Indianapolis Colts": "South",
     "Jacksonville Jaguars": "South",
     "Tennessee Titans": "South",
-    # AFC West
     "Denver Broncos": "West",
     "Kansas City Chiefs": "West",
     "Las Vegas Raiders": "West",
     "Los Angeles Chargers": "West",
-
-    # NFC East
     "Dallas Cowboys": "East",
     "New York Giants": "East",
     "Philadelphia Eagles": "East",
     "Washington Commanders": "East",
-    # NFC North
     "Chicago Bears": "North",
     "Detroit Lions": "North",
     "Green Bay Packers": "North",
     "Minnesota Vikings": "North",
-    # NFC South
     "Atlanta Falcons": "South",
     "Carolina Panthers": "South",
     "New Orleans Saints": "South",
     "Tampa Bay Buccaneers": "South",
-    # NFC West
     "Arizona Cardinals": "West",
     "Los Angeles Rams": "West",
     "San Francisco 49ers": "West",
@@ -76,17 +58,18 @@ def hardcoded_div(team_name: str) -> str:
 class TeamRow:
     team_id: str
     team_name: str
-    division: str  # East/North/South/West (or "")
+    division: str
     w: int
     l: int
     t: int
+    espn_seed: Optional[int] = None
 
 
 def get_json(season: int) -> dict:
     r = requests.get(
         SITE_API,
         params={"season": season, "type": 2},
-        headers={"User-Agent": USER_AGENT, "Accept-Language": "en-US,en;q=0.9"},
+        headers={"User-Agent": USER_AGENT},
         timeout=25,
     )
     r.raise_for_status()
@@ -98,23 +81,6 @@ def to_int(v: Any) -> int:
         return int(float(str(v).strip()))
     except Exception:
         return 0
-
-
-def normalize_division_name(name: str) -> str:
-    if not name:
-        return ""
-    n = name.strip().lower()
-    if "east" in n:
-        return "East"
-    if "north" in n:
-        return "North"
-    if "south" in n:
-        return "South"
-    if "west" in n:
-        return "West"
-    if n in ("east", "north", "south", "west"):
-        return n.title()
-    return ""
 
 
 def extract_stats(entry: dict) -> Tuple[int, int, int]:
@@ -132,84 +98,51 @@ def extract_stats(entry: dict) -> Tuple[int, int, int]:
     return w, l, t
 
 
-def sort_rows(rows: List[TeamRow]) -> List[TeamRow]:
-    return sorted(rows, key=lambda r: (-r.w, r.l, -r.t, r.team_name))
-
-
-def build_division_map(conf_obj: dict) -> Dict[str, str]:
-    mapping: Dict[str, str] = {}
-    for div in conf_obj.get("children", []) or []:
-        div_name = (div.get("shortName") or div.get("name") or "").strip()
-        div_short = normalize_division_name(div_name)
-        standings = (div.get("standings") or {}).get("entries") or []
-        for e in standings:
-            team = e.get("team") or {}
-            tid = str(team.get("id") or "").strip()
-            if tid:
-                mapping[tid] = div_short
-    return mapping
+def extract_seed(entry: dict) -> Optional[int]:
+    for s in entry.get("stats", []) or []:
+        name = (s.get("name") or "").lower()
+        if name in ("seed", "playoffseed", "conferencerank"):
+            val = s.get("value", s.get("displayValue"))
+            seed = to_int(val)
+            if seed > 0:
+                return seed
+    return None
 
 
 def extract_conferences(data: dict) -> Dict[str, List[TeamRow]]:
     conferences: Dict[str, List[TeamRow]] = {"AFC": [], "NFC": []}
 
     for conf in data.get("children", []) or []:
-        conf_abbr = (conf.get("abbreviation") or conf.get("shortName") or conf.get("name") or "").strip().upper()
+        conf_abbr = (conf.get("abbreviation") or "").upper()
         if conf_abbr not in ("AFC", "NFC"):
             continue
 
-        div_map = build_division_map(conf)
-        conf_entries = (conf.get("standings") or {}).get("entries") or []
-
+        entries = (conf.get("standings") or {}).get("entries") or []
         rows: List[TeamRow] = []
-        if conf_entries:
-            for e in conf_entries:
-                team = e.get("team") or {}
-                tid = str(team.get("id") or "").strip()
-                name = str(team.get("displayName") or team.get("name") or "").strip()
-                w, l, t = extract_stats(e)
-                rows.append(
-                    TeamRow(
-                        team_id=tid,
-                        team_name=name,
-                        division=div_map.get(tid, ""),  # may be blank -> we hardcode in render
-                        w=w,
-                        l=l,
-                        t=t,
-                    )
+
+        for e in entries:
+            team = e.get("team") or {}
+            name = str(team.get("displayName") or "").strip()
+            tid = str(team.get("id") or "").strip()
+            w, l, t = extract_stats(e)
+            seed = extract_seed(e)
+
+            rows.append(
+                TeamRow(
+                    team_id=tid,
+                    team_name=name,
+                    division=hardcoded_div(name),
+                    w=w,
+                    l=l,
+                    t=t,
+                    espn_seed=seed,
                 )
-            conferences[conf_abbr] = sort_rows(rows)
-            continue
+            )
 
-        fallback_rows: List[TeamRow] = []
-        for div in conf.get("children", []) or []:
-            div_name = (div.get("shortName") or div.get("name") or "").strip()
-            div_short = normalize_division_name(div_name)
-            div_entries = (div.get("standings") or {}).get("entries") or []
-            for e in div_entries:
-                team = e.get("team") or {}
-                tid = str(team.get("id") or "").strip()
-                name = str(team.get("displayName") or team.get("name") or "").strip()
-                w, l, t = extract_stats(e)
-                fallback_rows.append(
-                    TeamRow(
-                        team_id=tid,
-                        team_name=name,
-                        division=div_short,
-                        w=w,
-                        l=l,
-                        t=t,
-                    )
-                )
+        if any(r.espn_seed is not None for r in rows):
+            rows = sorted(rows, key=lambda r: r.espn_seed if r.espn_seed else 999)
 
-        seen = set()
-        uniq: List[TeamRow] = []
-        for r in fallback_rows:
-            if r.team_id and r.team_id not in seen:
-                seen.add(r.team_id)
-                uniq.append(r)
-
-        conferences[conf_abbr] = sort_rows(uniq)
+        conferences[conf_abbr] = rows
 
     return conferences
 
@@ -236,7 +169,6 @@ def render_conference_poster(season: int, conferences: Dict[str, List[TeamRow]],
     card = (18, 22, 30)
     grid = (40, 48, 66)
     text = (235, 238, 245)
-    muted = (170, 176, 190)
 
     img = Image.new("RGB", (width, height), bg)
     draw = ImageDraw.Draw(img)
@@ -245,15 +177,12 @@ def render_conference_poster(season: int, conferences: Dict[str, List[TeamRow]],
     section_font = get_font(28)
     header_font = get_font(20)
     row_font = get_font(22)
-    small_font = get_font(18)
 
     pad = 34
     y = pad
 
     draw.text((pad, y), f"NFL Standings {season} — By Conference", fill=text, font=title_font)
-    y += 60
-    draw.text((pad, y), "Source: ESPN site API", fill=muted, font=small_font)
-    y += 26
+    y += 70
 
     headers = ["#", "TEAM", "DIV", "W", "L", "T"]
     col_fracs = [0.06, 0.68, 0.10, 0.06, 0.05, 0.05]
@@ -275,15 +204,8 @@ def render_conference_poster(season: int, conferences: Dict[str, List[TeamRow]],
 
         x = pad
         for i, h in enumerate(headers):
-            if i in (0, 1):
-                draw.text((x + 8, y + 6), h, fill=muted, font=header_font)
-            else:
-                tw = draw.textlength(h, font=header_font)
-                draw.text((x + px[i] - 8 - tw, y + 6), h, fill=muted, font=header_font)
-
+            draw.text((x + 8, y + 6), h, fill=text, font=header_font)
             x += px[i]
-            if i != len(headers) - 1:
-                draw.line((x, y + 5, x, y + header_h - 5), fill=grid, width=1)
 
         y += header_h + 4
 
@@ -292,27 +214,17 @@ def render_conference_poster(season: int, conferences: Dict[str, List[TeamRow]],
             if y > height - 24:
                 break
 
-            fill = (14, 18, 26) if (idx % 2 == 0) else (12, 16, 22)
-            draw.rounded_rectangle((pad, y, width - pad, y + row_h), radius=8, fill=fill)
+            draw.rounded_rectangle((pad, y, width - pad, y + row_h), radius=8, fill=(14, 18, 26))
 
             seed = str(idx + 1)
-
-            # ✅ If ESPN division missing, use hardcoded division
-            div = r.division or hardcoded_div(r.team_name)
+            div = r.division
 
             values = [seed, r.team_name, div, str(r.w), str(r.l), str(r.t)]
 
             x = pad
             for c_i, val in enumerate(values):
-                if c_i in (0, 1):
-                    draw.text((x + 8, y + 4), val, fill=text, font=row_font)
-                else:
-                    tw = draw.textlength(val, font=row_font)
-                    draw.text((x + px[c_i] - 8 - tw, y + 4), val, fill=text, font=row_font)
-
+                draw.text((x + 8, y + 4), val, fill=text, font=row_font)
                 x += px[c_i]
-                if c_i != len(values) - 1:
-                    draw.line((x, y + 4, x, y + row_h - 4), fill=grid, width=1)
 
             y += row_h + 3
 
@@ -324,82 +236,21 @@ def render_conference_poster(season: int, conferences: Dict[str, List[TeamRow]],
     img.save(out_path)
 
 
-def upload_png_to_supabase(local_path: str, storage_path: str) -> str:
-    """
-    Uploads to Supabase Storage and returns a PUBLIC URL.
-    Requires env vars:
-      SUPABASE_URL
-      SUPABASE_SERVICE_ROLE_KEY
-      SUPABASE_BUCKET
-    """
-    if create_client is None:
-        raise RuntimeError("supabase package not installed. Add it to requirements.txt")
-
-    url = os.getenv("SUPABASE_URL", "").strip()
-    key = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
-    bucket = os.getenv("SUPABASE_BUCKET", "").strip()
-
-    if not url or not key or not bucket:
-        raise RuntimeError("Missing SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY / SUPABASE_BUCKET env vars")
-
-    sb = create_client(url, key)
-    storage = sb.storage.from_(bucket)
-
-    with open(local_path, "rb") as f:
-        # Upsert so reruns overwrite the same file
-        storage.upload(
-            storage_path,
-            f,
-            file_options={"content-type": "image/png", "upsert": "true"},
-        )
-
-    # Public URL (bucket should be public)
-    pub = storage.get_public_url(storage_path)
-    # supabase-py sometimes returns a dict or a string depending on version
-    if isinstance(pub, dict):
-        return pub.get("publicUrl") or pub.get("publicURL") or pub.get("data", {}).get("publicUrl") or str(pub)
-    return str(pub)
-
-
-def generate_standings_conference_png(season: int, out_path: str) -> str:
-    data = get_json(season)
-    conferences = extract_conferences(data)
-    render_conference_poster(season, conferences, out_path)
-    return out_path
-
-
-def generate_and_upload_standings_conference(season: int) -> str:
-    """
-    Generates PNG to /tmp then uploads to Supabase.
-    Returns the public URL.
-    """
-    local_path = f"/tmp/standings_conference_{season}.png"
-    generate_standings_conference_png(season, local_path)
-    storage_path = f"standings/{season}/standings_conference.png"
-    return upload_png_to_supabase(local_path, storage_path)
-
-
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--season", type=int, required=True)
     ap.add_argument("--out", type=str, default="standings_conference.png")
-    ap.add_argument("--upload", action="store_true", help="Upload to Supabase and print public URL")
     args = ap.parse_args()
 
-    if args.upload:
-        url = generate_and_upload_standings_conference(args.season)
-        print(url)
-        return
-
-    generate_standings_conference_png(args.season, args.out)
-    print(f"✅ Saved: {args.out}")
+    data = get_json(args.season)
+    conferences = extract_conferences(data)
+    render_conference_poster(args.season, conferences, args.out)
 
 
 if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        print("\nStopped.")
         sys.exit(130)
     except Exception as e:
         print(f"❌ Error: {e}")
