@@ -31,9 +31,6 @@ TEAM_ALT = "|".join(sorted(TEAM_ABBRS, key=len, reverse=True))
 TEAM_END_RE = re.compile(rf"^(?P<name>.*?)(?P<team>{TEAM_ALT})(?P<trail>[\s\W]*)$")
 
 
-# ----------------------------
-# String normalization (fix glued TEAM)
-# ----------------------------
 def normalize_spaces(s: str) -> str:
     s = str(s)
     s = re.sub(r"[\u200b\u200c\u200d\ufeff]", "", s)  # zero-width chars
@@ -54,9 +51,6 @@ def enforce_space_before_team(s: str) -> str:
     return f"{name_part} {team}".strip()
 
 
-# ----------------------------
-# ESPN URLs (seasontype: 2 regular, 3 postseason)
-# ----------------------------
 def build_urls(season: int, seasontype: int):
     base_player = f"https://www.espn.com/nfl/stats/player/_/season/{season}/seasontype/{seasontype}"
     base_rush = f"https://www.espn.com/nfl/stats/player/_/stat/rushing/season/{season}/seasontype/{seasontype}"
@@ -64,11 +58,7 @@ def build_urls(season: int, seasontype: int):
     base_def = f"https://www.espn.com/nfl/stats/player/_/view/defense/season/{season}/seasontype/{seasontype}"
 
     return {
-        "Passing Yards": (
-            base_player,
-            ["YDS", "PASS YDS", "Pass YDS"],
-            "int",
-        ),
+        "Passing Yards": (base_player, ["YDS", "PASS YDS", "Pass YDS"], "int"),
         "Passing TDs": (
             f"{base_player}/table/passing/sort/passingTouchdowns/dir/desc",
             ["TD", "PASS TD", "Pass TD"],
@@ -79,21 +69,13 @@ def build_urls(season: int, seasontype: int):
             ["INT", "Interceptions"],
             "int",
         ),
-        "Rushing Yards": (
-            base_rush,
-            ["YDS", "RUSH YDS", "Rush YDS"],
-            "int",
-        ),
+        "Rushing Yards": (base_rush, ["YDS", "RUSH YDS", "Rush YDS"], "int"),
         "Rushing TDs": (
             f"{base_rush}/table/rushing/sort/rushingTouchdowns/dir/desc",
             ["TD", "RUSH TD", "Rush TD"],
             "int",
         ),
-        "Receiving Yards": (
-            base_rec,
-            ["YDS", "REC YDS", "Rec YDS"],
-            "int",
-        ),
+        "Receiving Yards": (base_rec, ["YDS", "REC YDS", "Rec YDS"], "int"),
         "Receiving TDs": (
             f"{base_rec}/table/receiving/sort/receivingTouchdowns/dir/desc",
             ["TD", "REC TD", "Rec TD"],
@@ -117,9 +99,6 @@ def build_urls(season: int, seasontype: int):
     }
 
 
-# ----------------------------
-# Table parsing helpers
-# ----------------------------
 def flatten_columns(df: pd.DataFrame) -> pd.DataFrame:
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = [
@@ -264,11 +243,10 @@ def topN_from_url(url: str, stat_candidates: List[str], mode: str) -> List[Tuple
     return out
 
 
-# ----------------------------
-# Poster drawing (NO FOOTER)
-# ----------------------------
 def load_font(size: int, bold: bool = False):
+    # ✅ Added Ubuntu fonts for GitHub Actions
     candidates = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         "/System/Library/Fonts/Supplemental/Arial Bold.ttf" if bold else "/System/Library/Fonts/Supplemental/Arial.ttf",
         "/Library/Fonts/Arial Bold.ttf" if bold else "/Library/Fonts/Arial.ttf",
         "/System/Library/Fonts/Supplemental/Helvetica Bold.ttf" if bold else "/System/Library/Fonts/Supplemental/Helvetica.ttf",
@@ -433,4 +411,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
