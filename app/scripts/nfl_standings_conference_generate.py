@@ -208,7 +208,10 @@ def extract_conferences(data: dict) -> Dict[str, List[TeamRow]]:
             # If most teams have a seed, sort by that seed; otherwise preserve API order
             non_null = sum(1 for s in seeds if isinstance(s, int) and s > 0)
             if non_null >= max(4, int(0.8 * len(rows))):
-                rows = sorted(rows, key=lambda r: (r.espn_seed if r.espn_seed is not None else 999))
+                rows = sorted(
+                    rows,
+                    key=lambda r: (r.espn_seed if r.espn_seed is not None else 999),
+                )
 
             conferences[conf_abbr] = rows
             continue
@@ -249,9 +252,9 @@ def extract_conferences(data: dict) -> Dict[str, List[TeamRow]]:
 
 def get_font(size: int) -> ImageFont.FreeTypeFont:
     candidates = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",  # ✅ Ubuntu/GHA
         "/System/Library/Fonts/Supplemental/Arial.ttf",
         "/Library/Fonts/Arial.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
     ]
     for p in candidates:
         try:
@@ -282,7 +285,6 @@ def render_conference_poster(season: int, conferences: Dict[str, List[TeamRow]],
     pad = 34
     y = pad
 
-    # ✅ No "Source: ESPN site API" line anymore
     draw.text((pad, y), f"NFL Standings {season} — By Conference", fill=text, font=title_font)
     y += 70
 
@@ -327,10 +329,7 @@ def render_conference_poster(season: int, conferences: Dict[str, List[TeamRow]],
             draw.rounded_rectangle((pad, y, width - pad, y + row_h), radius=8, fill=fill)
 
             seed = str(idx + 1)
-
-            # ✅ hardcode DIV if ESPN mapping is blank
             div = r.division or hardcoded_div(r.team_name)
-
             values = [seed, r.team_name, div, str(r.w), str(r.l), str(r.t)]
 
             x = pad
@@ -364,7 +363,6 @@ def generate_standings_conference_png(season: int, out_path: str) -> str:
 
 def generate_and_upload_standings_conference(season: int) -> str:
     """
-    This is the function your router imports.
     Generates the PNG to /tmp and uploads to Supabase via upload_file_return_url().
     Returns public URL.
     """
