@@ -4,7 +4,7 @@ import re
 import argparse
 from io import StringIO
 from datetime import datetime
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union, Dict
 
 import requests
 import pandas as pd
@@ -30,12 +30,29 @@ TEAM_ABBRS = {
 TEAM_ALT = "|".join(sorted(TEAM_ABBRS, key=len, reverse=True))
 TEAM_END_RE = re.compile(rf"^(?P<name>.*?)(?P<team>{TEAM_ALT})(?P<trail>[\s\W]*)$")
 
+# slug, display title, short title
+STAT_CONFIG = [
+    ("passing_yards", "Passing Yards", "Passing Yards"),
+    ("passing_tds", "Passing TDs", "Passing TDs"),
+    ("interceptions_thrown", "Interceptions Thrown", "Interceptions Thrown"),
+    ("rushing_yards", "Rushing Yards", "Rushing Yards"),
+    ("rushing_tds", "Rushing TDs", "Rushing TDs"),
+    ("receiving_yards", "Receiving Yards", "Receiving Yards"),
+    ("receiving_tds", "Receiving TDs", "Receiving TDs"),
+    ("sacks", "Sacks", "Sacks"),
+    ("tackles", "Tackles", "Tackles"),
+    ("interceptions_defense", "Interceptions (Defense)", "Interceptions"),
+]
 
+
+# ----------------------------
+# String normalization
+# ----------------------------
 def normalize_spaces(s: str) -> str:
     s = str(s)
-    s = re.sub(r"[\u200b\u200c\u200d\ufeff]", "", s)  # zero-width chars
+    s = re.sub(r"[\u200b\u200c\u200d\ufeff]", "", s)
     s = s.replace("\u00a0", " ").replace("\u2009", " ").replace("\u202f", " ")
-    s = s.replace("\u00ad", "")  # soft hyphen
+    s = s.replace("\u00ad", "")
     s = re.sub(r"\s+", " ", s).strip()
     return s
 
@@ -51,6 +68,9 @@ def enforce_space_before_team(s: str) -> str:
     return f"{name_part} {team}".strip()
 
 
+# ----------------------------
+# ESPN URLs
+# ----------------------------
 def build_urls(season: int, seasontype: int):
     base_player = f"https://www.espn.com/nfl/stats/player/_/season/{season}/seasontype/{seasontype}"
     base_rush = f"https://www.espn.com/nfl/stats/player/_/stat/rushing/season/{season}/seasontype/{seasontype}"
@@ -58,7 +78,11 @@ def build_urls(season: int, seasontype: int):
     base_def = f"https://www.espn.com/nfl/stats/player/_/view/defense/season/{season}/seasontype/{seasontype}"
 
     return {
-        "Passing Yards": (base_player, ["YDS", "PASS YDS", "Pass YDS"], "int"),
+        "Passing Yards": (
+            base_player,
+            ["YDS", "PASS YDS", "Pass YDS"],
+            "int",
+        ),
         "Passing TDs": (
             f"{base_player}/table/passing/sort/passingTouchdowns/dir/desc",
             ["TD", "PASS TD", "Pass TD"],
@@ -69,13 +93,21 @@ def build_urls(season: int, seasontype: int):
             ["INT", "Interceptions"],
             "int",
         ),
-        "Rushing Yards": (base_rush, ["YDS", "RUSH YDS", "Rush YDS"], "int"),
+        "Rushing Yards": (
+            base_rush,
+            ["YDS", "RUSH YDS", "Rush YDS"],
+            "int",
+        ),
         "Rushing TDs": (
             f"{base_rush}/table/rushing/sort/rushingTouchdowns/dir/desc",
             ["TD", "RUSH TD", "Rush TD"],
             "int",
         ),
-        "Receiving Yards": (base_rec, ["YDS", "REC YDS", "Rec YDS"], "int"),
+        "Receiving Yards": (
+            base_rec,
+            ["YDS", "REC YDS", "Rec YDS"],
+            "int",
+        ),
         "Receiving TDs": (
             f"{base_rec}/table/receiving/sort/receivingTouchdowns/dir/desc",
             ["TD", "REC TD", "Rec TD"],
@@ -99,6 +131,9 @@ def build_urls(season: int, seasontype: int):
     }
 
 
+# ----------------------------
+# Table parsing helpers
+# ----------------------------
 def flatten_columns(df: pd.DataFrame) -> pd.DataFrame:
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = [
@@ -243,8 +278,10 @@ def topN_from_url(url: str, stat_candidates: List[str], mode: str) -> List[Tuple
     return out
 
 
+# ----------------------------
+# Drawing
+# ----------------------------
 def load_font(size: int, bold: bool = False):
-    # ✅ Added Ubuntu fonts for GitHub Actions
     candidates = [
         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         "/System/Library/Fonts/Supplemental/Arial Bold.ttf" if bold else "/System/Library/Fonts/Supplemental/Arial.ttf",
@@ -265,70 +302,113 @@ def fmt_value(val: Number, mode: str) -> str:
     return str(int(val))
 
 
-def draw_poster(
+def draw_single_stat_poster(
     out_path: str,
-    title: str,
+    poster_title: str,
+    stat_title: str,
     subtitle: str,
-    sections: List[Tuple[str, List[Tuple[int, str, Number]], str]],
-    cols: int,
-    rows: int,
-    height: int,
-    sub_size: int,
-    head_size: int,
-    row_size: int,
-    line_h: int,
-    y_start_offset: int,
+    items: List[Tuple[int, str, Number]],
+    mode: str,
 ):
-    W, H = 1400, height
+    W, H = 1080, 1920
     img = Image.new("RGB", (W, H), (12, 12, 16))
     d = ImageDraw.Draw(img)
 
-    title_font = load_font(56, bold=True)
-    sub_font = load_font(sub_size, bold=False)
-    head_font = load_font(head_size, bold=True)
-    row_font = load_font(row_size, bold=False)
+    title_font = load_font(52, bold=True)
+    stat_font = load_font(34, bold=True)
+    sub_font = load_font(24, bold=False)
+    header_font = load_font(22, bold=True)
+    row_font = load_font(28, bold=False)
 
-    d.text((60, 40), title, font=title_font, fill=(245, 245, 245))
-    d.text((60, 112), subtitle, font=sub_font, fill=(180, 180, 190))
+    text = (245, 245, 245)
+    muted = (180, 180, 190)
+    card_fill = (20, 20, 28)
+    outline = (45, 45, 60)
+    grid = (40, 48, 66)
 
-    left = 60
-    top = 180
-    gap_x = 40
-    gap_y = 35
-    box_w = (W - left * 2 - gap_x * (cols - 1)) // cols
-    box_h = (H - top - 80 - gap_y * (rows - 1)) // rows
+    d.text((50, 40), poster_title, font=title_font, fill=text)
+    d.text((50, 110), stat_title, font=stat_font, fill=(220, 220, 230))
+    d.text((50, 160), subtitle, font=sub_font, fill=muted)
 
-    for idx, (sec_title, items, mode) in enumerate(sections):
-        c = idx % cols
-        r = idx // cols
-        x0 = left + c * (box_w + gap_x)
-        y0 = top + r * (box_h + gap_y)
-        x1 = x0 + box_w
-        y1 = y0 + box_h
+    x0, y0, x1, y1 = 50, 240, W - 50, H - 60
+    d.rounded_rectangle([x0, y0, x1, y1], radius=24, fill=card_fill, outline=outline, width=2)
 
+    header_y = y0 + 16
+    d.text((x0 + 24, header_y), "RK", font=header_font, fill=muted)
+    d.text((x0 + 110, header_y), "PLAYER", font=header_font, fill=muted)
+    value_label = stat_title.upper()
+    tw = d.textlength(value_label, font=header_font)
+    d.text((x1 - 24 - tw, header_y), value_label, font=header_font, fill=muted)
+
+    d.line((x0 + 20, header_y + 34, x1 - 20, header_y + 34), fill=grid, width=2)
+
+    y = header_y + 54
+    row_h = 135
+
+    for rank, display_name, val in items:
         d.rounded_rectangle(
-            [x0, y0, x1, y1],
-            radius=22,
-            fill=(20, 20, 28),
-            outline=(45, 45, 60),
-            width=2,
+            [x0 + 16, y, x1 - 16, y + row_h - 10],
+            radius=16,
+            fill=(14, 18, 26),
+            outline=(35, 42, 58),
+            width=1,
         )
-        d.text((x0 + 18, y0 + 14), sec_title, font=head_font, fill=(240, 240, 245))
 
-        y = y0 + y_start_offset
-        for rank, display_name, val in items:
-            left_txt = f"{rank:>2}. {display_name}"
-            d.text((x0 + 18, y), left_txt, font=row_font, fill=(210, 210, 220))
+        d.text((x0 + 28, y + 18), str(rank), font=row_font, fill=text)
 
-            val_txt = fmt_value(val, mode)
-            tw = d.textlength(val_txt, font=row_font)
-            d.text((x1 - 18 - tw, y), val_txt, font=row_font, fill=(210, 210, 220))
+        player_text = display_name
+        d.text((x0 + 110, y + 18), player_text, font=row_font, fill=text)
 
-            y += line_h
-            if y > y1 - 18:
-                break
+        val_txt = fmt_value(val, mode)
+        val_w = d.textlength(val_txt, font=row_font)
+        d.text((x1 - 30 - val_w, y + 18), val_txt, font=row_font, fill=text)
+
+        y += row_h
+        if y > y1 - 40:
+            break
 
     img.save(out_path, "PNG")
+
+
+# ----------------------------
+# Generation helpers
+# ----------------------------
+def build_stat_sections(season: int, seasontype: int) -> Dict[str, Tuple[str, List[Tuple[int, str, Number]], str]]:
+    urls = build_urls(season, seasontype)
+    out: Dict[str, Tuple[str, List[Tuple[int, str, Number]], str]] = {}
+
+    for slug, espn_title, short_title in STAT_CONFIG:
+        url, cand, mode = urls[espn_title]
+        items = topN_from_url(url, cand, mode)
+        out[slug] = (short_title, items, mode)
+
+    return out
+
+
+def generate_all_stat_leader_posters(season: int, seasontype: int, outdir: str) -> Dict[str, str]:
+    os.makedirs(outdir, exist_ok=True)
+
+    phase = "Regular Season" if seasontype == 2 else "Postseason"
+    updated = datetime.now().strftime("%b %d, %Y • %I:%M %p")
+    subtitle = f"Season {season} • {phase} • Updated {updated}"
+
+    sections = build_stat_sections(season, seasontype)
+    outputs: Dict[str, str] = {}
+
+    for slug, _espn_title, short_title in STAT_CONFIG:
+        stat_title, items, mode = sections[slug]
+        out_path = os.path.join(outdir, f"{slug}_s{season}_t{seasontype}.png")
+        draw_single_stat_poster(
+            out_path=out_path,
+            poster_title="NFL Statistical Leaders",
+            stat_title=stat_title,
+            subtitle=subtitle,
+            items=items,
+            mode=mode,
+        )
+        outputs[slug] = out_path
+
+    return outputs
 
 
 def main():
@@ -338,74 +418,15 @@ def main():
     ap.add_argument("--outdir", type=str, default=os.path.join(os.path.expanduser("~"), "Desktop"))
     args = ap.parse_args()
 
-    season = args.season
-    seasontype = args.seasontype
-    outdir = args.outdir
-
-    phase = "Regular Season" if seasontype == 2 else "Postseason"
-    updated = datetime.now().strftime("%b %d, %Y • %I:%M %p")
-    subtitle = f"Season {season} • {phase} • Updated {updated}"
-
-    URLS = build_urls(season, seasontype)
-
-    offense_titles = [
-        "Passing Yards",
-        "Passing TDs",
-        "Interceptions Thrown",
-        "Rushing Yards",
-        "Rushing TDs",
-        "Receiving Yards",
-        "Receiving TDs",
-    ]
-    offense_sections: List[Tuple[str, List[Tuple[int, str, Number]], str]] = []
-    for t in offense_titles:
-        url, cand, mode = URLS[t]
-        offense_sections.append((t, topN_from_url(url, cand, mode), mode))
-
-    defense_titles = ["Sacks", "Tackles", "Interceptions (Defense)"]
-    defense_sections: List[Tuple[str, List[Tuple[int, str, Number]], str]] = []
-    for t in defense_titles:
-        url, cand, mode = URLS[t]
-        label = t.replace(" (Defense)", "")
-        defense_sections.append((label, topN_from_url(url, cand, mode), mode))
-
-    tag = "reg" if seasontype == 2 else "post"
-    out_off = os.path.join(outdir, f"offense_stat_leaders_{season}_{tag}.png")
-    out_def = os.path.join(outdir, f"defense_stat_leaders_{season}_{tag}.png")
-
-    draw_poster(
-        out_off,
-        "Offensive Statistical Leaders",
-        subtitle,
-        offense_sections,
-        cols=2,
-        rows=4,
-        height=2000,
-        sub_size=28,
-        head_size=32,
-        row_size=26,
-        line_h=33,
-        y_start_offset=64,
-    )
-
-    draw_poster(
-        out_def,
-        "Defensive Statistical Leaders",
-        subtitle,
-        defense_sections,
-        cols=1,
-        rows=3,
-        height=1800,
-        sub_size=30,
-        head_size=36,
-        row_size=30,
-        line_h=38,
-        y_start_offset=72,
+    outputs = generate_all_stat_leader_posters(
+        season=args.season,
+        seasontype=args.seasontype,
+        outdir=args.outdir,
     )
 
     print("\nDONE ✅")
-    print(out_off)
-    print(out_def)
+    for slug, path in outputs.items():
+        print(slug, "->", path)
     print("")
 
 
