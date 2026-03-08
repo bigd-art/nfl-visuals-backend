@@ -27,11 +27,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Generate + Upload Posters
+           - name: Generate + Upload Posters
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           SUPABASE_BUCKET: ${{ secrets.SUPABASE_BUCKET }}
           PYTHONPATH: .
         run: |
-          python -m app.scripts.nightly_publish_posters --season 2025 --seasontype 2 --keep_versioned
+          python -m app.scripts.nightly_publish_posters --season 2025 --seasontypes "2,3" --keep_versioned
