@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  run:
+  generate_posters:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repo
