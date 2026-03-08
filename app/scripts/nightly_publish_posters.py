@@ -46,51 +46,99 @@ def write_manifest(manifest: dict) -> str:
     return path
 
 
+def build_catalog_for_year(
+    season: int,
+    season_types: list[int],
+    keep_versioned: bool,
+) -> dict:
+    """
+    Returns:
+    {
+      "2": {
+        "standings_url": "...",
+        "stat_leaders": {...}
+      },
+      "3": {
+        "stat_leaders": {...}
+      }
+    }
+    """
+    day = utc_day()
+    season_catalog: dict[str, dict] = {}
+
+    for seasontype in season_types:
+        type_key = str(seasontype)
+        base = (
+            f"posters/{day}/{season}/{seasontype}"
+            if keep_versioned
+            else f"posters/latest/{season}/{seasontype}"
+        )
+
+        entry: dict = {}
+
+        # Standings only for regular season
+        if seasontype == 2:
+            standings_local = generate_standings_png(season)
+            standings_key = f"{base}/standings_conference_s{season}.png"
+            entry["standings_url"] = upload_file_return_url(standings_local, standings_key)
+
+        stat_outputs = generate_stat_leaders_pngs(season, seasontype)
+        stat_urls: dict[str, str] = {}
+        for slug, local_path in stat_outputs.items():
+            storage_key = f"{base}/{slug}_s{season}_t{seasontype}.png"
+            stat_urls[slug] = upload_file_return_url(local_path, storage_key)
+
+        entry["stat_leaders"] = stat_urls
+        season_catalog[type_key] = entry
+
+    return season_catalog
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--season", type=int, required=True)
-    ap.add_argument("--seasontype", type=int, default=2, choices=[2, 3])
-    ap.add_argument("--keep_versioned", action="store_true", help="Store posters in dated paths (new URL daily).")
+    ap.add_argument("--season", type=int, required=True, help="Single season, e.g. 2025")
+    ap.add_argument(
+        "--seasontypes",
+        type=str,
+        default="2,3",
+        help='CSV list, e.g. "2,3"',
+    )
+    ap.add_argument(
+        "--keep_versioned",
+        action="store_true",
+        help="Store posters in dated paths.",
+    )
     args = ap.parse_args()
 
     season = args.season
-    seasontype = args.seasontype
-    day = utc_day()
-    base = f"posters/{day}" if args.keep_versioned else "posters/latest"
+    if season < 2025:
+        raise ValueError("This setup only supports seasons 2025 and onward.")
 
-    # Generate locally
-    standings_local = generate_standings_png(season)
-    stat_outputs = generate_stat_leaders_pngs(season, seasontype)
+    season_types = [int(x.strip()) for x in args.seasontypes.split(",") if x.strip()]
 
-    # Upload standings
-    standings_key = f"{base}/standings_conference_s{season}.png"
-    standings_url = upload_file_return_url(standings_local, standings_key)
+    catalog = {
+        str(season): build_catalog_for_year(
+            season=season,
+            season_types=season_types,
+            keep_versioned=args.keep_versioned,
+        )
+    }
 
-    # Upload all stat posters
-    stat_urls: dict[str, str] = {}
-    for slug, local_path in stat_outputs.items():
-        storage_key = f"{base}/{slug}_s{season}_t{seasontype}.png"
-        stat_urls[slug] = upload_file_return_url(local_path, storage_key)
-
-    # Manifest
     manifest = {
         "updated_utc": datetime.now(timezone.utc).isoformat(),
-        "season": season,
-        "seasontype": seasontype,
+        "season_min": 2025,
+        "season_max_generated": season,
+        "seasontypes": season_types,
         "versioned": bool(args.keep_versioned),
-        "base_path": base,
-        "standings_url": standings_url,
-        "stat_leaders": stat_urls,
+        "catalog": catalog,
     }
 
     manifest_local = write_manifest(manifest)
     manifest_url = upload_file_return_url(manifest_local, "posters/latest.json")
 
-    print("\n✅ Uploaded URLs")
-    print("standings_url:", standings_url)
-    for slug, url in stat_urls.items():
-        print(f"{slug}_url:", url)
+    print("\n✅ Uploaded manifest")
     print("manifest_url:", manifest_url)
+    print(json.dumps(manifest, indent=2))
     print("")
 
 
