@@ -1,4 +1,4 @@
-name: Nightly Posters (Standings + Leaders)
+name: Nightly Posters (Standings + Leaders + Team Needs)
 
 on:
   schedule:
@@ -35,3 +35,4 @@ jobs:
           PYTHONPATH: .
         run: |
           python -m app.scripts.nightly_publish_posters --season 2025 --seasontypes "2,3" --keep_versioned
+          python -m app.scripts.nightly_publish_team_needs --keep_versioned
