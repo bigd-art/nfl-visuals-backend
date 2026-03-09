@@ -2,7 +2,6 @@
 import argparse
 import mimetypes
 import os
-import sys
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -40,24 +39,21 @@ def upload_to_supabase(
         "x-upsert": "true" if upsert else "false",
     }
 
-    resp = requests.post(url, headers=headers, data=data, timeout=120)
-
-    if resp.status_code in (200, 201):
+    post_resp = requests.post(url, headers=headers, data=data, timeout=120)
+    if post_resp.status_code in (200, 201):
         return
 
-    # Supabase may return 400/409 on existing file when POSTing with upsert;
-    # fallback to PUT for safety.
     put_resp = requests.put(url, headers=headers, data=data, timeout=120)
     if put_resp.status_code not in (200, 201):
         raise RuntimeError(
             f"Upload failed for {object_path}. "
-            f"POST {resp.status_code}: {resp.text[:300]} | "
+            f"POST {post_resp.status_code}: {post_resp.text[:300]} | "
             f"PUT {put_resp.status_code}: {put_resp.text[:300]}"
         )
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Generate and upload nightly NFL team needs posters.")
+    parser = argparse.ArgumentParser(description="Generate and upload nightly NFL team-needs posters.")
     parser.add_argument("--keep_versioned", action="store_true")
     parser.add_argument("--folder", default="team_needs", help="Bucket folder for latest posters")
     args = parser.parse_args()
@@ -70,7 +66,7 @@ def main():
         outputs, failures = generate_all_team_needs_posters(tmpdir)
 
         if not outputs:
-            raise RuntimeError("No team needs posters were generated.")
+            raise RuntimeError("No team-needs posters were generated.")
 
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
