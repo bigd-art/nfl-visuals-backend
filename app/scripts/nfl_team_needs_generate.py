@@ -3,7 +3,6 @@ import argparse
 import io
 import os
 import re
-import sys
 from typing import Dict, List, Tuple, Optional
 
 import requests
@@ -377,8 +376,7 @@ def main():
         return
 
     if not args.team:
-        print("Provide a team abbreviation like BUF, or use --all")
-        sys.exit(1)
+        raise SystemExit("Provide a team abbreviation like BUF, or use --all")
 
     team = ALIASES.get(args.team.upper(), args.team.upper())
     out_file = os.path.join(args.outdir, f"{team.lower()}_team_needs.png")
