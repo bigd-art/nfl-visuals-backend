@@ -1,145 +1,122 @@
-# app/scripts/nightly_publish_posters.py
-import os
-import json
+#!/usr/bin/env python3
+from __future__ import annotations
+
 import argparse
-from datetime import datetime, timezone
+import json
+import os
+import tempfile
 
 from app.services.storage_supabase import upload_file_return_url
-from app.scripts.nfl_stat_leaders_generate import generate_all_stat_leader_posters
+from app.scripts.season_auto import candidate_regular_seasons, resolve_first_valid
+
 from app.scripts.nfl_standings_conference_generate import generate_standings_conference_png
+from app.scripts.nfl_stat_leaders_generate import generate_all_stat_leader_posters, STAT_CONFIG
 
 
-def utc_day() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+def public_storage_url(storage_key: str) -> str:
+    base = os.environ["SUPABASE_URL"].rstrip("/")
+    bucket = os.environ.get("SUPABASE_BUCKET", "nfl-posters")
+    return f"{base}/storage/v1/object/public/{bucket}/{storage_key}"
 
 
-def ensure_tmp():
-    os.makedirs("/tmp", exist_ok=True)
+def standings_has_data(season: int) -> bool:
+    from app.scripts.nfl_standings_conference_generate import get_json
+    data = get_json(season)
+    children = data.get("children", [])
+    return bool(children)
 
 
-def generate_standings_png(season: int) -> str:
-    ensure_tmp()
-    out_path = f"/tmp/standings_conference_{season}.png"
-    generate_standings_conference_png(season, out_path)
-    if not os.path.exists(out_path):
-        raise RuntimeError(f"Missing generated file: {out_path}")
-    return out_path
+def leaders_has_data(season: int, seasontype: int) -> bool:
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            outputs = generate_all_stat_leader_posters(season=season, seasontype=seasontype, outdir=tmpdir)
+            return bool(outputs)
+    except Exception:
+        return False
 
 
-def generate_stat_leaders_pngs(season: int, seasontype: int) -> dict[str, str]:
-    ensure_tmp()
-    outputs = generate_all_stat_leader_posters(
-        season=season,
-        seasontype=seasontype,
-        outdir="/tmp",
-    )
-    if not outputs:
-        raise RuntimeError("No stat leader posters were generated.")
-    return outputs
+def publish_posters(keep_versioned: bool = False) -> dict:
+    season = resolve_first_valid(candidate_regular_seasons(), standings_has_data)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        payload = {
+            "season": season,
+            "standings": {},
+            "stat_leaders": {},
+        }
+
+        # Standings
+        standings_png = os.path.join(tmpdir, f"standings_conference_{season}.png")
+        generate_standings_conference_png(season, standings_png)
+        standings_url = upload_file_return_url(standings_png, "standings/current.png")
+        payload["standings"] = {
+            "season": season,
+            "image_url": standings_url,
+        }
+
+        # Stat leaders regular season only if valid
+        regular_posters = {}
+        if leaders_has_data(season, 2):
+            regular_dir = os.path.join(tmpdir, "leaders_regular")
+            os.makedirs(regular_dir, exist_ok=True)
+            outputs = generate_all_stat_leader_posters(season=season, seasontype=2, outdir=regular_dir)
+
+            for slug, _full_title, _short_title in STAT_CONFIG:
+                local_path = outputs[slug]
+                regular_posters[slug] = upload_file_return_url(
+                    local_path,
+                    f"stat_leaders/current/regular/{slug}.png"
+                )
+
+        payload["stat_leaders"]["regular"] = regular_posters
+
+        # Postseason only if data exists
+        postseason_posters = {}
+        if leaders_has_data(season, 3):
+            post_dir = os.path.join(tmpdir, "leaders_post")
+            os.makedirs(post_dir, exist_ok=True)
+            outputs = generate_all_stat_leader_posters(season=season, seasontype=3, outdir=post_dir)
+
+            for slug, _full_title, _short_title in STAT_CONFIG:
+                local_path = outputs[slug]
+                postseason_posters[slug] = upload_file_return_url(
+                    local_path,
+                    f"stat_leaders/current/postseason/{slug}.png"
+                )
+
+        payload["stat_leaders"]["postseason"] = postseason_posters
+
+        local_json = os.path.join(tmpdir, "nightly_posters_current.json")
+        with open(local_json, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2)
+
+        payload["metadata_url"] = upload_file_return_url(local_json, "nightly_posters/current.json")
+
+        if keep_versioned:
+            payload["versioned_metadata_url"] = upload_file_return_url(
+                local_json,
+                f"nightly_posters/history/{season}/metadata.json"
+            )
+
+        return payload
 
 
-def write_manifest(manifest: dict) -> str:
-    ensure_tmp()
-    path = "/tmp/latest.json"
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(manifest, f, indent=2)
-    return path
-
-
-def build_catalog_for_year(
-    season: int,
-    season_types: list[int],
-    keep_versioned: bool,
-) -> dict:
-    """
-    Returns:
-    {
-      "2": {
-        "standings_url": "...",
-        "stat_leaders": {...}
-      },
-      "3": {
-        "stat_leaders": {...}
-      }
+def get_current_posters_payload() -> dict:
+    return {
+        "metadata_url": public_storage_url("nightly_posters/current.json"),
+        "standings_url": public_storage_url("standings/current.png"),
     }
-    """
-    day = utc_day()
-    season_catalog: dict[str, dict] = {}
 
-    for seasontype in season_types:
-        type_key = str(seasontype)
-        base = (
-            f"posters/{day}/{season}/{seasontype}"
-            if keep_versioned
-            else f"posters/latest/{season}/{seasontype}"
-        )
 
-        entry: dict = {}
-
-        # Standings only for regular season
-        if seasontype == 2:
-            standings_local = generate_standings_png(season)
-            standings_key = f"{base}/standings_conference_s{season}.png"
-            entry["standings_url"] = upload_file_return_url(standings_local, standings_key)
-
-        stat_outputs = generate_stat_leaders_pngs(season, seasontype)
-        stat_urls: dict[str, str] = {}
-        for slug, local_path in stat_outputs.items():
-            storage_key = f"{base}/{slug}_s{season}_t{seasontype}.png"
-            stat_urls[slug] = upload_file_return_url(local_path, storage_key)
-
-        entry["stat_leaders"] = stat_urls
-        season_catalog[type_key] = entry
-
-    return season_catalog
+def parse_args():
+    p = argparse.ArgumentParser()
+    p.add_argument("--keep_versioned", action="store_true")
+    return p.parse_args()
 
 
 def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--season", type=int, required=True, help="Single season, e.g. 2025")
-    ap.add_argument(
-        "--seasontypes",
-        type=str,
-        default="2,3",
-        help='CSV list, e.g. "2,3"',
-    )
-    ap.add_argument(
-        "--keep_versioned",
-        action="store_true",
-        help="Store posters in dated paths.",
-    )
-    args = ap.parse_args()
-
-    season = args.season
-    if season < 2025:
-        raise ValueError("This setup only supports seasons 2025 and onward.")
-
-    season_types = [int(x.strip()) for x in args.seasontypes.split(",") if x.strip()]
-
-    catalog = {
-        str(season): build_catalog_for_year(
-            season=season,
-            season_types=season_types,
-            keep_versioned=args.keep_versioned,
-        )
-    }
-
-    manifest = {
-        "updated_utc": datetime.now(timezone.utc).isoformat(),
-        "season_min": 2025,
-        "season_max_generated": season,
-        "seasontypes": season_types,
-        "versioned": bool(args.keep_versioned),
-        "catalog": catalog,
-    }
-
-    manifest_local = write_manifest(manifest)
-    manifest_url = upload_file_return_url(manifest_local, "posters/latest.json")
-
-    print("\n✅ Uploaded manifest")
-    print("manifest_url:", manifest_url)
-    print(json.dumps(manifest, indent=2))
-    print("")
+    args = parse_args()
+    print(json.dumps(publish_posters(keep_versioned=args.keep_versioned), indent=2))
 
 
 if __name__ == "__main__":
