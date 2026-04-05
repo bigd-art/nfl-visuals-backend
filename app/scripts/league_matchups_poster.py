@@ -19,11 +19,6 @@ USER_AGENT = (
     "Chrome/138.0.0.0 Safari/537.36"
 )
 
-SCOREBOARD_URL = (
-    "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard"
-    "?dates={year}&seasontype=2&week={week}"
-)
-
 TEAM_COLORS = {
     "ARI": ("#97233F", "#000000"),
     "ATL": ("#A71930", "#000000"),
@@ -98,6 +93,17 @@ DEFAULT_PRIMARY = "#111111"
 DEFAULT_SECONDARY = "#444444"
 
 
+def no_poster_message(year: int, week: int) -> str:
+    return f"No poster available yet for {year} week {week}. Please try another week or season type"
+
+
+def scoreboard_url(year: int, week: int, seasontype: int) -> str:
+    return (
+        "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard"
+        f"?dates={year}&seasontype={seasontype}&week={week}"
+    )
+
+
 def get_json(url: str) -> dict:
     resp = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=30)
     resp.raise_for_status()
@@ -140,7 +146,7 @@ def format_date_eastern(date_iso: str) -> str:
 def parse_week_games(data: dict) -> List[Dict[str, str]]:
     events = data.get("events", [])
     if not events:
-        raise RuntimeError("No games returned from ESPN scoreboard endpoint.")
+        raise RuntimeError("NO_GAMES")
 
     games = []
 
@@ -178,7 +184,7 @@ def parse_week_games(data: dict) -> List[Dict[str, str]]:
         )
 
     if not games:
-        raise RuntimeError("No valid matchups found for that week.")
+        raise RuntimeError("NO_GAMES")
 
     return games
 
@@ -330,7 +336,7 @@ def draw_matchup_row(
         bg.paste(home_logo, (cur_x, logo_y), home_logo)
 
 
-def make_poster(year: int, week: int, games: List[dict], output_path: str):
+def make_poster(year: int, week: int, seasontype: int, games: List[dict], output_path: str):
     width = 1400
     height = 2200
 
@@ -350,7 +356,8 @@ def make_poster(year: int, week: int, games: List[dict], output_path: str):
     draw.rectangle([0, height - 32, width, height], fill=secondary)
 
     draw_centered(draw, "NFL LEAGUE MATCHUPS", title_font, 65, width, "white")
-    draw_centered(draw, f"Week {week} • {year}", subtitle_font, 160, width, "white")
+    season_label = "Regular Season" if seasontype == 2 else "Playoffs"
+    draw_centered(draw, f"Week {week} • {year} • {season_label}", subtitle_font, 160, width, "white")
 
     left = 55
     right = width - 55
@@ -414,25 +421,34 @@ def make_poster(year: int, week: int, games: List[dict], output_path: str):
         y += row_h + row_gap
 
     bg.save(output_path)
-    print(f"Saved poster to {output_path}")
+
+
+def generate_league_matchups_poster(year: int, week: int, seasontype: int, output_path: str) -> str:
+    try:
+        url = scoreboard_url(year, week, seasontype)
+        data = get_json(url)
+        games = parse_week_games(data)
+        make_poster(year, week, seasontype, games, output_path)
+        return output_path
+    except RuntimeError as e:
+        if str(e) == "NO_GAMES":
+            raise RuntimeError(no_poster_message(year, week))
+        raise
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Create an NFL league matchups poster for one regular-season week using ESPN."
+        description="Create an NFL league matchups poster for a specific week using ESPN."
     )
     parser.add_argument("--year", type=int, required=True, help="Season year, e.g. 2025")
     parser.add_argument("--week", type=int, required=True, help="Week number, e.g. 1")
+    parser.add_argument("--seasontype", type=int, default=2, help="2=regular, 3=playoffs")
     args = parser.parse_args()
 
     try:
-        url = SCOREBOARD_URL.format(year=args.year, week=args.week)
-        data = get_json(url)
-        games = parse_week_games(data)
-
-        output_path = f"league_matchups_{args.year}_week_{args.week}.png"
-        make_poster(args.year, args.week, games, output_path)
-
+        output_path = f"league_matchups_{args.year}_week_{args.week}_type_{args.seasontype}.png"
+        generate_league_matchups_poster(args.year, args.week, args.seasontype, output_path)
+        print(f"Saved poster to {output_path}")
     except Exception as e:
         print(f"ERROR: {e}", file=sys.stderr)
         sys.exit(1)
