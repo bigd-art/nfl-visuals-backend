@@ -1,8 +1,7 @@
 import os
 import shutil
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
-# Import ONLY from your existing week script (unchanged)
 from app.generator.week_posters import (
     fetch_url,
     fetch_summary,
@@ -14,6 +13,8 @@ from app.generator.week_posters import (
 
 def _normalize_team_abbr(team: str) -> str:
     t = (team or "").strip().upper()
+    if t == "WAS":
+        t = "WSH"
     if not t:
         raise ValueError("team is required (e.g., SEA, DAL, KC).")
     if not (2 <= len(t) <= 4) or not t.isalpha():
@@ -21,10 +22,14 @@ def _normalize_team_abbr(team: str) -> str:
     return t
 
 
+def no_poster_message(year: int, week: int) -> str:
+    return f"No poster available yet for {year} week {week}. Please try another week or season type"
+
+
 def _extract_team_abbrs_from_summary(summary: Dict) -> List[str]:
     try:
         comp = summary["header"]["competitions"][0]
-        return [c["team"]["abbreviation"] for c in comp.get("competitors", [])]
+        return [c["team"]["abbreviation"].upper() for c in comp.get("competitors", [])]
     except Exception:
         return []
 
@@ -37,7 +42,7 @@ def find_game_for_team_in_week(year: int, week: int, seasontype: int, team_abbr:
     game_ids = extract_game_ids_from_scoreboard_html(html)
 
     if not game_ids:
-        raise RuntimeError("No gameIds found. ESPN scoreboard format may have changed.")
+        raise RuntimeError(no_poster_message(year, week))
 
     for gid in game_ids:
         try:
@@ -47,9 +52,7 @@ def find_game_for_team_in_week(year: int, week: int, seasontype: int, team_abbr:
         except Exception:
             continue
 
-    raise RuntimeError(
-        f"No game found for team '{team_abbr}' in year={year}, week={week}, seasontype={seasontype}."
-    )
+    raise RuntimeError(no_poster_message(year, week))
 
 
 def generate_favorite_team_poster(
@@ -61,27 +64,23 @@ def generate_favorite_team_poster(
     team_abbr = _normalize_team_abbr(team)
     game_id = find_game_for_team_in_week(year, week, seasontype, team_abbr)
 
-
     kind = "regular" if seasontype == 2 else "playoffs"
     week_folder = f"week{str(week).zfill(2)}"
-    team = team.strip().upper()
 
     out_dir = os.path.join(
-    "game_visuals",
-    str(year),
-    kind,
-    week_folder,
-    "favorite",
-    team
-)
+        "game_visuals",
+        str(year),
+        kind,
+        week_folder,
+        "favorite",
+        team_abbr,
+    )
 
-    # CRITICAL: remove leftovers from previous runs
     shutil.rmtree(out_dir, ignore_errors=True)
     os.makedirs(out_dir, exist_ok=True)
 
     success, msg = generate_poster_for_game(game_id, out_dir)
     if not success:
-        raise RuntimeError(f"Poster generation failed: {msg}")
+        raise RuntimeError(no_poster_message(year, week))
 
     return msg
-
