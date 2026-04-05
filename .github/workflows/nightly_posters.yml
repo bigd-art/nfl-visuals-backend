@@ -1,4 +1,4 @@
-name: Nightly Posters (Standings + Leaders + Team Needs)
+name: Nightly Posters (Standings + Leaders + Team Needs + Stat of the Day)
 
 on:
   schedule:
@@ -8,6 +8,7 @@ on:
 jobs:
   generate_posters:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -36,3 +37,4 @@ jobs:
         run: |
           python -m app.scripts.nightly_publish_posters --season 2025 --seasontypes "2,3" --keep_versioned
           python -m app.scripts.nightly_publish_team_needs --keep_versioned
+          python -m app.scripts.stat_of_the_day_publish --keep_versioned
