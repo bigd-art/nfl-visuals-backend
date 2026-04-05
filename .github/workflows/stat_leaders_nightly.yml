@@ -8,6 +8,10 @@ on:
 jobs:
   run:
     runs-on: ubuntu-latest
+
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -33,5 +37,5 @@ jobs:
           urls = generate_stat_leaders_and_upload(season=2025, seasontype=2)
           print("Uploaded", len(urls), "images")
           for u in urls:
-            print(u)
+              print(u)
           PY
