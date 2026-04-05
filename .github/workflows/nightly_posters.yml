@@ -35,7 +35,7 @@ jobs:
           SUPABASE_BUCKET: ${{ secrets.SUPABASE_BUCKET }}
           PYTHONPATH: .
         run: |
-          python -m app.scripts.nightly_publish_posters --season 2025 --seasontypes "2,3" --keep_versioned
+          python -m app.scripts.nightly_publish_posters --keep_versioned
           python -m app.scripts.nightly_publish_team_needs --keep_versioned
           python -m app.scripts.stat_of_the_day_publish --keep_versioned
           python -m app.scripts.nightly_publish_league_matchups --keep_versioned
