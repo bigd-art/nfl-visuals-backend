@@ -1,4 +1,4 @@
-name: Nightly Posters (Standings + Leaders + Team Needs + Stat of the Day)
+name: Nightly Posters (Standings + Leaders + Team Needs + Stat of the Day + Matchups + Draft + Schedules + Rosters)
 
 on:
   schedule:
@@ -38,3 +38,8 @@ jobs:
           python -m app.scripts.nightly_publish_posters --season 2025 --seasontypes "2,3" --keep_versioned
           python -m app.scripts.nightly_publish_team_needs --keep_versioned
           python -m app.scripts.stat_of_the_day_publish --keep_versioned
+          python -m app.scripts.nightly_publish_league_matchups --keep_versioned
+          python -m app.scripts.nightly_publish_pff_big_board --keep_versioned
+          python -m app.scripts.nightly_publish_tankathon_mock --keep_versioned
+          python -m app.scripts.nightly_publish_team_schedules --keep_versioned
+          python -m app.scripts.nightly_publish_team_rosters --keep_versioned
