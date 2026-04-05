@@ -21,11 +21,12 @@ def team_rosters_current(
         meta = resp.json()
         posters = meta.get("posters", {}) or {}
 
-        if team and unit:
-            team_abbr = team.strip().upper()
-            unit_key = unit.strip().lower()
-            image_url = posters.get(team_abbr, {}).get(unit_key)
+        team_abbr = team.strip().upper() if team else ""
+        unit_key = unit.strip().lower() if unit else ""
 
+        # Case 1: team + unit => single URL
+        if team_abbr and unit_key:
+            image_url = posters.get(team_abbr, {}).get(unit_key)
             return {
                 "team": team_abbr,
                 "unit": unit_key,
@@ -33,6 +34,19 @@ def team_rosters_current(
                 "metadata_url": payload.get("metadata_url"),
             }
 
+        # Case 2: team only => return only that team's units
+        if team_abbr:
+            team_posters = posters.get(team_abbr, {}) or {}
+            urls = [url for url in team_posters.values() if url]
+
+            return {
+                "team": team_abbr,
+                "posters": {team_abbr: team_posters},
+                "urls": urls,
+                "metadata_url": payload.get("metadata_url"),
+            }
+
+        # Case 3: no team => return everything
         urls = []
         for team_map in posters.values():
             if isinstance(team_map, dict):
