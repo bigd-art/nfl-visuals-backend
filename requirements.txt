@@ -5,6 +5,7 @@ requests
 matplotlib
 Pillow
 pandas
+numpy
 lxml
 html5lib
 beautifulsoup4
