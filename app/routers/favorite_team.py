@@ -1,10 +1,14 @@
 import os
+from typing import Any, Dict
+
 from fastapi import APIRouter
 from pydantic import BaseModel
-import requests
 
 from app.generator.favorite_team_poster import generate_favorite_team_poster
-from app.services.storage_supabase import upload_file_return_url
+from app.services.storage_supabase import (
+    upload_file_return_url,
+    cached_urls_for_prefix,
+)
 
 router = APIRouter(prefix="/favorite-team", tags=["favorite-team"])
 
@@ -21,42 +25,58 @@ def _normalize_team(team: str) -> str:
     return "WSH" if t == "WAS" else t
 
 
-def _public_url(storage_key: str) -> str:
-    base = os.environ["SUPABASE_URL"].rstrip("/")
-    bucket = os.environ.get("SUPABASE_BUCKET", "nfl-posters")
-    return f"{base}/storage/v1/object/public/{bucket}/{storage_key}"
+def _week_folder(week: int) -> str:
+    return f"week{str(week).zfill(2)}"
 
 
-def _url_exists(url: str) -> bool:
-    try:
-        r = requests.head(url, timeout=15)
-        return r.status_code == 200
-    except Exception:
-        return False
+def _kind_from_seasontype(seasontype: int) -> str:
+    return "regular" if int(seasontype) == 2 else "playoffs"
+
+
+def _prefix_favorite(year: int, kind: str, week: int, team: str) -> str:
+    return f"posters_v3/{year}/{kind}/{_week_folder(week)}/favorite/{team}/"
 
 
 @router.post("/generate")
-def generate_favorite_team(req: FavoriteTeamRequest):
+def generate_favorite_team(req: FavoriteTeamRequest) -> Dict[str, Any]:
     team = _normalize_team(req.team)
-    kind = "regular" if req.seasontype == 2 else "playoffs"
-    folder = f"week{str(req.week).zfill(2)}"
-
-    storage_key = f"posters_v3/{req.year}/{kind}/{folder}/favorite/{team}/favorite_team_poster.png"
-    public_url = _public_url(storage_key)
+    kind = _kind_from_seasontype(req.seasontype)
+    prefix = _prefix_favorite(req.year, kind, req.week, team)
 
     try:
-        if _url_exists(public_url):
-            return {"ok": True, "url": public_url}
+        cached = cached_urls_for_prefix(prefix)
+        if cached:
+            return {
+                "ok": True,
+                "cache_hit": True,
+                "url": cached[0],
+                "urls": cached,
+            }
 
-        local_path = generate_favorite_team_poster(
+        png_path = generate_favorite_team_poster(
             year=req.year,
             week=req.week,
             seasontype=req.seasontype,
             team=team,
         )
 
-        uploaded = upload_file_return_url(local_path, storage_key)
-        return {"ok": True, "url": uploaded}
+        if not png_path or not os.path.exists(png_path):
+            raise RuntimeError("Favorite team poster not generated.")
+
+        key = f"{prefix}{os.path.basename(png_path)}"
+        url = upload_file_return_url(png_path, key)
+
+        return {
+            "ok": True,
+            "cache_hit": False,
+            "url": url,
+            "urls": [url],
+        }
 
     except Exception as e:
-        return {"ok": False, "error": str(e), "url": None}
+        return {
+            "ok": False,
+            "error": str(e),
+            "url": None,
+            "urls": [],
+        }
