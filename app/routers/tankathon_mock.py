@@ -6,43 +6,89 @@ from app.scripts.nightly_publish_tankathon_mock import get_current_tankathon_moc
 router = APIRouter(prefix="/tankathon-mock", tags=["tankathon-mock"])
 
 
-def _extract_urls(value):
-    urls = []
+def _looks_like_image_url(value: str) -> bool:
+    if not isinstance(value, str):
+        return False
+    v = value.strip().lower()
+    return (
+        (v.startswith("http://") or v.startswith("https://"))
+        and any(ext in v for ext in [".png", ".jpg", ".jpeg", ".webp"])
+    )
 
-    if isinstance(value, str):
-        if value.startswith("http://") or value.startswith("https://"):
-            urls.append(value)
 
-    elif isinstance(value, list):
-        for item in value:
-            urls.extend(_extract_urls(item))
+def _collect_image_urls(obj, found=None):
+    if found is None:
+        found = []
 
-    elif isinstance(value, dict):
-        for item in value.values():
-            urls.extend(_extract_urls(item))
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            # Prefer common image keys
+            if isinstance(v, str) and k.lower() in {
+                "url",
+                "image_url",
+                "poster_url",
+                "poster",
+                "image",
+            } and _looks_like_image_url(v):
+                found.append(v)
+            else:
+                _collect_image_urls(v, found)
 
-    return urls
+    elif isinstance(obj, list):
+        for item in obj:
+            _collect_image_urls(item, found)
+
+    elif isinstance(obj, str):
+        if _looks_like_image_url(obj):
+            found.append(obj)
+
+    return found
 
 
 @router.get("/current")
 def tankathon_mock_current():
     try:
         payload = get_current_tankathon_mock_payload()
-        resp = requests.get(payload["metadata_url"], timeout=20)
 
+        metadata_url = payload.get("metadata_url")
+        if not metadata_url:
+            return {
+                "season": payload.get("season"),
+                "urls": [],
+                "detail": "No metadata_url found in payload.",
+            }
+
+        resp = requests.get(metadata_url, timeout=20)
         if not resp.ok:
-            return payload
+            return {
+                "season": payload.get("season"),
+                "urls": [],
+                "detail": f"Metadata fetch failed with status {resp.status_code}",
+                "metadata_url": metadata_url,
+            }
 
         meta = resp.json()
-        posters = meta.get("posters", {}) or {}
 
-        urls = _extract_urls(posters)
+        # First try the whole metadata object
+        urls = _collect_image_urls(meta)
+
+        # Remove metadata_url itself if it got picked up for any reason
+        urls = [u for u in urls if u != metadata_url]
+
+        # Deduplicate while preserving order
+        seen = set()
+        deduped = []
+        for u in urls:
+            if u not in seen:
+                seen.add(u)
+                deduped.append(u)
 
         return {
-            "season": meta.get("season"),
-            "posters": posters,
-            "urls": urls,
-            "metadata_url": payload.get("metadata_url"),
+            "season": meta.get("season", payload.get("season")),
+            "url": deduped[0] if len(deduped) == 1 else None,
+            "urls": deduped,
+            "metadata_url": metadata_url,
+            "meta": meta,  # keep this temporarily for debugging
         }
 
     except Exception as e:
