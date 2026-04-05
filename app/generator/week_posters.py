@@ -717,6 +717,10 @@ def main():
         sys.exit(1)
 
 
+def no_poster_message(year: int, week: int) -> str:
+    return f"No poster available yet for {year} week {week}. Please try another week or season type"
+
+
 def generate_week(year: int, week: int, seasontype: int = 2, limit: int = 0) -> str:
     """
     Wrapper used by FastAPI.
@@ -730,20 +734,24 @@ def generate_week(year: int, week: int, seasontype: int = 2, limit: int = 0) -> 
         game_ids = game_ids[:limit]
 
     if not game_ids:
-        raise RuntimeError("No gameIds found. ESPN page format may have changed.")
+        raise RuntimeError(no_poster_message(year, week))
 
-    kind = "regular" if seasontype == 2 else "playoffs" 
+    kind = "regular" if seasontype == 2 else "playoffs"
     out_dir = os.path.join("game_visuals", str(year), kind, f"week{str(week).zfill(2)}")
 
-    # ALWAYS start clean so we don't upload leftover PNGs from a previous run
     shutil.rmtree(out_dir, ignore_errors=True)
     os.makedirs(out_dir, exist_ok=True)
 
+    made_any = False
     for gid in game_ids:
-        generate_poster_for_game(gid, out_dir)
+        success, _ = generate_poster_for_game(gid, out_dir)
+        if success:
+            made_any = True
+
+    if not made_any:
+        raise RuntimeError(no_poster_message(year, week))
 
     return out_dir
-
 
 
 if __name__ == "__main__":
