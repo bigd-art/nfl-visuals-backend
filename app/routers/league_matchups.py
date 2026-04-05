@@ -4,7 +4,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 import requests
 
-from app.generator.league_matchups_poster import generate_league_matchups_poster
+from app.scripts.league_matchups_poster import generate_league_matchups_poster
 from app.services.storage_supabase import upload_file_return_url
 
 router = APIRouter(prefix="/league-matchups", tags=["league-matchups"])
