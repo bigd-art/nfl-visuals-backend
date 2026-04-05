@@ -25,6 +25,8 @@ from app.routers.pff_big_board import router as pff_big_board_router
 from app.routers.tankathon_mock import router as tankathon_mock_router
 from app.routers.team_schedules import router as team_schedules_router
 from app.routers.team_rosters import router as team_rosters_router
+from app.routers.current_week import router as current_week_router
+from app.routers.current_favorite_team import router as current_favorite_team_router
 
 
 
@@ -38,6 +40,8 @@ app.include_router(pff_big_board_router)
 app.include_router(tankathon_mock_router)
 app.include_router(team_schedules_router)
 app.include_router(team_rosters_router)
+app.include_router(current_week_router)
+app.include_router(current_favorite_team_router)
 # =========================
 # Helpers
 # =========================
