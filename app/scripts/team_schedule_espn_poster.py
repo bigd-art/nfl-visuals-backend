@@ -322,39 +322,44 @@ def make_poster(team_abbr: str, team_name: str, year: int, games: List[dict], ou
     bg = Image.new("RGB", (width, height), primary)
     draw = ImageDraw.Draw(bg)
 
-    title_font = get_font(120, bold=True)
-    subtitle_font = get_font(64, bold=True)
-    header_font = get_font(46, bold=True)
-    row_font = get_font(42, bold=False)
-    week_font = get_font(48, bold=True)
+    title_font = get_font(132, bold=True)
+    subtitle_font = get_font(68, bold=True)
+    header_font = get_font(45, bold=True)
+    row_font = get_font(40, bold=False)
+    week_font = get_font(45, bold=True)
 
-    draw.rectangle([0, 0, width, 50], fill=secondary)
-    draw.rectangle([0, height - 50, width, height], fill=secondary)
+    draw.rectangle([0, 0, width, 54], fill=secondary)
+    draw.rectangle([0, height - 54, width, height], fill=secondary)
 
-    draw_centered(draw, team_abbr, title_font, 120, width, "white")
-    draw_centered(draw, f"{team_name} {year} Schedule", subtitle_font, 260, width, "white")
+    draw_centered(draw, team_abbr, title_font, 86, width, "white")
+    draw_centered(draw, f"{team_name} {year} Schedule", subtitle_font, 236, width, "white")
 
-    left = 120
-    right = width - 120
-    top = 420
-    row_h = 130
-    row_gap = 20
+    left = 62
+    right = width - 62
+    top = 334
 
-    draw.rounded_rectangle([left, top, right, top + 160], radius=30, fill=secondary)
-    draw.text((left + 60, top + 52), "WEEK", font=header_font, fill="white")
-    draw.text((left + 340, top + 52), "OPP", font=header_font, fill="white")
-    draw.text((left + 520, top + 52), "MATCHUP", font=header_font, fill="white")
-    draw.text((left + 1080, top + 52), "DATE / TIME (ET)", font=header_font, fill="white")
+    header_h = 126
+    row_h = 120
+    row_gap = 7
 
-    y = top + 200
+    draw.rounded_rectangle([left, top, right, top + header_h], radius=28, fill=secondary)
 
-    logo_x = left + 350
-    logo_size = 90
-    matchup_x = left + 520
-    date_x = left + 1080
+    week_x = left + 30
+    opp_label_x = left + 245
+    logo_x = left + 255
+    matchup_x = left + 405
+    date_x = left + 1115
 
-    matchup_width = 500
-    date_width = right - date_x - 40
+    draw.text((week_x, top + 38), "WEEK", font=header_font, fill="white")
+    draw.text((opp_label_x, top + 38), "OPP", font=header_font, fill="white")
+    draw.text((matchup_x, top + 38), "MATCHUP", font=header_font, fill="white")
+    draw.text((date_x, top + 38), "DATE / TIME (ET)", font=header_font, fill="white")
+
+    y = top + header_h + 12
+
+    logo_size = 78
+    matchup_width = 675
+    date_width = right - date_x - 22
 
     logo_cache: Dict[str, Image.Image] = {}
 
@@ -364,26 +369,39 @@ def make_poster(team_abbr: str, team_name: str, year: int, games: List[dict], ou
 
         draw.rounded_rectangle(
             [left, y, right, y + row_h],
-            radius=22,
+            radius=18,
             fill=row_fill
         )
 
         matchup_text = fit_text(draw, game["opponent"], row_font, matchup_width)
         date_text = fit_text(draw, game["date"], row_font, date_width)
 
-        draw.text((left + 70, y + 35), f"{game['week']}", font=week_font, fill=text_fill)
+        week_text = str(game["week"])
+        week_bbox = draw.textbbox((0, 0), week_text, font=week_font)
+        week_h = week_bbox[3] - week_bbox[1]
+        draw.text((week_x, y + (row_h - week_h) // 2 - 4), week_text, font=week_font, fill=text_fill)
 
         if game["opponent"] != "BYE":
             logo_img = fetch_logo_image(game.get("logo_url", ""), logo_size, logo_cache)
             if logo_img is not None:
-                bg.paste(logo_img, (logo_x, y + 20), logo_img)
+                logo_y = y + (row_h - logo_size) // 2
+                bg.paste(logo_img, (logo_x, logo_y), logo_img)
             else:
-                draw.text((logo_x + 20, y + 35), "-", font=row_font, fill=text_fill)
+                dash_bbox = draw.textbbox((0, 0), "-", font=row_font)
+                dash_h = dash_bbox[3] - dash_bbox[1]
+                draw.text((logo_x + 22, y + (row_h - dash_h) // 2 - 2), "-", font=row_font, fill=text_fill)
         else:
-            draw.text((logo_x + 20, y + 35), "-", font=row_font, fill=text_fill)
+            dash_bbox = draw.textbbox((0, 0), "-", font=row_font)
+            dash_h = dash_bbox[3] - dash_bbox[1]
+            draw.text((logo_x + 22, y + (row_h - dash_h) // 2 - 2), "-", font=row_font, fill=text_fill)
 
-        draw.text((matchup_x, y + 35), matchup_text, font=row_font, fill=text_fill)
-        draw.text((date_x, y + 35), date_text, font=row_font, fill=text_fill)
+        matchup_bbox = draw.textbbox((0, 0), matchup_text, font=row_font)
+        matchup_h = matchup_bbox[3] - matchup_bbox[1]
+        draw.text((matchup_x, y + (row_h - matchup_h) // 2 - 4), matchup_text, font=row_font, fill=text_fill)
+
+        date_bbox = draw.textbbox((0, 0), date_text, font=row_font)
+        date_h = date_bbox[3] - date_bbox[1]
+        draw.text((date_x, y + (row_h - date_h) // 2 - 4), date_text, font=row_font, fill=text_fill)
 
         y += row_h + row_gap
 
