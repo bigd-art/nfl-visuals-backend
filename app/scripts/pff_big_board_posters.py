@@ -24,10 +24,10 @@ USER_AGENT = (
 SKIP_POSITIONS = {"FB", "K", "P"}
 
 POSTER_WIDTH = 1450
-HEADER_HEIGHT = 190
-ROW_HEIGHT = 110
-BOTTOM_PADDING = 50
-MARGIN = 40
+HEADER_HEIGHT = 280
+ROW_HEIGHT = 190
+BOTTOM_PADDING = 60
+MARGIN = 44
 
 
 def ensure_output_dir():
@@ -40,6 +40,7 @@ def safe_filename(name: str) -> str:
 
 def get_font(size=30, bold=False):
     candidates = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         "/System/Library/Fonts/Supplemental/Arial Bold.ttf" if bold else "/System/Library/Fonts/Supplemental/Arial.ttf",
         "/Library/Fonts/Arial Bold.ttf" if bold else "/Library/Fonts/Arial.ttf",
         "/System/Library/Fonts/Supplemental/Helvetica.ttc",
@@ -52,10 +53,13 @@ def get_font(size=30, bold=False):
     return ImageFont.load_default()
 
 
-TITLE_FONT = get_font(52, bold=True)
-SUBTITLE_FONT = get_font(22, bold=False)
-HEADER_FONT = get_font(25, bold=True)
-TEXT_FONT = get_font(24, bold=False)
+TITLE_FONT = get_font(84, bold=True)
+SUBTITLE_FONT = get_font(34, bold=False)
+HEADER_FONT = get_font(34, bold=True)
+TEXT_FONT = get_font(36, bold=False)
+RANK_FONT = get_font(42, bold=True)
+NAME_FONT = get_font(44, bold=True)
+SMALL_TEXT_FONT = get_font(32, bold=False)
 
 
 def get_headers(season):
@@ -182,23 +186,144 @@ def draw_row(draw, y, p):
         draw_text(draw, x, y, t, TEXT_FONT)
 
 
+def fit_font(draw, text, max_width, start_size, min_size=20, bold=False):
+    size = start_size
+    while size >= min_size:
+        font = get_font(size, bold=bold)
+        if draw.textlength(str(text), font=font) <= max_width:
+            return font
+        size -= 1
+    return get_font(min_size, bold=bold)
+
+
+def draw_vertical_gradient(draw, width, height, top_color, bottom_color):
+    for y in range(height):
+        t = y / max(1, height - 1)
+        r = int(top_color[0] * (1 - t) + bottom_color[0] * t)
+        g = int(top_color[1] * (1 - t) + bottom_color[1] * t)
+        b = int(top_color[2] * (1 - t) + bottom_color[2] * t)
+        draw.line((0, y, width, y), fill=(r, g, b))
+
+
 def create_poster(position, players, season):
     h = HEADER_HEIGHT + len(players) * ROW_HEIGHT + BOTTOM_PADDING
-    img = Image.new("RGB", (POSTER_WIDTH, h), "white")
+
+    bg_top = (6, 30, 88)
+    bg_bottom = (3, 10, 28)
+    outer_border = (120, 185, 255)
+    panel = (10, 28, 72)
+    panel_2 = (14, 39, 96)
+    title_bar = (23, 62, 150)
+    title_bar_hi = (45, 100, 220)
+    row_a = (10, 31, 78)
+    row_b = (16, 40, 95)
+    grid = (78, 132, 228)
+    text = (245, 248, 255)
+    muted = (192, 208, 242)
+    accent = (154, 204, 255)
+    gold = (255, 214, 90)
+
+    img = Image.new("RGB", (POSTER_WIDTH, h), bg_bottom)
     draw = ImageDraw.Draw(img)
+    draw_vertical_gradient(draw, POSTER_WIDTH, h, bg_top, bg_bottom)
 
-    draw_text(draw, MARGIN, 30, f"{position} - Top {len(players)} PFF Prospects", TITLE_FONT)
-    draw_text(draw, MARGIN, 95, f"Season {season}", SUBTITLE_FONT)
+    draw.rounded_rectangle((18, 18, POSTER_WIDTH - 18, h - 18), radius=34, outline=outer_border, width=3)
+    draw.rounded_rectangle((28, 28, POSTER_WIDTH - 28, h - 28), radius=30, outline=(40, 90, 190), width=1)
 
-    y = 150
-    draw.line((MARGIN, y - 10, POSTER_WIDTH - MARGIN, y - 10), fill="black", width=3)
-    draw_header(draw, y)
+    left = MARGIN
+    right = POSTER_WIDTH - MARGIN
 
-    y += 50
-    for p in players:
-        draw.line((MARGIN, y - 10, POSTER_WIDTH - MARGIN, y - 10), fill="black", width=1)
-        draw_row(draw, y + 5, p)
-        y += ROW_HEIGHT
+    top_h = 180
+    top_y = 34
+    draw.rounded_rectangle((left, top_y, right, top_y + top_h), radius=28, fill=panel, outline=outer_border, width=2)
+    draw.rounded_rectangle((left + 10, top_y + 10, right - 10, top_y + top_h - 10), radius=24, fill=panel_2)
+
+    title = f"{position} - TOP {len(players)} PFF PROSPECTS"
+    title_font = fit_font(draw, title, (right - left) - 60, 84, 44, bold=True)
+    tw = draw.textlength(title, font=title_font)
+    draw.text(((POSTER_WIDTH - tw) / 2, top_y + 28), title, fill=text, font=title_font)
+
+    subtitle = f"SEASON {season}"
+    sw = draw.textlength(subtitle, font=SUBTITLE_FONT)
+    draw.text(((POSTER_WIDTH - sw) / 2, top_y + 120), subtitle, fill=muted, font=SUBTITLE_FONT)
+
+    table_left = left + 12
+    table_right = right - 12
+    table_w = table_right - table_left
+
+    col_fracs = [0.09, 0.37, 0.22, 0.12, 0.12, 0.08]
+    col_px = [int(table_w * f) for f in col_fracs]
+    col_px[-1] += table_w - sum(col_px)
+
+    headers = ["RANK", "NAME", "COLLEGE", "HEIGHT", "WEIGHT", "AGE"]
+
+    header_y = top_y + top_h + 18
+    header_h = 58
+    draw.rounded_rectangle((table_left, header_y, table_right, header_y + header_h), radius=16, fill=title_bar)
+    draw.rounded_rectangle((table_left, header_y, table_right, header_y + (header_h // 2)), radius=16, fill=title_bar_hi)
+
+    x = table_left
+    for i, header in enumerate(headers):
+        if i in (0, 1, 2):
+            draw.text((x + 14, header_y + 12), header, fill=muted, font=HEADER_FONT)
+        else:
+            tw = draw.textlength(header, font=HEADER_FONT)
+            draw.text((x + col_px[i] - 14 - tw, header_y + 12), header, fill=muted, font=HEADER_FONT)
+
+        x += col_px[i]
+        if i != len(headers) - 1:
+            draw.line((x, header_y + 8, x, header_y + header_h - 8), fill=grid, width=1)
+
+    row_y = header_y + header_h + 14
+    for idx, p in enumerate(players):
+        fill = row_a if idx % 2 == 0 else row_b
+        draw.rounded_rectangle((table_left, row_y, table_right, row_y + ROW_HEIGHT - 12), radius=18, fill=fill)
+
+        rank = str(p["rank"])
+        name = str(p["name"])
+        college = str(p["college"])
+        height_text = str(p["height"])
+        weight_text = str(p["weight"])
+        age_text = str(p["age"])
+
+        values = [rank, name, college, height_text, weight_text, age_text]
+
+        x = table_left
+        for c_i, val in enumerate(values):
+            col_w = col_px[c_i]
+
+            if c_i == 0:
+                font = fit_font(draw, val, col_w - 28, 42, 24, bold=True)
+                y_text = row_y + 24
+                draw.text((x + 14, y_text), val, fill=gold, font=font)
+
+            elif c_i == 1:
+                font = fit_font(draw, val, col_w - 24, 44, 24, bold=True)
+                y_text = row_y + 18
+                draw.text((x + 14, y_text), val, fill=text, font=font)
+
+            elif c_i == 2:
+                font = fit_font(draw, val, col_w - 24, 34, 20, bold=False)
+                y_text = row_y + 64
+                draw.text((x + 14, y_text), val, fill=accent, font=font)
+
+            elif c_i in (3, 4):
+                font = fit_font(draw, val, col_w - 24, 38, 24, bold=False)
+                tw = draw.textlength(val, font=font)
+                y_text = row_y + 42
+                draw.text((x + col_w - 14 - tw, y_text), val, fill=text, font=font)
+
+            else:
+                font = fit_font(draw, val, col_w - 20, 40, 26, bold=False)
+                tw = draw.textlength(val, font=font)
+                y_text = row_y + 42
+                draw.text((x + col_w - 14 - tw, y_text), val, fill=text, font=font)
+
+            x += col_w
+            if c_i != len(values) - 1:
+                draw.line((x, row_y + 10, x, row_y + ROW_HEIGHT - 22), fill=grid, width=1)
+
+        row_y += ROW_HEIGHT
 
     path = os.path.join(OUTPUT_DIR, f"{safe_filename(position)}_top_5.png")
     img.save(path)
