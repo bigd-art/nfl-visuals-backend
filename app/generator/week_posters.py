@@ -704,16 +704,16 @@ def main():
     parser.add_argument("--limit", type=int, default=0, help="Limit number of games (0=all)")
     args = parser.parse_args()
 
-    url = scoreboard_url(args.year, args.week, args.seasontype)
-    print(f"Fetching scoreboard: {url}")
-    html = fetch_url(url)
-    game_ids = extract_game_ids_from_scoreboard_html(html)
-
-    if args.limit and args.limit > 0:
-        game_ids = game_ids[: args.limit]
-
-    if not game_ids:
-        print("No gameIds found. ESPN page format may have changed.")
+    try:
+        out_dir = generate_week(
+            year=args.year,
+            week=args.week,
+            seasontype=args.seasontype,
+            limit=args.limit,
+        )
+        print(f"Posters generated in: {out_dir}")
+    except Exception as e:
+        print(str(e))
         sys.exit(1)
 
 
@@ -725,6 +725,10 @@ def generate_week(year: int, week: int, seasontype: int = 2, limit: int = 0) -> 
     """
     Wrapper used by FastAPI.
     Generates posters for a given week and returns the output folder path.
+
+    New behavior:
+    - Posters are generated ONLY if every game for that week is completed.
+    - If even one game is not completed, nothing is generated.
     """
     url = scoreboard_url(year, week, seasontype)
     html = fetch_url(url)
@@ -736,25 +740,34 @@ def generate_week(year: int, week: int, seasontype: int = 2, limit: int = 0) -> 
     if not game_ids:
         raise RuntimeError(no_poster_message(year, week))
 
+    # Pre-check: every game in the requested set must be completed
+    summaries: Dict[str, Dict] = {}
+    for gid in game_ids:
+        summary = fetch_summary(gid)
+        summaries[gid] = summary
+        meta = extract_game_meta(summary, gid)
+        if not meta.get("completed", False):
+            raise RuntimeError(no_poster_message(year, week))
+
     kind = "regular" if seasontype == 2 else "playoffs"
     out_dir = os.path.join("game_visuals", str(year), kind, f"week{str(week).zfill(2)}")
 
     shutil.rmtree(out_dir, ignore_errors=True)
     os.makedirs(out_dir, exist_ok=True)
 
-    made_any = False
     for gid in game_ids:
-        success, _ = generate_poster_for_game(gid, out_dir)
-        if success:
-            made_any = True
+        summary = summaries[gid]
 
-    if not made_any:
-        raise RuntimeError(no_poster_message(year, week))
+        offensive_leaders = extract_all_team_leaders(summary)
+        defensive_leaders = extract_all_defensive_leaders(summary)
+        yardage = extract_team_yardage(summary)
+        meta = extract_game_meta(summary, gid)
+
+        out_path = os.path.join(out_dir, f"game_{gid}_poster.png")
+        make_poster_style_image(meta, offensive_leaders, defensive_leaders, yardage, out_path)
 
     return out_dir
 
 
 if __name__ == "__main__":
     main()
-
-
