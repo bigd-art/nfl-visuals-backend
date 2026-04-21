@@ -9,8 +9,6 @@ from typing import Any, Dict, List, Tuple, Optional
 import requests
 from PIL import Image, ImageDraw, ImageFont
 
-from app.services.storage_supabase import upload_file_return_url
-
 USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -18,6 +16,7 @@ USER_AGENT = (
 )
 
 SITE_API = "https://site.api.espn.com/apis/v2/sports/football/nfl/standings"
+SUPABASE_PUBLIC_BASE = "https://rojsabkwywygludonpdf.supabase.co/storage/v1/object/public/nfl-posters"
 
 # ✅ HARDCODED DIVISIONS (East/North/South/West) by ESPN displayName
 TEAM_TO_DIV: Dict[str, str] = {
@@ -454,24 +453,11 @@ def generate_standings_conference_png(season: int, out_path: str) -> str:
 
 def generate_and_upload_standings_conference(season: int) -> str:
     """
-    Generates the PNG to /tmp and uploads to Supabase.
-    Returns a versioned public URL so the frontend does not reuse a stale cached image.
+    Return the existing current standings image from Supabase instead of
+    generating and uploading a new one.
     """
-    local_path = f"/tmp/standings_conference_{season}.png"
-    generate_standings_conference_png(season, local_path)
-
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-
-    # Upload unique versioned file to avoid stale cache
-    versioned_storage_key = f"standings/{season}/history/standings_conference_{timestamp}.png"
-    versioned_url = upload_file_return_url(local_path, versioned_storage_key)
-
-    # Optional stable current copy
-    current_storage_key = f"standings/{season}/standings_conference_current.png"
-    upload_file_return_url(local_path, current_storage_key)
-
-    # Return cache-busted versioned URL
-    return f"{versioned_url}?v={timestamp}"
+    return f"{SUPABASE_PUBLIC_BASE}/standings/current.png?v={timestamp}"
 
 
 def main():
