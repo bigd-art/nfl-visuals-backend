@@ -202,15 +202,13 @@ def format_date_eastern(date_iso: str) -> str:
 
         if ZoneInfo is not None:
             eastern = dt.astimezone(ZoneInfo("America/New_York"))
-            day_part = eastern.strftime("%a").upper()
             date_part = eastern.strftime("%m/%d/%Y")
-            time_part = eastern.strftime("%I:%M %p").lstrip("0")
-            return f"{day_part} {date_part} ({time_part} ET)"
+            time_part = eastern.strftime("%I:%M").lstrip("0")
+            return f"{date_part} {time_part}"
 
-        day_part = dt.strftime("%a").upper()
         date_part = dt.strftime("%m/%d/%Y")
-        time_part = dt.strftime("%I:%M %p").lstrip("0")
-        return f"{day_part} {date_part} ({time_part})"
+        time_part = dt.strftime("%I:%M").lstrip("0")
+        return f"{date_part} {time_part}"
 
     except Exception:
         return date_iso
@@ -248,12 +246,14 @@ def get_font(size: int, bold: bool = False):
     candidates = []
     if bold:
         candidates = [
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
             "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
             "/System/Library/Fonts/Supplemental/Helvetica.ttc",
             "/Library/Fonts/Arial Bold.ttf",
         ]
     else:
         candidates = [
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
             "/System/Library/Fonts/Supplemental/Arial.ttf",
             "/System/Library/Fonts/Supplemental/Helvetica.ttc",
             "/Library/Fonts/Arial.ttf",
@@ -315,46 +315,46 @@ def fetch_logo_image(url: str, size: int, cache: Dict[str, Image.Image]) -> Opti
 
 
 def make_poster(team_abbr: str, team_name: str, year: int, games: List[dict], output_path: str):
-    width = 1400
-    height = 2200
+    width = 1800
+    height = 3000
 
     primary, secondary = TEAM_COLORS.get(team_abbr, ("#111111", "#444444"))
     bg = Image.new("RGB", (width, height), primary)
     draw = ImageDraw.Draw(bg)
 
-    title_font = get_font(80, bold=True)
-    subtitle_font = get_font(42, bold=True)
-    header_font = get_font(34, bold=True)
-    row_font = get_font(31, bold=False)
-    week_font = get_font(32, bold=True)
+    title_font = get_font(120, bold=True)
+    subtitle_font = get_font(64, bold=True)
+    header_font = get_font(46, bold=True)
+    row_font = get_font(42, bold=False)
+    week_font = get_font(48, bold=True)
 
-    draw.rectangle([0, 0, width, 32], fill=secondary)
-    draw.rectangle([0, height - 32, width, height], fill=secondary)
+    draw.rectangle([0, 0, width, 50], fill=secondary)
+    draw.rectangle([0, height - 50, width, height], fill=secondary)
 
-    draw_centered(draw, team_abbr, title_font, 80, width, "white")
-    draw_centered(draw, f"{team_name} {year} Schedule", subtitle_font, 178, width, "white")
+    draw_centered(draw, team_abbr, title_font, 120, width, "white")
+    draw_centered(draw, f"{team_name} {year} Schedule", subtitle_font, 260, width, "white")
 
-    left = 90
-    right = width - 90
-    top = 285
-    row_h = 82
-    row_gap = 12
+    left = 120
+    right = width - 120
+    top = 420
+    row_h = 130
+    row_gap = 20
 
-    draw.rounded_rectangle([left, top, right, top + 112], radius=24, fill=secondary)
-    draw.text((left + 40, top + 34), "WEEK", font=header_font, fill="white")
-    draw.text((left + 220, top + 34), "OPP", font=header_font, fill="white")
-    draw.text((left + 355, top + 34), "MATCHUP", font=header_font, fill="white")
-    draw.text((left + 700, top + 34), "DATE / TIME (ET)", font=header_font, fill="white")
+    draw.rounded_rectangle([left, top, right, top + 160], radius=30, fill=secondary)
+    draw.text((left + 60, top + 52), "WEEK", font=header_font, fill="white")
+    draw.text((left + 340, top + 52), "OPP", font=header_font, fill="white")
+    draw.text((left + 520, top + 52), "MATCHUP", font=header_font, fill="white")
+    draw.text((left + 1080, top + 52), "DATE / TIME (ET)", font=header_font, fill="white")
 
-    y = top + 132
+    y = top + 200
 
-    logo_x = left + 230
-    logo_size = 56
-    matchup_x = left + 355
-    date_x = left + 700
+    logo_x = left + 350
+    logo_size = 90
+    matchup_x = left + 520
+    date_x = left + 1080
 
-    matchup_width = 300
-    date_width = right - date_x - 35
+    matchup_width = 500
+    date_width = right - date_x - 40
 
     logo_cache: Dict[str, Image.Image] = {}
 
@@ -364,26 +364,26 @@ def make_poster(team_abbr: str, team_name: str, year: int, games: List[dict], ou
 
         draw.rounded_rectangle(
             [left, y, right, y + row_h],
-            radius=18,
+            radius=22,
             fill=row_fill
         )
 
         matchup_text = fit_text(draw, game["opponent"], row_font, matchup_width)
         date_text = fit_text(draw, game["date"], row_font, date_width)
 
-        draw.text((left + 45, y + 21), f"{game['week']}", font=week_font, fill=text_fill)
+        draw.text((left + 70, y + 35), f"{game['week']}", font=week_font, fill=text_fill)
 
         if game["opponent"] != "BYE":
             logo_img = fetch_logo_image(game.get("logo_url", ""), logo_size, logo_cache)
             if logo_img is not None:
-                bg.paste(logo_img, (logo_x, y + 13), logo_img)
+                bg.paste(logo_img, (logo_x, y + 20), logo_img)
             else:
-                draw.text((logo_x + 10, y + 19), "-", font=row_font, fill=text_fill)
+                draw.text((logo_x + 20, y + 35), "-", font=row_font, fill=text_fill)
         else:
-            draw.text((logo_x + 6, y + 19), "-", font=row_font, fill=text_fill)
+            draw.text((logo_x + 20, y + 35), "-", font=row_font, fill=text_fill)
 
-        draw.text((matchup_x, y + 21), matchup_text, font=row_font, fill=text_fill)
-        draw.text((date_x, y + 21), date_text, font=row_font, fill=text_fill)
+        draw.text((matchup_x, y + 35), matchup_text, font=row_font, fill=text_fill)
+        draw.text((date_x, y + 35), date_text, font=row_font, fill=text_fill)
 
         y += row_h + row_gap
 
