@@ -3,6 +3,7 @@ import argparse
 import os
 import sys
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Tuple, Optional
 
 import requests
@@ -252,7 +253,7 @@ def extract_conferences(data: dict) -> Dict[str, List[TeamRow]]:
 
 def get_font(size: int) -> ImageFont.FreeTypeFont:
     candidates = [
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",  # ✅ Ubuntu/GHA
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         "/System/Library/Fonts/Supplemental/Arial.ttf",
         "/Library/Fonts/Arial.ttf",
     ]
@@ -327,7 +328,6 @@ def render_conference_poster(season: int, conferences: Dict[str, List[TeamRow]],
     draw.rounded_rectangle((18, 18, width - 18, height - 18), radius=34, outline=outer_border, width=3)
     draw.rounded_rectangle((28, 28, width - 28, height - 28), radius=30, outline=(40, 90, 190), width=1)
 
-    title_font = get_font_local(76, bold=True)
     section_font = get_font_local(36, bold=True)
     header_font = get_font_local(22, bold=True)
     seed_font = get_font_local(28, bold=True)
@@ -454,14 +454,24 @@ def generate_standings_conference_png(season: int, out_path: str) -> str:
 
 def generate_and_upload_standings_conference(season: int) -> str:
     """
-    Generates the PNG to /tmp and uploads to Supabase via upload_file_return_url().
-    Returns public URL.
+    Generates the PNG to /tmp and uploads to Supabase.
+    Returns a versioned public URL so the frontend does not reuse a stale cached image.
     """
     local_path = f"/tmp/standings_conference_{season}.png"
     generate_standings_conference_png(season, local_path)
 
-    storage_key = f"standings/{season}/standings_conference.png"
-    return upload_file_return_url(local_path, storage_key)
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+    # Upload unique versioned file to avoid stale cache
+    versioned_storage_key = f"standings/{season}/history/standings_conference_{timestamp}.png"
+    versioned_url = upload_file_return_url(local_path, versioned_storage_key)
+
+    # Optional stable current copy
+    current_storage_key = f"standings/{season}/standings_conference_current.png"
+    upload_file_return_url(local_path, current_storage_key)
+
+    # Return cache-busted versioned URL
+    return f"{versioned_url}?v={timestamp}"
 
 
 def main():
