@@ -267,89 +267,180 @@ def get_font(size: int) -> ImageFont.FreeTypeFont:
 def render_conference_poster(season: int, conferences: Dict[str, List[TeamRow]], out_path: str):
     width, height = 1080, 1920
 
-    bg = (10, 12, 16)
-    header_bar = (30, 36, 50)
-    card = (18, 22, 30)
-    grid = (40, 48, 66)
-    text = (235, 238, 245)
-    muted = (170, 176, 190)
+    def get_font_local(size: int, bold: bool = False):
+        candidates = []
+        if bold:
+            candidates.extend([
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+                "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+                "/Library/Fonts/Arial Bold.ttf",
+            ])
+        candidates.extend([
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "/System/Library/Fonts/Supplemental/Arial.ttf",
+            "/Library/Fonts/Arial.ttf",
+        ])
+        for p in candidates:
+            try:
+                return ImageFont.truetype(p, size=size)
+            except Exception:
+                pass
+        return ImageFont.load_default()
 
-    img = Image.new("RGB", (width, height), bg)
+    def fit_font(draw: ImageDraw.ImageDraw, text: str, max_width: int, start_size: int, min_size: int = 18, bold: bool = False):
+        size = start_size
+        while size >= min_size:
+            font = get_font_local(size, bold=bold)
+            if draw.textlength(text, font=font) <= max_width:
+                return font
+            size -= 1
+        return get_font_local(min_size, bold=bold)
+
+    def draw_vertical_gradient(draw: ImageDraw.ImageDraw, width: int, height: int, top_color, bottom_color):
+        for yy in range(height):
+            t = yy / max(1, height - 1)
+            r = int(top_color[0] * (1 - t) + bottom_color[0] * t)
+            g = int(top_color[1] * (1 - t) + bottom_color[1] * t)
+            b = int(top_color[2] * (1 - t) + bottom_color[2] * t)
+            draw.line((0, yy, width, yy), fill=(r, g, b))
+
+    bg_top = (6, 30, 88)
+    bg_bottom = (3, 10, 28)
+    outer_border = (120, 185, 255)
+    panel = (10, 28, 72)
+    panel_2 = (14, 39, 96)
+    title_bar = (23, 62, 150)
+    title_bar_hi = (45, 100, 220)
+    table_header = (15, 43, 104)
+    row_a = (10, 31, 78)
+    row_b = (16, 40, 95)
+    grid = (78, 132, 228)
+    text = (245, 248, 255)
+    muted = (192, 208, 242)
+    accent = (154, 204, 255)
+    gold = (255, 214, 90)
+
+    img = Image.new("RGB", (width, height), bg_bottom)
     draw = ImageDraw.Draw(img)
+    draw_vertical_gradient(draw, width, height, bg_top, bg_bottom)
 
-    title_font = get_font(46)
-    section_font = get_font(28)
-    header_font = get_font(20)
-    row_font = get_font(22)
+    draw.rounded_rectangle((18, 18, width - 18, height - 18), radius=34, outline=outer_border, width=3)
+    draw.rounded_rectangle((28, 28, width - 28, height - 28), radius=30, outline=(40, 90, 190), width=1)
 
-    pad = 34
-    y = pad
+    title_font = get_font_local(76, bold=True)
+    section_font = get_font_local(36, bold=True)
+    header_font = get_font_local(22, bold=True)
+    seed_font = get_font_local(28, bold=True)
+    stat_font = get_font_local(28, bold=False)
 
-    draw.text((pad, y), f"NFL Standings {season} — By Conference", fill=text, font=title_font)
-    y += 70
+    left = 38
+    right = width - 38
+    y = 38
+
+    top_h = 150
+    draw.rounded_rectangle((left, y, right, y + top_h), radius=28, fill=panel, outline=outer_border, width=2)
+    draw.rounded_rectangle((left + 10, y + 10, right - 10, y + top_h - 10), radius=24, fill=panel_2)
+
+    title = f"NFL STANDINGS {season}"
+    max_title_width = (right - left) - 60
+    fitted_title_font = fit_font(draw, title, max_title_width, 76, 52, bold=True)
+    tw = draw.textlength(title, font=fitted_title_font)
+    th = fitted_title_font.size
+    draw.text(((width - tw) / 2, y + (top_h - th) / 2 - 8), title, fill=text, font=fitted_title_font)
+
+    y += top_h + 24
+
+    section_gap = 24
+    bottom_margin = 34
+    available_h = height - y - bottom_margin
+    section_h = (available_h - section_gap) // 2
 
     headers = ["#", "TEAM", "DIV", "W", "L", "T"]
-    col_fracs = [0.06, 0.68, 0.10, 0.06, 0.05, 0.05]
+    col_fracs = [0.10, 0.52, 0.14, 0.08, 0.08, 0.08]
 
-    def draw_section(title: str, rows: List[TeamRow]):
-        nonlocal y
+    def draw_section(top_y: int, title: str, rows: List[TeamRow]):
+        sec_bottom = top_y + section_h
+        draw.rounded_rectangle((left, top_y, right, sec_bottom), radius=28, fill=panel, outline=grid, width=2)
 
-        bar_h = 36
-        draw.rounded_rectangle((pad, y, width - pad, y + bar_h), radius=12, fill=header_bar)
-        draw.text((pad + 12, y + 6), title, fill=text, font=section_font)
-        y += bar_h + 8
+        bar_margin = 16
+        bar_h = 58
+        draw.rounded_rectangle(
+            (left + bar_margin, top_y + bar_margin, right - bar_margin, top_y + bar_margin + bar_h),
+            radius=18,
+            fill=title_bar,
+        )
+        draw.rounded_rectangle(
+            (left + bar_margin, top_y + bar_margin, right - bar_margin, top_y + bar_margin + (bar_h // 2)),
+            radius=18,
+            fill=title_bar_hi,
+        )
 
-        card_w = width - 2 * pad
-        px = [int(card_w * f) for f in col_fracs]
-        px[-1] += (card_w - sum(px))
+        tw = draw.textlength(title, font=section_font)
+        draw.text(((width - tw) / 2, top_y + bar_margin + 9), title, fill=text, font=section_font)
 
-        header_h = 30
-        draw.rounded_rectangle((pad, y, width - pad, y + header_h), radius=10, fill=card)
+        table_left = left + 16
+        table_right = right - 16
+        table_w = table_right - table_left
 
-        x = pad
+        px = [int(table_w * f) for f in col_fracs]
+        px[-1] += (table_w - sum(px))
+
+        header_y = top_y + bar_margin + bar_h + 16
+        header_h = 46
+        draw.rounded_rectangle((table_left, header_y, table_right, header_y + header_h), radius=14, fill=table_header)
+
+        x = table_left
         for i, h in enumerate(headers):
             if i in (0, 1):
-                draw.text((x + 8, y + 6), h, fill=muted, font=header_font)
+                draw.text((x + 12, header_y + 10), h, fill=muted, font=header_font)
             else:
                 tw = draw.textlength(h, font=header_font)
-                draw.text((x + px[i] - 8 - tw, y + 6), h, fill=muted, font=header_font)
+                draw.text((x + px[i] - 12 - tw, header_y + 10), h, fill=muted, font=header_font)
 
             x += px[i]
             if i != len(headers) - 1:
-                draw.line((x, y + 5, x, y + header_h - 5), fill=grid, width=1)
+                draw.line((x, header_y + 7, x, header_y + header_h - 7), fill=grid, width=1)
 
-        y += header_h + 4
+        rows_top = header_y + header_h + 10
+        rows_bottom = sec_bottom - 18
+        n_rows = max(1, len(rows))
+        gap = 6
+        usable_h = rows_bottom - rows_top - gap * (n_rows - 1)
+        row_h = max(34, usable_h // n_rows)
 
-        row_h = 28
+        current_y = rows_top
         for idx, r in enumerate(rows):
-            if y > height - 24:
-                break
-
-            fill = (14, 18, 26) if (idx % 2 == 0) else (12, 16, 22)
-            draw.rounded_rectangle((pad, y, width - pad, y + row_h), radius=8, fill=fill)
+            fill = row_a if idx % 2 == 0 else row_b
+            draw.rounded_rectangle((table_left, current_y, table_right, current_y + row_h), radius=14, fill=fill)
 
             seed = str(idx + 1)
             div = r.division or hardcoded_div(r.team_name)
             values = [seed, r.team_name, div, str(r.w), str(r.l), str(r.t)]
 
-            x = pad
+            x = table_left
             for c_i, val in enumerate(values):
-                if c_i in (0, 1):
-                    draw.text((x + 8, y + 4), val, fill=text, font=row_font)
+                if c_i == 0:
+                    text_y = current_y + (row_h - 28) / 2 - 2
+                    color = gold if idx < 7 else accent
+                    draw.text((x + 14, text_y), val, fill=color, font=seed_font)
+                elif c_i == 1:
+                    max_team_w = px[c_i] - 24
+                    team_font = fit_font(draw, val, max_team_w, 28, 18, bold=False)
+                    text_y = current_y + (row_h - team_font.size) / 2 - 2
+                    draw.text((x + 12, text_y), val, fill=text, font=team_font)
                 else:
-                    tw = draw.textlength(val, font=row_font)
-                    draw.text((x + px[c_i] - 8 - tw, y + 4), val, fill=text, font=row_font)
+                    tw = draw.textlength(val, font=stat_font)
+                    text_y = current_y + (row_h - 28) / 2 - 2
+                    draw.text((x + px[c_i] - 12 - tw, text_y), val, fill=text, font=stat_font)
 
                 x += px[c_i]
                 if c_i != len(values) - 1:
-                    draw.line((x, y + 4, x, y + row_h - 4), fill=grid, width=1)
+                    draw.line((x, current_y + 7, x, current_y + row_h - 7), fill=grid, width=1)
 
-            y += row_h + 3
+            current_y += row_h + gap
 
-        y += 10
-
-    draw_section("AFC", conferences.get("AFC", []))
-    draw_section("NFC", conferences.get("NFC", []))
+    draw_section(y, "AFC", conferences.get("AFC", []))
+    draw_section(y + section_h + section_gap, "NFC", conferences.get("NFC", []))
 
     img.save(out_path)
 
