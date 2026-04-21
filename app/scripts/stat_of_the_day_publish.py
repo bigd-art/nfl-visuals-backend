@@ -528,50 +528,93 @@ def draw_header(draw, item: PosterItem):
 
 
 def draw_player_row(draw, item: PosterItem):
-    y = 196
-    rounded_rect(draw, (MARGIN, y, W - MARGIN, y + 98), 24, fill=CARD, outline=LINE, width=2)
-    draw.text((MARGIN + 22, y + 16), item.player, font=font(40, bold=True), fill=TEXT)
-    draw.text((MARGIN + 22, y + 58), item.team, font=font(22), fill=MUTED)
+    y = 184
+    rounded_rect(draw, (MARGIN, y, W - MARGIN, y + 108), 24, fill=CARD, outline=LINE, width=2)
+
+    max_width = (W - 2 * MARGIN) - 44
+    max_height = 108 - 28
+    wrapped, fitted_font, spacing = fit_multiline_text(
+        draw=draw,
+        text=item.player,
+        max_width=max_width,
+        max_height=max_height,
+        start_size=46,
+        min_size=28,
+        bold=True,
+        line_spacing=4,
+    )
+    bbox = draw.multiline_textbbox((0, 0), wrapped, font=fitted_font, spacing=spacing)
+    text_h = bbox[3] - bbox[1]
+    text_y = y + ((108 - text_h) // 2) - 2
+    draw.multiline_text((MARGIN + 22, text_y), wrapped, font=fitted_font, fill=TEXT, spacing=spacing)
 
 
 def draw_big_stat(draw, item: PosterItem):
-    y = 318
-    rounded_rect(draw, (MARGIN, y, W - MARGIN, y + 160), 28, fill=CARD2, outline=item.accent_rgb, width=3)
-    draw.text((MARGIN + 24, y + 18), item.big_label, font=font(24, bold=True), fill=MUTED)
-    draw.text((MARGIN + 24, y + 56), item.big_value, font=font(84, bold=True), fill=TEXT)
+    y = 314
+    rounded_rect(draw, (MARGIN, y, W - MARGIN, y + 172), 28, fill=CARD2, outline=item.accent_rgb, width=3)
+    draw.text((MARGIN + 24, y + 18), item.big_label, font=font(26, bold=True), fill=MUTED)
+
+    max_width = (W - 2 * MARGIN) - 48
+    wrapped, fitted_font, spacing = fit_multiline_text(
+        draw=draw,
+        text=item.big_value,
+        max_width=max_width,
+        max_height=96,
+        start_size=92,
+        min_size=60,
+        bold=True,
+        line_spacing=4,
+    )
+    draw.multiline_text((MARGIN + 24, y + 56), wrapped, font=fitted_font, fill=TEXT, spacing=spacing)
 
 
 def draw_description(draw, item: PosterItem):
-    y = 500
-    rounded_rect(draw, (MARGIN, y, W - MARGIN, y + 118), 22, fill=CARD, outline=LINE, width=2)
+    y = 510
+    rounded_rect(draw, (MARGIN, y, W - MARGIN, y + 138), 22, fill=CARD, outline=LINE, width=2)
 
     max_width = (W - 2 * MARGIN) - 36
-    max_height = 118 - 32
+    max_height = 138 - 28
 
     wrapped, fitted_font, spacing = fit_multiline_text(
         draw=draw,
         text=item.description,
         max_width=max_width,
         max_height=max_height,
-        start_size=22,
-        min_size=15,
+        start_size=28,
+        min_size=18,
         bold=False,
-        line_spacing=6,
+        line_spacing=7,
     )
-    draw.multiline_text((MARGIN + 18, y + 16), wrapped, font=fitted_font, fill=TEXT, spacing=spacing)
+    bbox = draw.multiline_textbbox((0, 0), wrapped, font=fitted_font, spacing=spacing)
+    text_h = bbox[3] - bbox[1]
+    text_y = y + ((138 - text_h) // 2) - 2
+    draw.multiline_text((MARGIN + 18, text_y), wrapped, font=fitted_font, fill=TEXT, spacing=spacing)
 
 
 def draw_statline(draw, item: PosterItem):
-    y = 640
-    rounded_rect(draw, (MARGIN, y, W - MARGIN, y + 98), 22, fill=CARD, outline=LINE, width=2)
-    draw.text((MARGIN + 18, y + 14), "STAT LINE", font=font(18, bold=True), fill=MUTED)
-    draw.multiline_text((MARGIN + 18, y + 42), wrap_text(item.statline, 70), font=font(20, bold=False), fill=TEXT, spacing=4)
+    y = 664
+    rounded_rect(draw, (MARGIN, y, W - MARGIN, y + 126), 22, fill=CARD, outline=LINE, width=2)
+    draw.text((MARGIN + 18, y + 14), "STAT LINE", font=font(20, bold=True), fill=MUTED)
+
+    max_width = (W - 2 * MARGIN) - 36
+    max_height = 126 - 44
+    wrapped, fitted_font, spacing = fit_multiline_text(
+        draw=draw,
+        text=item.statline,
+        max_width=max_width,
+        max_height=max_height,
+        start_size=28,
+        min_size=17,
+        bold=False,
+        line_spacing=6,
+    )
+    draw.multiline_text((MARGIN + 18, y + 44), wrapped, font=fitted_font, fill=TEXT, spacing=spacing)
 
 
 def draw_visual(draw, item: PosterItem):
-    y = 760
-    rounded_rect(draw, (MARGIN, y, W - MARGIN, y + 250), 28, fill=CARD, outline=LINE, width=2)
-    draw.text((MARGIN + 20, y + 16), "VISUAL BREAKDOWN", font=font(20, bold=True), fill=MUTED)
+    y = 814
+    rounded_rect(draw, (MARGIN, y, W - MARGIN, y + 252), 28, fill=CARD, outline=LINE, width=2)
+    draw.text((MARGIN + 20, y + 16), "VISUAL BREAKDOWN", font=font(22, bold=True), fill=MUTED)
 
     if item.visual_kind == "before_after":
         left = MARGIN + 30
@@ -638,7 +681,7 @@ def draw_visual(draw, item: PosterItem):
 
 
 def draw_chips(draw, item: PosterItem):
-    y = 1034
+    y = 1092
     gap = 16
     chip_w = (W - (2 * MARGIN) - (2 * gap)) // 3
     chips = [item.chip1, item.chip2, item.chip3]
@@ -1016,7 +1059,6 @@ def publish_stat_of_the_day(run_day: date = None, keep_versioned: bool = False) 
 
     category_key = category_for_day(run_day)
 
-    # daily deterministic randomness so reruns that same day stay stable
     random.seed(f"stat-of-day::{run_day.isoformat()}::{category_key}")
 
     season, week, df_week = choose_random_valid_season_week(category_key=category_key)
