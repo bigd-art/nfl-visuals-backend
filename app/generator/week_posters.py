@@ -446,8 +446,6 @@ def extract_team_yardage(summary: Dict) -> Dict[str, Dict]:
     return results
 
 
-# ---------------------- POSTER DESIGN ----------------------
-
 def load_font(size: int, bold: bool = False):
     candidates = [
         "/System/Library/Fonts/Supplemental/Arial Bold.ttf" if bold else "/System/Library/Fonts/Supplemental/Arial.ttf",
@@ -474,6 +472,34 @@ def fit_text(draw, text: str, font, max_width: int) -> str:
         text = text[:-1]
 
     return text.rstrip() + "…"
+
+
+def wrap_line(draw, text: str, font, max_width: int, max_lines: int = 2) -> List[str]:
+    words = str(text).split()
+    if not words:
+        return [""]
+
+    lines = []
+    current = ""
+
+    for word in words:
+        test = word if not current else current + " " + word
+
+        if draw.textlength(test, font=font) <= max_width:
+            current = test
+        else:
+            if current:
+                lines.append(current)
+            current = word
+
+    if current:
+        lines.append(current)
+
+    if len(lines) > max_lines:
+        lines = lines[:max_lines]
+        lines[-1] = fit_text(draw, lines[-1], font, max_width)
+
+    return lines
 
 
 def draw_center(draw, box, text: str, font, fill):
@@ -514,12 +540,12 @@ def leader_offense_lines(off_dict: Dict) -> List[str]:
     lines = []
 
     if p:
-        lines.append(f"PASS: {p.get('name','N/A')} • {p.get('yards',0)} YDS, {p.get('td',0)} TD")
+        lines.append(f"PASS: {p.get('name','N/A')} • {p.get('yards',0)} YDS, {p.get('td',0)} TD, {p.get('ints',0)} INT")
     else:
         lines.append("PASS: N/A")
 
     if r:
-        lines.append(f"RUSH: {r.get('name','N/A')} • {r.get('yards',0)} YDS")
+        lines.append(f"RUSH: {r.get('name','N/A')} • {r.get('yards',0)} YDS, {r.get('td',0)} TD")
     else:
         lines.append("RUSH: N/A")
 
@@ -558,16 +584,21 @@ def leader_defense_lines(def_dict: Dict) -> List[str]:
 
 def draw_leader_column(draw, x1, y1, x2, title, lines):
     section_font = load_font(23, True)
-    line_font = load_font(24, True)
+    line_font = load_font(21, True)
 
     draw.text((x1, y1), title, font=section_font, fill=WHITE)
 
-    y = y1 + 44
+    y = y1 + 42
+    max_width = x2 - x1
 
     for line in lines:
-        line = fit_text(draw, line, line_font, x2 - x1)
-        draw.text((x1, y), line, font=line_font, fill=WHITE)
-        y += 43
+        wrapped = wrap_line(draw, line, line_font, max_width, max_lines=2)
+
+        for wrapped_line in wrapped:
+            draw.text((x1, y), wrapped_line, font=line_font, fill=WHITE)
+            y += 26
+
+        y += 8
 
 
 def draw_team_leader_card(draw, x1, y1, x2, y2, team_name, off_dict, def_dict):
@@ -664,7 +695,6 @@ def make_poster_style_image(
     d.text(((W - d.textlength(title, font=title_font)) / 2, 28), title, font=title_font, fill=WHITE)
     d.text(((W - d.textlength(subtitle, font=small_font)) / 2, 105), subtitle, font=small_font, fill=(208, 218, 238))
 
-    # SCOREBOARD
     x0, y0, x1, y1 = 42, 230, W - 42, 555
 
     d.rounded_rectangle((x0, y0, x1, y1), radius=32, fill=CARD, outline=BORDER, width=3)
@@ -688,7 +718,6 @@ def make_poster_style_image(
     draw_center(d, (498, y0 + 127, 582, y0 + 175), "AT", at_font, MUTED)
     d.text((600, y0 + 92), str(right_score), font=score_font, fill=WHITE)
 
-    # SCORING BY QUARTER
     qx0, qy0, qx1, qy1 = 42, 590, W - 42, 850
 
     d.rounded_rectangle((qx0, qy0, qx1, qy1), radius=28, fill=CARD, outline=BORDER, width=3)
@@ -719,7 +748,6 @@ def make_poster_style_image(
         for score, x in zip(scores, col_x[1:]):
             draw_center(d, (x - 55, y, x + 55, y + 42), str(score), q_font, WHITE)
 
-    # TEAM YARDAGE
     sx0, sy0, sx1, sy1 = 42, 890, W - 42, 1090
 
     d.rounded_rectangle((sx0, sy0, sx1, sy1), radius=28, fill=CARD, outline=BORDER, width=3)
@@ -734,7 +762,6 @@ def make_poster_style_image(
     stat_line(d, sx0 + 380, sy0 + 95, f"{home.get('abbr')} TOTAL", f"{home_total}", stat_label_font, stat_value_font)
     stat_line(d, sx0 + 670, sy0 + 95, "DIFFERENCE", diff_text, stat_label_font, stat_value_font)
 
-    # TEAM LEADERS
     draw_center(d, (42, 1120, W - 42, 1170), "TEAM LEADERS", section_font, WHITE)
 
     draw_team_leader_card(d, 42, 1190, W - 42, 1518, away_name, away_off, away_def)
