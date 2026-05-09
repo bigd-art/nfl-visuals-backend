@@ -43,7 +43,16 @@ TEAM_INFO = {
 }
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0"
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/138.0.0.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://www.espn.com/nfl/",
+    "Cache-Control": "no-cache",
+    "Pragma": "no-cache",
 }
 
 OFFENSE_REQUIREMENTS = [
@@ -184,9 +193,34 @@ def paste_logo_centered(base_image, logo, center_x, top_y, max_width=120, max_he
 
 def fetch_roster_tables(team_code):
     url = f"https://www.espn.com/nfl/team/roster/_/name/{team_code}"
-    response = requests.get(url, headers=HEADERS, timeout=30)
-    response.raise_for_status()
-    return pd.read_html(StringIO(response.text))
+
+    last_error = None
+
+    for attempt in range(1, 5):
+        try:
+            response = requests.get(url, headers=HEADERS, timeout=30)
+            response.raise_for_status()
+
+            html = response.text or ""
+
+            if len(html.strip()) < 200:
+                raise RuntimeError(f"ESPN returned empty or short HTML for {team_code}")
+
+            if "<table" not in html.lower():
+                raise RuntimeError(f"ESPN returned HTML with no roster table for {team_code}")
+
+            tables = pd.read_html(StringIO(html))
+
+            if not tables:
+                raise RuntimeError(f"ESPN returned 0 roster tables for {team_code}")
+
+            return tables
+
+        except Exception as e:
+            last_error = e
+            print(f"WARNING: roster fetch attempt {attempt}/4 failed for {team_code}: {e}")
+
+    raise RuntimeError(f"Failed to fetch roster tables for {team_code}. Last error: {last_error}")
 
 
 def normalize_position(pos):
@@ -269,6 +303,9 @@ def parse_team_roster(team_code):
                 "exp": exp,
                 "college": college,
             })
+
+    if not sections["offense"] and not sections["defense"] and not sections["special_teams"]:
+        raise RuntimeError(f"No usable roster rows parsed for {team_code}")
 
     return sections
 
@@ -389,8 +426,8 @@ def create_single_poster(team_code, unit_key, players, output_dir):
     try:
         logo = fetch_team_logo(team_code)
         paste_logo_centered(bg, logo, width // 2, 50, max_width=130, max_height=130)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"WARNING: logo fetch failed for {team_code}: {e}")
 
     center_text(draw, team_name.upper(), team_font, "white", width, 195)
     center_text(draw, unit_title + " ROSTER", big_font, "white", width, 235)
@@ -461,8 +498,7 @@ def create_single_poster(team_code, unit_key, players, output_dir):
         fill="white",
     )
 
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
+    os.makedirs(output_dir, exist_ok=True)
 
     file_name = f"{team_code}_{unit_key}_roster.png"
     output_path = os.path.join(output_dir, file_name)
