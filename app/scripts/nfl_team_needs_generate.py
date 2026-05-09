@@ -6,10 +6,12 @@ import re
 from typing import Dict, List, Tuple, Optional
 
 import requests
-from bs4 import BeautifulSoup
 from PIL import Image, ImageDraw, ImageFont
 
-HEADERS = {"User-Agent": "Mozilla/5.0"}
+HEADERS = {
+    "User-Agent": "Mozilla/5.0",
+    "Accept": "application/json,text/plain,*/*",
+}
 
 TEAM_NEEDS = {
     "ARI": ["QB", "RB", "G", "T"],
@@ -47,38 +49,38 @@ TEAM_NEEDS = {
 }
 
 TEAM_META = {
-    "ARI": ("ari", "arizona-cardinals", "Arizona Cardinals"),
-    "ATL": ("atl", "atlanta-falcons", "Atlanta Falcons"),
-    "BAL": ("bal", "baltimore-ravens", "Baltimore Ravens"),
-    "BUF": ("buf", "buffalo-bills", "Buffalo Bills"),
-    "CAR": ("car", "carolina-panthers", "Carolina Panthers"),
-    "CHI": ("chi", "chicago-bears", "Chicago Bears"),
-    "CIN": ("cin", "cincinnati-bengals", "Cincinnati Bengals"),
-    "CLE": ("cle", "cleveland-browns", "Cleveland Browns"),
-    "DAL": ("dal", "dallas-cowboys", "Dallas Cowboys"),
-    "DEN": ("den", "denver-broncos", "Denver Broncos"),
-    "DET": ("det", "detroit-lions", "Detroit Lions"),
-    "GB": ("gb", "green-bay-packers", "Green Bay Packers"),
-    "HOU": ("hou", "houston-texans", "Houston Texans"),
-    "IND": ("ind", "indianapolis-colts", "Indianapolis Colts"),
-    "JAX": ("jax", "jacksonville-jaguars", "Jacksonville Jaguars"),
-    "KC": ("kc", "kansas-city-chiefs", "Kansas City Chiefs"),
-    "LV": ("lv", "las-vegas-raiders", "Las Vegas Raiders"),
-    "LAC": ("lac", "los-angeles-chargers", "Los Angeles Chargers"),
-    "LAR": ("lar", "los-angeles-rams", "Los Angeles Rams"),
-    "MIA": ("mia", "miami-dolphins", "Miami Dolphins"),
-    "MIN": ("min", "minnesota-vikings", "Minnesota Vikings"),
-    "NE": ("ne", "new-england-patriots", "New England Patriots"),
-    "NO": ("no", "new-orleans-saints", "New Orleans Saints"),
-    "NYG": ("nyg", "new-york-giants", "New York Giants"),
-    "NYJ": ("nyj", "new-york-jets", "New York Jets"),
-    "PHI": ("phi", "philadelphia-eagles", "Philadelphia Eagles"),
-    "PIT": ("pit", "pittsburgh-steelers", "Pittsburgh Steelers"),
-    "SEA": ("sea", "seattle-seahawks", "Seattle Seahawks"),
-    "SF": ("sf", "san-francisco-49ers", "San Francisco 49ers"),
-    "TB": ("tb", "tampa-bay-buccaneers", "Tampa Bay Buccaneers"),
-    "TEN": ("ten", "tennessee-titans", "Tennessee Titans"),
-    "WSH": ("wsh", "washington-commanders", "Washington Commanders"),
+    "ARI": ("22", "ari", "Arizona Cardinals"),
+    "ATL": ("1", "atl", "Atlanta Falcons"),
+    "BAL": ("33", "bal", "Baltimore Ravens"),
+    "BUF": ("2", "buf", "Buffalo Bills"),
+    "CAR": ("29", "car", "Carolina Panthers"),
+    "CHI": ("3", "chi", "Chicago Bears"),
+    "CIN": ("4", "cin", "Cincinnati Bengals"),
+    "CLE": ("5", "cle", "Cleveland Browns"),
+    "DAL": ("6", "dal", "Dallas Cowboys"),
+    "DEN": ("7", "den", "Denver Broncos"),
+    "DET": ("8", "det", "Detroit Lions"),
+    "GB": ("9", "gb", "Green Bay Packers"),
+    "HOU": ("34", "hou", "Houston Texans"),
+    "IND": ("11", "ind", "Indianapolis Colts"),
+    "JAX": ("30", "jax", "Jacksonville Jaguars"),
+    "KC": ("12", "kc", "Kansas City Chiefs"),
+    "LV": ("13", "lv", "Las Vegas Raiders"),
+    "LAC": ("24", "lac", "Los Angeles Chargers"),
+    "LAR": ("14", "lar", "Los Angeles Rams"),
+    "MIA": ("15", "mia", "Miami Dolphins"),
+    "MIN": ("16", "min", "Minnesota Vikings"),
+    "NE": ("17", "ne", "New England Patriots"),
+    "NO": ("18", "no", "New Orleans Saints"),
+    "NYG": ("19", "nyg", "New York Giants"),
+    "NYJ": ("20", "nyj", "New York Jets"),
+    "PHI": ("21", "phi", "Philadelphia Eagles"),
+    "PIT": ("23", "pit", "Pittsburgh Steelers"),
+    "SEA": ("26", "sea", "Seattle Seahawks"),
+    "SF": ("25", "sf", "San Francisco 49ers"),
+    "TB": ("27", "tb", "Tampa Bay Buccaneers"),
+    "TEN": ("10", "ten", "Tennessee Titans"),
+    "WSH": ("28", "wsh", "Washington Commanders"),
 }
 
 POSITION_MAP = {
@@ -137,26 +139,25 @@ ALIASES = {"WAS": "WSH"}
 
 
 def load_font(size: int, bold: bool = False):
-    font_paths = []
-    if bold:
-        font_paths = [
-            "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
-            "/Library/Fonts/Arial Bold.ttf",
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-        ]
-    else:
-        font_paths = [
-            "/System/Library/Fonts/Supplemental/Arial.ttf",
-            "/Library/Fonts/Arial.ttf",
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        ]
+    paths = [
+        "/System/Library/Fonts/Supplemental/Arial Bold.ttf" if bold else "/System/Library/Fonts/Supplemental/Arial.ttf",
+        "/Library/Fonts/Arial Bold.ttf" if bold else "/Library/Fonts/Arial.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    ]
 
-    for path in font_paths:
+    for path in paths:
         try:
             return ImageFont.truetype(path, size)
         except Exception:
             continue
+
     return ImageFont.load_default()
+
+
+def clean_text(value) -> str:
+    if value is None:
+        return ""
+    return re.sub(r"\s+", " ", str(value).replace("\xa0", " ").strip())
 
 
 def fetch_image(url: str) -> Optional[Image.Image]:
@@ -169,50 +170,107 @@ def fetch_image(url: str) -> Optional[Image.Image]:
 
 
 def get_logo(team: str) -> Optional[Image.Image]:
-    slug = TEAM_META[team][0]
+    _, slug, _ = TEAM_META[team]
     logo_url = f"https://a.espncdn.com/i/teamlogos/nfl/500/{slug}.png"
     return fetch_image(logo_url)
 
 
-def clean_player_name(name: str) -> str:
-    name = re.sub(r"\s+", " ", name).strip()
-    name = re.sub(r"\d+$", "", name).strip()
-    return name
+def normalize_position(pos: str) -> str:
+    p = clean_text(pos).upper()
+
+    if p == "QB":
+        return "QB"
+    if p in {"RB", "HB", "FB"}:
+        return "RB"
+    if p == "WR":
+        return "WR"
+    if p == "TE":
+        return "TE"
+    if p in {"G", "OG", "LG", "RG"}:
+        return "G"
+    if p in {"T", "OT", "LT", "RT"}:
+        return "T"
+    if p == "C":
+        return "C"
+    if p in {"DE", "EDGE", "LDE", "RDE"}:
+        return "DE"
+    if p in {"DT", "NT"}:
+        return "DT"
+    if p in {"LB", "ILB", "OLB", "MLB"}:
+        return "LB"
+    if p == "CB":
+        return "CB"
+    if p in {"S", "FS", "SS"}:
+        return "S"
+
+    return p
+
+
+def fetch_roster_json(team: str) -> Dict:
+    team_id, _, _ = TEAM_META[team]
+    url = f"https://site.web.api.espn.com/apis/common/v3/sports/football/nfl/teams/{team_id}/roster"
+
+    resp = requests.get(url, headers=HEADERS, timeout=30)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def parse_player(raw: Dict) -> Optional[Tuple[str, str]]:
+    name = clean_text(
+        raw.get("displayName")
+        or raw.get("fullName")
+        or raw.get("shortName")
+        or ""
+    )
+
+    pos_obj = raw.get("position") or {}
+    if isinstance(pos_obj, dict):
+        pos = clean_text(pos_obj.get("abbreviation") or pos_obj.get("name") or "")
+    else:
+        pos = clean_text(pos_obj)
+
+    pos = normalize_position(pos)
+
+    if not name or not pos:
+        return None
+
+    return name, pos
 
 
 def get_players(team: str) -> Dict[str, List[str]]:
-    slug, full_slug, _ = TEAM_META[team]
-    url = f"https://www.espn.com/nfl/team/roster/_/name/{slug}/{full_slug}"
-
-    html = requests.get(url, headers=HEADERS, timeout=20).text
-    soup = BeautifulSoup(html, "html.parser")
-
+    data = fetch_roster_json(team)
     roster: Dict[str, List[str]] = {}
 
-    for row in soup.select("table tbody tr"):
-        cols = row.find_all("td")
-        if len(cols) < 3:
-            continue
+    groups = data.get("positionGroups", [])
 
-        player = clean_player_name(cols[1].get_text(" ", strip=True))
-        pos = cols[2].get_text(" ", strip=True).upper()
+    for group in groups:
+        athletes = group.get("athletes", []) or []
 
-        if not player or not pos:
-            continue
+        for raw in athletes:
+            parsed = parse_player(raw)
+            if not parsed:
+                continue
 
-        roster.setdefault(pos, [])
-        if player not in roster[pos]:
-            roster[pos].append(player)
+            name, pos = parsed
+            roster.setdefault(pos, [])
+
+            if name not in roster[pos]:
+                roster[pos].append(name)
+
+    if not roster:
+        raise RuntimeError(f"No roster players parsed for {team}. ESPN API structure may have changed.")
 
     return roster
 
 
 def players_for_position(pos: str, roster: Dict[str, List[str]]) -> List[str]:
     result = []
+
     for mapped_pos in POSITION_MAP.get(pos, [pos]):
         for player in roster.get(mapped_pos, []):
             if player not in result:
                 result.append(player)
+
     return result[:8]
 
 
@@ -231,6 +289,7 @@ def wrap_players(draw: ImageDraw.ImageDraw, players: List[str], font, max_width:
     for player in players[1:]:
         test = current + ", " + player
         w, _ = text_size(draw, test, font)
+
         if w <= max_width:
             current = test
         else:
@@ -248,6 +307,11 @@ def draw_centered(draw: ImageDraw.ImageDraw, text: str, y: int, font, fill, canv
     return y + h
 
 
+def hex_to_rgb(hex_color: str) -> Tuple[int, int, int]:
+    hex_color = hex_color.lstrip("#")
+    return tuple(int(hex_color[i:i + 2], 16) for i in (0, 2, 4))
+
+
 def make_gradient(width: int, height: int, top_color: Tuple[int, int, int], bottom_color: Tuple[int, int, int]) -> Image.Image:
     img = Image.new("RGB", (width, height), top_color)
     px = img.load()
@@ -257,15 +321,11 @@ def make_gradient(width: int, height: int, top_color: Tuple[int, int, int], bott
         r = int(top_color[0] * (1 - ratio) + bottom_color[0] * ratio)
         g = int(top_color[1] * (1 - ratio) + bottom_color[1] * ratio)
         b = int(top_color[2] * (1 - ratio) + bottom_color[2] * ratio)
+
         for x in range(width):
             px[x, y] = (r, g, b)
 
     return img
-
-
-def hex_to_rgb(hex_color: str) -> Tuple[int, int, int]:
-    hex_color = hex_color.lstrip("#")
-    return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
 
 
 def poster(team: str, out_file: Optional[str] = None):
@@ -339,6 +399,7 @@ def poster(team: str, out_file: Optional[str] = None):
     draw_centered(draw, f"{team} TEAM NEEDS", H - 60, footer_font, "#DADADA", W)
 
     out_file = out_file or f"{team.lower()}_team_needs.png"
+    os.makedirs(os.path.dirname(out_file) or ".", exist_ok=True)
     img.convert("RGB").save(out_file, quality=95)
     return out_file
 
