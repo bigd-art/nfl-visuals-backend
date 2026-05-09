@@ -30,7 +30,6 @@ TEAM_ABBRS = {
 TEAM_ALT = "|".join(sorted(TEAM_ABBRS, key=len, reverse=True))
 TEAM_END_RE = re.compile(rf"^(?P<name>.*?)(?P<team>{TEAM_ALT})(?P<trail>[\s\W]*)$")
 
-# slug, display title, short title
 STAT_CONFIG = [
     ("passing_yards", "Passing Yards", "Passing Yards"),
     ("passing_tds", "Passing TDs", "Passing TDs"),
@@ -45,9 +44,6 @@ STAT_CONFIG = [
 ]
 
 
-# ----------------------------
-# String normalization
-# ----------------------------
 def normalize_spaces(s: str) -> str:
     s = str(s)
     s = re.sub(r"[\u200b\u200c\u200d\ufeff]", "", s)
@@ -68,9 +64,6 @@ def enforce_space_before_team(s: str) -> str:
     return f"{name_part} {team}".strip()
 
 
-# ----------------------------
-# ESPN URLs
-# ----------------------------
 def build_urls(season: int, seasontype: int):
     base_player = f"https://www.espn.com/nfl/stats/player/_/season/{season}/seasontype/{seasontype}"
     base_rush = f"https://www.espn.com/nfl/stats/player/_/stat/rushing/season/{season}/seasontype/{seasontype}"
@@ -78,62 +71,19 @@ def build_urls(season: int, seasontype: int):
     base_def = f"https://www.espn.com/nfl/stats/player/_/view/defense/season/{season}/seasontype/{seasontype}"
 
     return {
-        "Passing Yards": (
-            base_player,
-            ["YDS", "PASS YDS", "Pass YDS"],
-            "int",
-        ),
-        "Passing TDs": (
-            f"{base_player}/table/passing/sort/passingTouchdowns/dir/desc",
-            ["TD", "PASS TD", "Pass TD"],
-            "int",
-        ),
-        "Interceptions Thrown": (
-            f"{base_player}/table/passing/sort/interceptions/dir/desc",
-            ["INT", "Interceptions"],
-            "int",
-        ),
-        "Rushing Yards": (
-            base_rush,
-            ["YDS", "RUSH YDS", "Rush YDS"],
-            "int",
-        ),
-        "Rushing TDs": (
-            f"{base_rush}/table/rushing/sort/rushingTouchdowns/dir/desc",
-            ["TD", "RUSH TD", "Rush TD"],
-            "int",
-        ),
-        "Receiving Yards": (
-            base_rec,
-            ["YDS", "REC YDS", "Rec YDS"],
-            "int",
-        ),
-        "Receiving TDs": (
-            f"{base_rec}/table/receiving/sort/receivingTouchdowns/dir/desc",
-            ["TD", "REC TD", "Rec TD"],
-            "int",
-        ),
-        "Sacks": (
-            f"{base_def}/table/defensive/sort/sacks/dir/desc",
-            ["SACK", "Sacks SACK", "Sacks"],
-            "float1",
-        ),
-        "Tackles": (
-            f"{base_def}/table/defensive/sort/totalTackles/dir/desc",
-            ["TOT", "Tackles TOT", "Total", "Tackles"],
-            "int",
-        ),
-        "Interceptions (Defense)": (
-            f"{base_def}/table/defensiveInterceptions/sort/interceptions/dir/desc",
-            ["INT", "Interceptions INT", "Interceptions"],
-            "int",
-        ),
+        "Passing Yards": (base_player, ["YDS", "PASS YDS", "Pass YDS"], "int"),
+        "Passing TDs": (f"{base_player}/table/passing/sort/passingTouchdowns/dir/desc", ["TD", "PASS TD", "Pass TD"], "int"),
+        "Interceptions Thrown": (f"{base_player}/table/passing/sort/interceptions/dir/desc", ["INT", "Interceptions"], "int"),
+        "Rushing Yards": (base_rush, ["YDS", "RUSH YDS", "Rush YDS"], "int"),
+        "Rushing TDs": (f"{base_rush}/table/rushing/sort/rushingTouchdowns/dir/desc", ["TD", "RUSH TD", "Rush TD"], "int"),
+        "Receiving Yards": (base_rec, ["YDS", "REC YDS", "Rec YDS"], "int"),
+        "Receiving TDs": (f"{base_rec}/table/receiving/sort/receivingTouchdowns/dir/desc", ["TD", "REC TD", "Rec TD"], "int"),
+        "Sacks": (f"{base_def}/table/defensive/sort/sacks/dir/desc", ["SACK", "Sacks SACK", "Sacks"], "float1"),
+        "Tackles": (f"{base_def}/table/defensive/sort/totalTackles/dir/desc", ["TOT", "Tackles TOT", "Total", "Tackles"], "int"),
+        "Interceptions (Defense)": (f"{base_def}/table/defensiveInterceptions/sort/interceptions/dir/desc", ["INT", "Interceptions INT", "Interceptions"], "int"),
     }
 
 
-# ----------------------------
-# Table parsing helpers
-# ----------------------------
 def flatten_columns(df: pd.DataFrame) -> pd.DataFrame:
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = [
@@ -248,8 +198,10 @@ def topN_from_url(url: str, stat_candidates: List[str], mode: str) -> List[Tuple
 
     name_t = pick_name_table(tables)
     stat_t = find_stat_table(tables, stat_candidates)
+
     if stat_t is None:
         stat_t = pick_widest_table(tables)
+
     if stat_t is None:
         raise RuntimeError(f"Could not choose a stat table at: {url}")
 
@@ -258,11 +210,12 @@ def topN_from_url(url: str, stat_candidates: List[str], mode: str) -> List[Tuple
     cmap = col_lookup(list(df.columns))
     if "name" not in cmap:
         raise RuntimeError(f"No Name column after stitching. Columns={list(df.columns)}")
-    name_col = cmap["name"]
 
+    name_col = cmap["name"]
     stat_col = choose_stat_col(df, stat_candidates)
 
     work = df[[name_col, stat_col]].copy()
+
     if mode == "float1":
         work["__val__"] = work[stat_col].map(safe_float)
     else:
@@ -275,12 +228,10 @@ def topN_from_url(url: str, stat_candidates: List[str], mode: str) -> List[Tuple
         raw = normalize_spaces(rec[name_col])
         display_name = enforce_space_before_team(raw)
         out.append((i, display_name, rec["__val__"]))
+
     return out
 
 
-# ----------------------------
-# Drawing
-# ----------------------------
 def load_font(size: int, bold: bool = False):
     candidates = [
         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
@@ -299,7 +250,28 @@ def load_font(size: int, bold: bool = False):
 def fmt_value(val: Number, mode: str) -> str:
     if mode == "float1":
         return f"{float(val):.1f}"
-    return str(int(val))
+    return f"{int(val):,}"
+
+
+def fit_text(draw, text: str, font, max_width: int) -> str:
+    text = str(text)
+    if draw.textlength(text, font=font) <= max_width:
+        return text
+
+    while len(text) > 3 and draw.textlength(text + "…", font=font) > max_width:
+        text = text[:-1]
+
+    return text.rstrip() + "…"
+
+
+def split_name_team(display_name: str) -> Tuple[str, str]:
+    display_name = normalize_spaces(display_name)
+    parts = display_name.split()
+
+    if parts and parts[-1].upper() in TEAM_ABBRS:
+        return " ".join(parts[:-1]), parts[-1].upper()
+
+    return display_name, ""
 
 
 def draw_single_stat_poster(
@@ -311,68 +283,118 @@ def draw_single_stat_poster(
     mode: str,
 ):
     W, H = 1080, 1920
-    img = Image.new("RGB", (W, H), (12, 12, 16))
+    img = Image.new("RGB", (W, H), (10, 14, 24))
     d = ImageDraw.Draw(img)
 
-    title_font = load_font(52, bold=True)
-    stat_font = load_font(34, bold=True)
-    sub_font = load_font(24, bold=False)
-    header_font = load_font(22, bold=True)
-    row_font = load_font(28, bold=False)
+    title_font = load_font(48, bold=True)
+    stat_font = load_font(68, bold=True)
+    sub_font = load_font(22, bold=False)
+    rank_font = load_font(31, bold=True)
+    name_font = load_font(43, bold=True)
+    team_font = load_font(24, bold=True)
+    value_font = load_font(45, bold=True)
 
-    text = (245, 245, 245)
-    muted = (180, 180, 190)
-    card_fill = (20, 20, 28)
-    outline = (45, 45, 60)
-    grid = (40, 48, 66)
+    white = (246, 248, 252)
+    muted = (208, 218, 238)
+    blue = (128, 183, 255)
+    dark = (24, 29, 42)
+    border = (64, 74, 98)
 
-    d.text((50, 40), poster_title, font=title_font, fill=text)
-    d.text((50, 110), stat_title, font=stat_font, fill=(220, 220, 230))
-    d.text((50, 160), subtitle, font=sub_font, fill=muted)
+    d.rectangle((0, 0, W, 178), fill=(22, 38, 74))
+    d.rectangle((0, 178, W, 187), fill=blue)
 
-    x0, y0, x1, y1 = 50, 240, W - 50, H - 60
-    d.rounded_rectangle([x0, y0, x1, y1], radius=24, fill=card_fill, outline=outline, width=2)
+    for y in range(198, H, 30):
+        color = (14, 18, 28) if (y // 30) % 2 == 0 else (12, 16, 26)
+        d.rectangle((0, y, W, y + 15), fill=color)
 
-    header_y = y0 + 16
-    d.text((x0 + 24, header_y), "RK", font=header_font, fill=muted)
-    d.text((x0 + 110, header_y), "PLAYER", font=header_font, fill=muted)
-    value_label = stat_title.upper()
-    tw = d.textlength(value_label, font=header_font)
-    d.text((x1 - 24 - tw, header_y), value_label, font=header_font, fill=muted)
+    title = fit_text(d, poster_title.upper(), title_font, W - 90)
+    stat = fit_text(d, stat_title.upper(), stat_font, W - 90)
+    sub = fit_text(d, subtitle, sub_font, W - 90)
 
-    d.line((x0 + 20, header_y + 34, x1 - 20, header_y + 34), fill=grid, width=2)
+    d.text(((W - d.textlength(title, font=title_font)) / 2, 24), title, font=title_font, fill=white)
+    d.text(((W - d.textlength(stat, font=stat_font)) / 2, 78), stat, font=stat_font, fill=white)
+    d.text(((W - d.textlength(sub, font=sub_font)) / 2, 143), sub, font=sub_font, fill=muted)
 
-    y = header_y + 54
-    row_h = 135
+    x0, x1 = 42, W - 42
+    top = 220
+    bottom = H - 42
+    gap = 14
+    row_h = int((bottom - top - gap * (TOP_N - 1)) / TOP_N)
 
     for rank, display_name, val in items:
+        y0 = top + (rank - 1) * (row_h + gap)
+        y1 = y0 + row_h
+
         d.rounded_rectangle(
-            [x0 + 16, y, x1 - 16, y + row_h - 10],
-            radius=16,
-            fill=(14, 18, 26),
-            outline=(35, 42, 58),
-            width=1,
+            (x0, y0, x1, y1),
+            radius=26,
+            fill=dark,
+            outline=border,
+            width=3,
         )
 
-        d.text((x0 + 28, y + 18), str(rank), font=row_font, fill=text)
+        pill = (x0 + 18, y0 + 22, x0 + 92, y0 + 84)
+        d.rounded_rectangle(pill, radius=18, fill=blue)
 
-        player_text = display_name
-        d.text((x0 + 110, y + 18), player_text, font=row_font, fill=text)
+        rank_text = str(rank)
+        d.text(
+            (
+                pill[0] + (pill[2] - pill[0] - d.textlength(rank_text, font=rank_font)) / 2,
+                pill[1] + 12,
+            ),
+            rank_text,
+            font=rank_font,
+            fill=(15, 20, 28),
+        )
 
-        val_txt = fmt_value(val, mode)
-        val_w = d.textlength(val_txt, font=row_font)
-        d.text((x1 - 30 - val_w, y + 18), val_txt, font=row_font, fill=text)
+        player_name, team = split_name_team(display_name)
+        value_text = fmt_value(val, mode)
+        value_w = d.textlength(value_text, font=value_font)
 
-        y += row_h
-        if y > y1 - 40:
-            break
+        d.text(
+            (x1 - 30 - value_w, y0 + 31),
+            value_text,
+            font=value_font,
+            fill=white,
+        )
+
+        max_name_w = x1 - x0 - 150 - value_w - 55
+        name_text = fit_text(d, player_name.upper(), name_font, max_name_w)
+
+        d.text(
+            (x0 + 112, y0 + 24),
+            name_text,
+            font=name_font,
+            fill=white,
+        )
+
+        if team:
+            tag_x1 = x0 + 114
+            tag_y1 = y0 + 83
+            tag_x2 = tag_x1 + 92
+            tag_y2 = tag_y1 + 38
+
+            d.rounded_rectangle(
+                (tag_x1, tag_y1, tag_x2, tag_y2),
+                radius=13,
+                fill=(16, 28, 54),
+                outline=(86, 104, 140),
+                width=1,
+            )
+
+            team_w = d.textlength(team, font=team_font)
+            d.text(
+                (tag_x1 + (tag_x2 - tag_x1 - team_w) / 2, tag_y1 + 5),
+                team,
+                font=team_font,
+                fill=blue,
+            )
+
+        d.rectangle((x0 + 18, y1 - 12, x1 - 18, y1 - 8), fill=blue)
 
     img.save(out_path, "PNG")
 
 
-# ----------------------------
-# Generation helpers
-# ----------------------------
 def build_stat_sections(season: int, seasontype: int) -> Dict[str, Tuple[str, List[Tuple[int, str, Number]], str]]:
     urls = build_urls(season, seasontype)
     out: Dict[str, Tuple[str, List[Tuple[int, str, Number]], str]] = {}
