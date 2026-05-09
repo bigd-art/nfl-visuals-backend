@@ -1,58 +1,50 @@
 import os
 import re
 import sys
-from io import BytesIO, StringIO
+from io import BytesIO
+from typing import Dict, List
 
-import pandas as pd
 import requests
 from PIL import Image, ImageDraw, ImageFont
 
 TEAM_INFO = {
-    "ari": {"name": "Arizona Cardinals", "primary": "#97233F", "secondary": "#000000", "accent": "#FFB612"},
-    "atl": {"name": "Atlanta Falcons", "primary": "#A71930", "secondary": "#000000", "accent": "#A5ACAF"},
-    "bal": {"name": "Baltimore Ravens", "primary": "#241773", "secondary": "#000000", "accent": "#9E7C0C"},
-    "buf": {"name": "Buffalo Bills", "primary": "#00338D", "secondary": "#C60C30", "accent": "#FFFFFF"},
-    "car": {"name": "Carolina Panthers", "primary": "#0085CA", "secondary": "#101820", "accent": "#BFC0BF"},
-    "chi": {"name": "Chicago Bears", "primary": "#0B162A", "secondary": "#C83803", "accent": "#FFFFFF"},
-    "cin": {"name": "Cincinnati Bengals", "primary": "#FB4F14", "secondary": "#000000", "accent": "#FFFFFF"},
-    "cle": {"name": "Cleveland Browns", "primary": "#311D00", "secondary": "#FF3C00", "accent": "#FFFFFF"},
-    "dal": {"name": "Dallas Cowboys", "primary": "#041E42", "secondary": "#869397", "accent": "#FFFFFF"},
-    "den": {"name": "Denver Broncos", "primary": "#FB4F14", "secondary": "#002244", "accent": "#FFFFFF"},
-    "det": {"name": "Detroit Lions", "primary": "#0076B6", "secondary": "#B0B7BC", "accent": "#FFFFFF"},
-    "gb": {"name": "Green Bay Packers", "primary": "#203731", "secondary": "#FFB612", "accent": "#FFFFFF"},
-    "hou": {"name": "Houston Texans", "primary": "#03202F", "secondary": "#A71930", "accent": "#FFFFFF"},
-    "ind": {"name": "Indianapolis Colts", "primary": "#002C5F", "secondary": "#A2AAAD", "accent": "#FFFFFF"},
-    "jax": {"name": "Jacksonville Jaguars", "primary": "#006778", "secondary": "#101820", "accent": "#D7A22A"},
-    "kc": {"name": "Kansas City Chiefs", "primary": "#E31837", "secondary": "#FFB81C", "accent": "#FFFFFF"},
-    "lv": {"name": "Las Vegas Raiders", "primary": "#000000", "secondary": "#A5ACAF", "accent": "#FFFFFF"},
-    "lac": {"name": "Los Angeles Chargers", "primary": "#0080C6", "secondary": "#FFC20E", "accent": "#FFFFFF"},
-    "lar": {"name": "Los Angeles Rams", "primary": "#003594", "secondary": "#FFD100", "accent": "#FFFFFF"},
-    "mia": {"name": "Miami Dolphins", "primary": "#008E97", "secondary": "#FC4C02", "accent": "#FFFFFF"},
-    "min": {"name": "Minnesota Vikings", "primary": "#4F2683", "secondary": "#FFC62F", "accent": "#FFFFFF"},
-    "ne": {"name": "New England Patriots", "primary": "#002244", "secondary": "#C60C30", "accent": "#FFFFFF"},
-    "no": {"name": "New Orleans Saints", "primary": "#101820", "secondary": "#D3BC8D", "accent": "#FFFFFF"},
-    "nyg": {"name": "New York Giants", "primary": "#0B2265", "secondary": "#A71930", "accent": "#FFFFFF"},
-    "nyj": {"name": "New York Jets", "primary": "#125740", "secondary": "#000000", "accent": "#FFFFFF"},
-    "phi": {"name": "Philadelphia Eagles", "primary": "#004C54", "secondary": "#A5ACAF", "accent": "#FFFFFF"},
-    "pit": {"name": "Pittsburgh Steelers", "primary": "#101820", "secondary": "#FFB612", "accent": "#FFFFFF"},
-    "sf": {"name": "San Francisco 49ers", "primary": "#AA0000", "secondary": "#B3995D", "accent": "#FFFFFF"},
-    "sea": {"name": "Seattle Seahawks", "primary": "#002244", "secondary": "#69BE28", "accent": "#FFFFFF"},
-    "tb": {"name": "Tampa Bay Buccaneers", "primary": "#D50A0A", "secondary": "#34302B", "accent": "#FF7900"},
-    "ten": {"name": "Tennessee Titans", "primary": "#0C2340", "secondary": "#4B92DB", "accent": "#C8102E"},
-    "wsh": {"name": "Washington Commanders", "primary": "#5A1414", "secondary": "#FFB612", "accent": "#FFFFFF"},
+    "ari": {"id": "22", "name": "Arizona Cardinals", "primary": "#97233F", "secondary": "#000000", "accent": "#FFB612"},
+    "atl": {"id": "1", "name": "Atlanta Falcons", "primary": "#A71930", "secondary": "#000000", "accent": "#A5ACAF"},
+    "bal": {"id": "33", "name": "Baltimore Ravens", "primary": "#241773", "secondary": "#000000", "accent": "#9E7C0C"},
+    "buf": {"id": "2", "name": "Buffalo Bills", "primary": "#00338D", "secondary": "#C60C30", "accent": "#FFFFFF"},
+    "car": {"id": "29", "name": "Carolina Panthers", "primary": "#0085CA", "secondary": "#101820", "accent": "#BFC0BF"},
+    "chi": {"id": "3", "name": "Chicago Bears", "primary": "#0B162A", "secondary": "#C83803", "accent": "#FFFFFF"},
+    "cin": {"id": "4", "name": "Cincinnati Bengals", "primary": "#FB4F14", "secondary": "#000000", "accent": "#FFFFFF"},
+    "cle": {"id": "5", "name": "Cleveland Browns", "primary": "#311D00", "secondary": "#FF3C00", "accent": "#FFFFFF"},
+    "dal": {"id": "6", "name": "Dallas Cowboys", "primary": "#041E42", "secondary": "#869397", "accent": "#FFFFFF"},
+    "den": {"id": "7", "name": "Denver Broncos", "primary": "#FB4F14", "secondary": "#002244", "accent": "#FFFFFF"},
+    "det": {"id": "8", "name": "Detroit Lions", "primary": "#0076B6", "secondary": "#B0B7BC", "accent": "#FFFFFF"},
+    "gb": {"id": "9", "name": "Green Bay Packers", "primary": "#203731", "secondary": "#FFB612", "accent": "#FFFFFF"},
+    "hou": {"id": "34", "name": "Houston Texans", "primary": "#03202F", "secondary": "#A71930", "accent": "#FFFFFF"},
+    "ind": {"id": "11", "name": "Indianapolis Colts", "primary": "#002C5F", "secondary": "#A2AAAD", "accent": "#FFFFFF"},
+    "jax": {"id": "30", "name": "Jacksonville Jaguars", "primary": "#006778", "secondary": "#101820", "accent": "#D7A22A"},
+    "kc": {"id": "12", "name": "Kansas City Chiefs", "primary": "#E31837", "secondary": "#FFB81C", "accent": "#FFFFFF"},
+    "lv": {"id": "13", "name": "Las Vegas Raiders", "primary": "#000000", "secondary": "#A5ACAF", "accent": "#FFFFFF"},
+    "lac": {"id": "24", "name": "Los Angeles Chargers", "primary": "#0080C6", "secondary": "#FFC20E", "accent": "#FFFFFF"},
+    "lar": {"id": "14", "name": "Los Angeles Rams", "primary": "#003594", "secondary": "#FFD100", "accent": "#FFFFFF"},
+    "mia": {"id": "15", "name": "Miami Dolphins", "primary": "#008E97", "secondary": "#FC4C02", "accent": "#FFFFFF"},
+    "min": {"id": "16", "name": "Minnesota Vikings", "primary": "#4F2683", "secondary": "#FFC62F", "accent": "#FFFFFF"},
+    "ne": {"id": "17", "name": "New England Patriots", "primary": "#002244", "secondary": "#C60C30", "accent": "#FFFFFF"},
+    "no": {"id": "18", "name": "New Orleans Saints", "primary": "#101820", "secondary": "#D3BC8D", "accent": "#FFFFFF"},
+    "nyg": {"id": "19", "name": "New York Giants", "primary": "#0B2265", "secondary": "#A71930", "accent": "#FFFFFF"},
+    "nyj": {"id": "20", "name": "New York Jets", "primary": "#125740", "secondary": "#000000", "accent": "#FFFFFF"},
+    "phi": {"id": "21", "name": "Philadelphia Eagles", "primary": "#004C54", "secondary": "#A5ACAF", "accent": "#FFFFFF"},
+    "pit": {"id": "23", "name": "Pittsburgh Steelers", "primary": "#101820", "secondary": "#FFB612", "accent": "#FFFFFF"},
+    "sf": {"id": "25", "name": "San Francisco 49ers", "primary": "#AA0000", "secondary": "#B3995D", "accent": "#FFFFFF"},
+    "sea": {"id": "26", "name": "Seattle Seahawks", "primary": "#002244", "secondary": "#69BE28", "accent": "#FFFFFF"},
+    "tb": {"id": "27", "name": "Tampa Bay Buccaneers", "primary": "#D50A0A", "secondary": "#34302B", "accent": "#FF7900"},
+    "ten": {"id": "10", "name": "Tennessee Titans", "primary": "#0C2340", "secondary": "#4B92DB", "accent": "#C8102E"},
+    "wsh": {"id": "28", "name": "Washington Commanders", "primary": "#5A1414", "secondary": "#FFB612", "accent": "#FFFFFF"},
 }
 
 HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/138.0.0.0 Safari/537.36"
-    ),
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.9",
-    "Referer": "https://www.espn.com/nfl/",
-    "Cache-Control": "no-cache",
-    "Pragma": "no-cache",
+    "User-Agent": "Mozilla/5.0",
+    "Accept": "application/json,text/plain,*/*",
 }
 
 OFFENSE_REQUIREMENTS = [
@@ -77,42 +69,21 @@ DEFENSE_REQUIREMENTS = [
 def clean_text(value):
     if value is None:
         return ""
-    text = str(value).replace("\xa0", " ").strip()
-    text = re.sub(r"\s+", " ", text)
-    return text
-
-
-def safe_get(row, colname):
-    for col in row.index:
-        if clean_text(col).lower() == colname.lower():
-            return clean_text(row[col])
-    return ""
+    return re.sub(r"\s+", " ", str(value).replace("\xa0", " ").strip())
 
 
 def get_font(size, bold=False):
-    font_paths = []
+    paths = [
+        "/System/Library/Fonts/Supplemental/Arial Bold.ttf" if bold else "/System/Library/Fonts/Supplemental/Arial.ttf",
+        "/Library/Fonts/Arial Bold.ttf" if bold else "/Library/Fonts/Arial.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    ]
 
-    if bold:
-        font_paths.extend([
-            "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
-            "/System/Library/Fonts/Supplemental/Helvetica.ttc",
-            "/Library/Fonts/Arial Bold.ttf",
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-        ])
-    else:
-        font_paths.extend([
-            "/System/Library/Fonts/Supplemental/Arial.ttf",
-            "/System/Library/Fonts/Supplemental/Helvetica.ttc",
-            "/Library/Fonts/Arial.ttf",
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        ])
-
-    for path in font_paths:
-        if os.path.exists(path):
-            try:
-                return ImageFont.truetype(path, size)
-            except Exception:
-                pass
+    for path in paths:
+        try:
+            return ImageFont.truetype(path, size)
+        except Exception:
+            pass
 
     return ImageFont.load_default()
 
@@ -134,16 +105,12 @@ def make_gradient_background(width, height, top_hex, bottom_hex):
     pixels = image.load()
 
     for y in range(height):
-        t = float(y) / float(max(height - 1, 1))
+        t = y / max(height - 1, 1)
         color = blend(top, bottom, t)
         for x in range(width):
             pixels[x, y] = color
 
     return image
-
-
-def rounded_rectangle(draw, xy, radius, fill, outline=None, width=1):
-    draw.rounded_rectangle(xy, radius=radius, fill=fill, outline=outline, width=width)
 
 
 def center_text(draw, text, font, fill, canvas_width, y):
@@ -153,8 +120,20 @@ def center_text(draw, text, font, fill, canvas_width, y):
     draw.text((x, y), text, font=font, fill=fill)
 
 
+def fit_text(draw, text, font, max_width):
+    text = str(text)
+
+    if draw.textlength(text, font=font) <= max_width:
+        return text
+
+    while len(text) > 3 and draw.textlength(text + "…", font=font) > max_width:
+        text = text[:-1]
+
+    return text.rstrip() + "…"
+
+
 def wrap_text(draw, text, font, max_width):
-    words = text.split()
+    words = str(text).split()
     if not words:
         return [""]
 
@@ -163,10 +142,7 @@ def wrap_text(draw, text, font, max_width):
 
     for word in words[1:]:
         trial = current + " " + word
-        bbox = draw.textbbox((0, 0), trial, font=font)
-        width = bbox[2] - bbox[0]
-
-        if width <= max_width:
+        if draw.textlength(trial, font=font) <= max_width:
             current = trial
         else:
             lines.append(current)
@@ -183,44 +159,11 @@ def fetch_team_logo(team_code):
     return Image.open(BytesIO(response.content)).convert("RGBA")
 
 
-def paste_logo_centered(base_image, logo, center_x, top_y, max_width=120, max_height=120):
+def paste_logo_centered(base_image, logo, center_x, top_y, max_width=135, max_height=135):
     logo = logo.copy()
     logo.thumbnail((max_width, max_height), Image.LANCZOS)
     x = int(center_x - logo.size[0] / 2)
-    y = top_y
-    base_image.paste(logo, (x, y), logo)
-
-
-def fetch_roster_tables(team_code):
-    url = f"https://www.espn.com/nfl/team/roster/_/name/{team_code}"
-
-    last_error = None
-
-    for attempt in range(1, 5):
-        try:
-            response = requests.get(url, headers=HEADERS, timeout=30)
-            response.raise_for_status()
-
-            html = response.text or ""
-
-            if len(html.strip()) < 200:
-                raise RuntimeError(f"ESPN returned empty or short HTML for {team_code}")
-
-            if "<table" not in html.lower():
-                raise RuntimeError(f"ESPN returned HTML with no roster table for {team_code}")
-
-            tables = pd.read_html(StringIO(html))
-
-            if not tables:
-                raise RuntimeError(f"ESPN returned 0 roster tables for {team_code}")
-
-            return tables
-
-        except Exception as e:
-            last_error = e
-            print(f"WARNING: roster fetch attempt {attempt}/4 failed for {team_code}: {e}")
-
-    raise RuntimeError(f"Failed to fetch roster tables for {team_code}. Last error: {last_error}")
+    base_image.paste(logo, (x, top_y), logo)
 
 
 def normalize_position(pos):
@@ -256,8 +199,63 @@ def normalize_position(pos):
     return p
 
 
+def fetch_roster_json(team_code):
+    team_id = TEAM_INFO[team_code]["id"]
+    url = f"https://site.web.api.espn.com/apis/common/v3/sports/football/nfl/teams/{team_id}/roster"
+
+    response = requests.get(url, headers=HEADERS, timeout=30)
+    response.raise_for_status()
+    return response.json()
+
+
+def parse_player(raw):
+    name = clean_text(
+        raw.get("displayName")
+        or raw.get("fullName")
+        or raw.get("shortName")
+        or ""
+    )
+
+    pos_obj = raw.get("position") or {}
+    pos = clean_text(
+        pos_obj.get("abbreviation")
+        or pos_obj.get("name")
+        or raw.get("position")
+        or ""
+    )
+
+    age = clean_text(raw.get("age") or "")
+    height = clean_text(raw.get("displayHeight") or "")
+    weight = clean_text(raw.get("displayWeight") or "")
+
+    exp = ""
+    experience = raw.get("experience")
+    if isinstance(experience, dict):
+        exp = clean_text(experience.get("years") or "")
+    else:
+        exp = clean_text(experience or "")
+
+    college = ""
+    college_obj = raw.get("college")
+    if isinstance(college_obj, dict):
+        college = clean_text(college_obj.get("name") or college_obj.get("shortName") or "")
+    else:
+        college = clean_text(college_obj or "")
+
+    return {
+        "name": name,
+        "pos": pos,
+        "display_pos": normalize_position(pos),
+        "age": age,
+        "height": height,
+        "weight": weight.replace(" lbs", "").replace("lbs", "").strip(),
+        "exp": exp,
+        "college": college,
+    }
+
+
 def parse_team_roster(team_code):
-    tables = fetch_roster_tables(team_code)
+    data = fetch_roster_json(team_code)
 
     sections = {
         "offense": [],
@@ -265,47 +263,34 @@ def parse_team_roster(team_code):
         "special_teams": [],
     }
 
-    section_order = ["offense", "defense", "special_teams"]
-    section_index = 0
+    groups = data.get("positionGroups", [])
 
-    for table in tables:
-        normalized_cols = [clean_text(c).lower() for c in table.columns]
+    for group in groups:
+        group_type = clean_text(group.get("type", "")).lower()
+        group_name = clean_text(group.get("displayName", "")).lower()
+        items = group.get("athletes", [])
 
-        if "name" not in normalized_cols or "pos" not in normalized_cols:
+        if group_type == "offense" or "offense" in group_name:
+            section_key = "offense"
+        elif group_type == "defense" or "defense" in group_name:
+            section_key = "defense"
+        elif "special" in group_type or "special" in group_name:
+            section_key = "special_teams"
+        else:
             continue
 
-        if section_index >= len(section_order):
-            break
+        for raw in items:
+            player = parse_player(raw)
+            if player["name"] and player["pos"]:
+                sections[section_key].append(player)
 
-        section_name = section_order[section_index]
-        section_index += 1
-
-        for _, row in table.iterrows():
-            name = safe_get(row, "Name")
-            name = re.sub(r"\d+$", "", name).strip()
-            pos = safe_get(row, "Pos")
-            age = safe_get(row, "Age")
-            ht = safe_get(row, "HT")
-            wt = safe_get(row, "WT")
-            exp = safe_get(row, "Exp")
-            college = safe_get(row, "College")
-
-            if not name or not pos:
-                continue
-
-            sections[section_name].append({
-                "name": name,
-                "pos": pos,
-                "display_pos": normalize_position(pos),
-                "age": age,
-                "height": ht,
-                "weight": wt,
-                "exp": exp,
-                "college": college,
-            })
+    print("Parsed rows:")
+    print("Offense:", len(sections["offense"]))
+    print("Defense:", len(sections["defense"]))
+    print("Special Teams:", len(sections["special_teams"]))
 
     if not sections["offense"] and not sections["defense"] and not sections["special_teams"]:
-        raise RuntimeError(f"No usable roster rows parsed for {team_code}")
+        raise RuntimeError(f"No roster players parsed for {team_code}. JSON format changed.")
 
     return sections
 
@@ -316,13 +301,16 @@ def select_players_by_requirements(players, requirements):
 
     for wanted_pos, wanted_count in requirements:
         count = 0
+
         for idx, player in enumerate(players):
             if idx in used_indices:
                 continue
+
             if player.get("display_pos") == wanted_pos:
                 selected.append(player)
                 used_indices.add(idx)
                 count += 1
+
                 if count == wanted_count:
                     break
 
@@ -331,33 +319,31 @@ def select_players_by_requirements(players, requirements):
 
 def build_display_players(unit_key, players):
     if unit_key == "offense":
-        return select_players_by_requirements(players, OFFENSE_REQUIREMENTS)
+        selected = select_players_by_requirements(players, OFFENSE_REQUIREMENTS)
+        return selected if selected else players[:18]
+
     if unit_key == "defense":
-        return select_players_by_requirements(players, DEFENSE_REQUIREMENTS)
+        selected = select_players_by_requirements(players, DEFENSE_REQUIREMENTS)
+        return selected if selected else players[:18]
+
     return players
 
 
 def draw_players_block(draw, players, start_x, start_y, content_width, row_height, fonts, colors):
-    pos_font = fonts["pos"]
-    name_font = fonts["name"]
-    meta_font = fonts["meta"]
-
-    accent = colors["accent"]
-    name_color = colors["name"]
-    line_color = colors["line"]
-
     y = start_y
 
     for player in players:
         pos = player.get("display_pos", player["pos"])
         name = player["name"]
 
-        draw.text((start_x, y), pos, font=pos_font, fill=accent)
+        draw.text((start_x, y), pos, font=fonts["pos"], fill=colors["accent"])
 
         name_x = start_x + 95
-        draw.text((name_x, y), name.upper(), font=name_font, fill=name_color)
+        display_name = fit_text(draw, name.upper(), fonts["name"], content_width - 95)
+        draw.text((name_x, y), display_name, font=fonts["name"], fill=colors["name"])
 
         meta_parts = []
+
         if player["age"]:
             meta_parts.append(f"Age {player['age']}")
         if player["height"]:
@@ -370,17 +356,17 @@ def draw_players_block(draw, players, start_x, start_y, content_width, row_heigh
             meta_parts.append(player["college"])
 
         meta = " • ".join(meta_parts)
-        meta_lines = wrap_text(draw, meta, meta_font, content_width - 95)
+        meta_lines = wrap_text(draw, meta, fonts["meta"], content_width - 95)
 
         meta_y = y + 32
-        for line in meta_lines:
-            draw.text((name_x, meta_y), line, font=meta_font, fill="#333333")
+        for line in meta_lines[:2]:
+            draw.text((name_x, meta_y), line, font=fonts["meta"], fill="#333333")
             meta_y += 20
 
         divider_y = y + row_height - 8
         draw.line(
             (start_x, divider_y, start_x + content_width, divider_y),
-            fill=line_color,
+            fill=colors["line"],
             width=1,
         )
 
@@ -391,7 +377,6 @@ def draw_players_block(draw, players, start_x, start_y, content_width, row_heigh
 
 def create_single_poster(team_code, unit_key, players, output_dir):
     team = TEAM_INFO[team_code]
-    team_name = team["name"]
 
     if unit_key == "offense":
         unit_title = "OFFENSE"
@@ -409,13 +394,13 @@ def create_single_poster(team_code, unit_key, players, output_dir):
     bg = make_gradient_background(width, height, team["primary"], team["secondary"])
     draw = ImageDraw.Draw(bg)
 
-    big_font = get_font(62, bold=True)
-    team_font = get_font(28, bold=True)
-    section_font = get_font(26, bold=True)
-    pos_font = get_font(28, bold=True)
-    name_font = get_font(25, bold=True)
-    meta_font = get_font(18, bold=False)
-    footer_font = get_font(16, bold=False)
+    big_font = get_font(62, True)
+    team_font = get_font(28, True)
+    section_font = get_font(26, True)
+    pos_font = get_font(28, True)
+    name_font = get_font(25, True)
+    meta_font = get_font(18, False)
+    footer_font = get_font(16, False)
 
     colors = {
         "accent": team["accent"] if team["accent"] != "#FFFFFF" else "#111111",
@@ -425,19 +410,18 @@ def create_single_poster(team_code, unit_key, players, output_dir):
 
     try:
         logo = fetch_team_logo(team_code)
-        paste_logo_centered(bg, logo, width // 2, 50, max_width=130, max_height=130)
+        paste_logo_centered(bg, logo, width // 2, 50)
     except Exception as e:
-        print(f"WARNING: logo fetch failed for {team_code}: {e}")
+        print(f"WARNING: logo failed for {team_code}: {e}")
 
-    center_text(draw, team_name.upper(), team_font, "white", width, 195)
+    center_text(draw, team["name"].upper(), team_font, "white", width, 195)
     center_text(draw, unit_title + " ROSTER", big_font, "white", width, 235)
 
     card_margin = 80
     card_top = 330
     card_bottom = height - 100
 
-    rounded_rectangle(
-        draw,
+    draw.rounded_rectangle(
         (card_margin, card_top, width - card_margin, card_bottom),
         radius=28,
         fill="#F4F4F4",
@@ -463,8 +447,8 @@ def create_single_poster(team_code, unit_key, players, output_dir):
     display_players = build_display_players(unit_key, players)
 
     row_height = 72
-    max_rows_that_fit = int((card_bottom - start_y - 20) / row_height)
-    visible_players = display_players[:max_rows_that_fit]
+    max_rows = int((card_bottom - start_y - 20) / row_height)
+    visible_players = display_players[:max_rows]
 
     draw_players_block(
         draw,
@@ -477,20 +461,10 @@ def create_single_poster(team_code, unit_key, players, output_dir):
         colors,
     )
 
-    if len(display_players) > max_rows_that_fit:
-        more_text = f"+ {len(display_players) - max_rows_that_fit} more players not shown"
-        bbox = draw.textbbox((0, 0), more_text, font=footer_font)
-        more_width = bbox[2] - bbox[0]
-        draw.text(
-            (width - card_margin - more_width - 24, card_bottom - 36),
-            more_text,
-            font=footer_font,
-            fill="#666666",
-        )
-
     footer = f"{team_code.upper()} {unit_title}"
     bbox = draw.textbbox((0, 0), footer, font=footer_font)
     footer_width = bbox[2] - bbox[0]
+
     draw.text(
         (int((width - footer_width) / 2), height - 42),
         footer,
@@ -503,6 +477,7 @@ def create_single_poster(team_code, unit_key, players, output_dir):
     file_name = f"{team_code}_{unit_key}_roster.png"
     output_path = os.path.join(output_dir, file_name)
     bg.save(output_path)
+
     return output_path
 
 
@@ -529,7 +504,7 @@ def get_team_code_from_args():
 def main():
     team_code = get_team_code_from_args()
 
-    print(f"Scraping roster for {TEAM_INFO[team_code]['name']}...")
+    print(f"Fetching roster API for {TEAM_INFO[team_code]['name']}...")
     sections = parse_team_roster(team_code)
 
     output_dir = "single_team_roster_posters"
