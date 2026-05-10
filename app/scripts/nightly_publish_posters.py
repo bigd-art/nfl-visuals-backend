@@ -9,7 +9,6 @@ from typing import Dict
 
 from app.services.storage_supabase import upload_file_return_url
 from app.scripts.season_auto import candidate_regular_seasons, resolve_first_valid
-
 from app.scripts.nfl_standings_conference_generate import generate_standings_conference_png
 from app.scripts.nfl_stat_leaders_generate import generate_all_stat_leader_posters, STAT_CONFIG
 
@@ -24,8 +23,7 @@ def standings_has_data(season: int) -> bool:
     from app.scripts.nfl_standings_conference_generate import get_json
 
     data = get_json(season)
-    children = data.get("children", [])
-    return bool(children)
+    return bool(data.get("children", []))
 
 
 def upload_stat_leaders(tmpdir: str, season: int, seasontype: int, phase: str) -> Dict[str, str]:
@@ -41,7 +39,7 @@ def upload_stat_leaders(tmpdir: str, season: int, seasontype: int, phase: str) -
             outdir=outdir,
         )
 
-        for slug, _full_title, _short_title in STAT_CONFIG:
+        for slug, *_rest in STAT_CONFIG:
             local_path = outputs.get(slug)
 
             if not local_path or not os.path.exists(local_path):
