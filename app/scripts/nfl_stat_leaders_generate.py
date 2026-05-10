@@ -1,27 +1,17 @@
 import os
 import re
 import argparse
-from io import StringIO
 from datetime import datetime
-from typing import List, Optional, Tuple, Union, Dict
+from typing import List, Optional, Tuple, Union, Dict, Any
 
 import requests
-import pandas as pd
 from PIL import Image, ImageDraw, ImageFont
 
 TOP_N = 10
 
 HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/138.0.0.0 Safari/537.36"
-    ),
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.9",
-    "Referer": "https://www.espn.com/nfl/stats/player",
-    "Cache-Control": "no-cache",
-    "Pragma": "no-cache",
+    "User-Agent": "Mozilla/5.0",
+    "Accept": "application/json,text/plain,*/*",
 }
 
 Number = Union[int, float]
@@ -33,300 +23,230 @@ TEAM_ABBRS = {
     "NYJ", "PHI", "PIT", "SEA", "SF", "TB", "TEN", "WAS", "WSH",
 }
 
-TEAM_ALT = "|".join(sorted(TEAM_ABBRS, key=len, reverse=True))
-TEAM_END_RE = re.compile(rf"^(?P<name>.*?)(?P<team>{TEAM_ALT})(?P<trail>[\s\W]*)$")
-
 STAT_CONFIG = [
-    ("passing_yards", "Passing Yards", "Passing Yards"),
-    ("passing_tds", "Passing TDs", "Passing TDs"),
-    ("interceptions_thrown", "Interceptions Thrown", "Interceptions Thrown"),
-    ("rushing_yards", "Rushing Yards", "Rushing Yards"),
-    ("rushing_tds", "Rushing TDs", "Rushing TDs"),
-    ("receiving_yards", "Receiving Yards", "Receiving Yards"),
-    ("receiving_tds", "Receiving TDs", "Receiving TDs"),
-    ("sacks", "Sacks", "Sacks"),
-    ("tackles", "Tackles", "Tackles"),
-    ("interceptions_defense", "Interceptions (Defense)", "Interceptions"),
+    ("passing_yards", "Passing Yards", "Passing Yards", ["passingYards", "passing yards"]),
+    ("passing_tds", "Passing TDs", "Passing TDs", ["passingTouchdowns", "passing touchdowns", "passing tds"]),
+    ("interceptions_thrown", "Interceptions Thrown", "Interceptions Thrown", ["interceptions", "interceptions thrown"]),
+    ("rushing_yards", "Rushing Yards", "Rushing Yards", ["rushingYards", "rushing yards"]),
+    ("rushing_tds", "Rushing TDs", "Rushing TDs", ["rushingTouchdowns", "rushing touchdowns", "rushing tds"]),
+    ("receiving_yards", "Receiving Yards", "Receiving Yards", ["receivingYards", "receiving yards"]),
+    ("receiving_tds", "Receiving TDs", "Receiving TDs", ["receivingTouchdowns", "receiving touchdowns", "receiving tds"]),
+    ("sacks", "Sacks", "Sacks", ["sacks"]),
+    ("tackles", "Tackles", "Tackles", ["totalTackles", "total tackles", "tackles"]),
+    ("interceptions_defense", "Interceptions (Defense)", "Interceptions", ["defensiveInterceptions", "interceptions"]),
 ]
+
+CORE_LEADERS_URL = (
+    "https://sports.core.api.espn.com/v2/sports/football/leagues/nfl/"
+    "seasons/{season}/types/{seasontype}/leaders?lang=en&region=us"
+)
 
 
 def normalize_spaces(s: str) -> str:
-    s = str(s)
+    s = str(s or "")
     s = re.sub(r"[\u200b\u200c\u200d\ufeff]", "", s)
     s = s.replace("\u00a0", " ").replace("\u2009", " ").replace("\u202f", " ")
     s = s.replace("\u00ad", "")
-    s = re.sub(r"\s+", " ", s).strip()
-    return s
-
-
-def enforce_space_before_team(s: str) -> str:
-    s = normalize_spaces(s)
-    m = TEAM_END_RE.match(s)
-
-    if not m:
-        return s
-
-    name_part = m.group("name").strip()
-    team = m.group("team").strip()
-
-    name_part = re.sub(r"[^\w\.\-'\s]+$", "", name_part).strip()
-    return f"{name_part} {team}".strip()
-
-
-def build_urls(season: int, seasontype: int):
-    base_player = f"https://www.espn.com/nfl/stats/player/_/season/{season}/seasontype/{seasontype}"
-    base_rush = f"https://www.espn.com/nfl/stats/player/_/stat/rushing/season/{season}/seasontype/{seasontype}"
-    base_rec = f"https://www.espn.com/nfl/stats/player/_/stat/receiving/season/{season}/seasontype/{seasontype}"
-    base_def = f"https://www.espn.com/nfl/stats/player/_/view/defense/season/{season}/seasontype/{seasontype}"
-
-    return {
-        "Passing Yards": (
-            base_player,
-            ["YDS", "PASS YDS", "Pass YDS"],
-            "int",
-        ),
-        "Passing TDs": (
-            f"{base_player}/table/passing/sort/passingTouchdowns/dir/desc",
-            ["TD", "PASS TD", "Pass TD"],
-            "int",
-        ),
-        "Interceptions Thrown": (
-            f"{base_player}/table/passing/sort/interceptions/dir/desc",
-            ["INT", "Interceptions"],
-            "int",
-        ),
-        "Rushing Yards": (
-            base_rush,
-            ["YDS", "RUSH YDS", "Rush YDS"],
-            "int",
-        ),
-        "Rushing TDs": (
-            f"{base_rush}/table/rushing/sort/rushingTouchdowns/dir/desc",
-            ["TD", "RUSH TD", "Rush TD"],
-            "int",
-        ),
-        "Receiving Yards": (
-            base_rec,
-            ["YDS", "REC YDS", "Rec YDS"],
-            "int",
-        ),
-        "Receiving TDs": (
-            f"{base_rec}/table/receiving/sort/receivingTouchdowns/dir/desc",
-            ["TD", "REC TD", "Rec TD"],
-            "int",
-        ),
-        "Sacks": (
-            f"{base_def}/table/defensive/sort/sacks/dir/desc",
-            ["SACK", "Sacks SACK", "Sacks"],
-            "float1",
-        ),
-        "Tackles": (
-            f"{base_def}/table/defensive/sort/totalTackles/dir/desc",
-            ["TOT", "Tackles TOT", "Total", "Tackles"],
-            "int",
-        ),
-        "Interceptions (Defense)": (
-            f"{base_def}/table/defensiveInterceptions/sort/interceptions/dir/desc",
-            ["INT", "Interceptions INT", "Interceptions"],
-            "int",
-        ),
-    }
-
-
-def flatten_columns(df: pd.DataFrame) -> pd.DataFrame:
-    if isinstance(df.columns, pd.MultiIndex):
-        df.columns = [
-            " ".join([str(x).strip() for x in tup if str(x).strip()]).strip()
-            for tup in df.columns
-        ]
-
-    df.columns = [str(c).strip() for c in df.columns]
-    return df
+    return re.sub(r"\s+", " ", s).strip()
 
 
 def safe_float(x) -> Optional[float]:
     if x is None:
         return None
-
-    s = str(x).strip()
-
-    if s == "" or s.lower() in {"nan", "none", "-"}:
-        return None
-
-    s = s.replace(",", "")
+    s = str(x).replace(",", "").strip()
     s = re.sub(r"[^\d\.\-]", "", s)
-
     if s in {"", "-", "."}:
         return None
-
     try:
         return float(s)
-    except ValueError:
+    except Exception:
         return None
 
 
 def safe_int(x) -> Optional[int]:
     f = safe_float(x)
-
     if f is None:
         return None
-
     return int(round(f))
 
 
-def col_lookup(cols: List[str]) -> dict:
-    return {str(c).strip().lower(): c for c in cols}
+def fetch_json(url: str) -> Dict[str, Any]:
+    r = requests.get(url, headers=HEADERS, timeout=30)
+    r.raise_for_status()
+    return r.json()
 
 
-def fetch_tables(url: str) -> List[pd.DataFrame]:
-    response = requests.get(url, headers=HEADERS, timeout=30)
-    response.raise_for_status()
-
-    html = response.text or ""
-
-    if len(html.strip()) < 200:
-        raise RuntimeError(f"ESPN returned empty or short HTML for {url}")
-
-    if "<table" not in html.lower():
-        raise RuntimeError(f"ESPN returned HTML with no tables for {url}")
-
-    tables = pd.read_html(StringIO(html))
-
-    if not tables:
-        raise RuntimeError(f"No tables found at: {url}")
-
-    return [flatten_columns(t.copy()) for t in tables]
+def resolve_ref(obj: Any) -> Dict[str, Any]:
+    if isinstance(obj, dict) and "$ref" in obj:
+        try:
+            return fetch_json(obj["$ref"])
+        except Exception:
+            return obj
+    if isinstance(obj, dict):
+        return obj
+    return {}
 
 
-def pick_name_table(tables: List[pd.DataFrame]) -> Optional[pd.DataFrame]:
-    for table in tables:
-        cmap = col_lookup(list(table.columns))
-
-        if "name" in cmap and table.shape[1] <= 4:
-            return table
-
-    for table in tables:
-        cmap = col_lookup(list(table.columns))
-
-        if "name" in cmap:
-            return table
-
-    return None
+def text_key(value: str) -> str:
+    return normalize_spaces(value).lower().replace("_", " ").replace("-", " ")
 
 
-def find_stat_table(tables: List[pd.DataFrame], candidates: List[str]) -> Optional[pd.DataFrame]:
-    cand_l = {c.strip().lower() for c in candidates}
+def category_matches(category: Dict[str, Any], aliases: List[str], slug: str) -> bool:
+    raw_fields = [
+        category.get("name"),
+        category.get("displayName"),
+        category.get("shortDisplayName"),
+        category.get("description"),
+        category.get("abbreviation"),
+    ]
 
-    for table in tables:
-        cols_l = {c.strip().lower() for c in table.columns}
+    combined = " ".join(text_key(x) for x in raw_fields if x)
 
-        for cand in cand_l:
-            for col in cols_l:
-                if cand == col or cand in col:
-                    return table
+    for alias in aliases:
+        a = text_key(alias)
+        if a and a in combined:
+            return True
 
-    return None
+    if slug == "interceptions_thrown":
+        return "interception" in combined and "defensive" not in combined
 
-
-def pick_widest_table(tables: List[pd.DataFrame]) -> Optional[pd.DataFrame]:
-    if not tables:
-        return None
-
-    return sorted(tables, key=lambda d: d.shape[1], reverse=True)[0]
-
-
-def stitch_tables_if_needed(name_t: Optional[pd.DataFrame], stat_t: pd.DataFrame) -> pd.DataFrame:
-    cmap = col_lookup(list(stat_t.columns))
-
-    if "name" in cmap:
-        return stat_t
-
-    if name_t is None:
-        return stat_t
-
-    if len(name_t) == len(stat_t):
-        stat_copy = stat_t.copy()
-
-        rk_cols = [
-            c for c in stat_copy.columns
-            if str(c).strip().lower() == "rk"
-        ]
-
-        if rk_cols:
-            stat_copy = stat_copy.drop(columns=rk_cols)
-
-        return pd.concat(
-            [name_t.reset_index(drop=True), stat_copy.reset_index(drop=True)],
-            axis=1,
+    if slug == "interceptions_defense":
+        return "interception" in combined and (
+            "defensive" in combined or "defense" in combined or "def" in combined
         )
 
-    return stat_t
+    return False
 
 
-def choose_stat_col(df: pd.DataFrame, candidates: List[str]) -> str:
-    cols = list(df.columns)
-    cols_l = [str(c).strip().lower() for c in cols]
-    cand_l = [c.strip().lower() for c in candidates]
+def find_leader_categories(data: Any) -> List[Dict[str, Any]]:
+    found = []
 
-    for ck in cand_l:
-        for i, colk in enumerate(cols_l):
-            if colk == ck:
-                return cols[i]
+    if isinstance(data, dict):
+        if "leaders" in data and isinstance(data["leaders"], list):
+            found.append(data)
 
-    for ck in cand_l:
-        for i, colk in enumerate(cols_l):
-            if ck in colk:
-                return cols[i]
+        for value in data.values():
+            found.extend(find_leader_categories(value))
 
-    raise RuntimeError(
-        f"Stat column not found. Candidates={candidates}. Columns={list(df.columns)}"
+    elif isinstance(data, list):
+        for item in data:
+            found.extend(find_leader_categories(item))
+
+    return found
+
+
+def extract_athlete_name(leader: Dict[str, Any]) -> str:
+    athlete = resolve_ref(
+        leader.get("athlete")
+        or leader.get("player")
+        or leader.get("person")
+        or {}
+    )
+
+    return normalize_spaces(
+        athlete.get("displayName")
+        or athlete.get("fullName")
+        or athlete.get("shortName")
+        or leader.get("displayName")
+        or leader.get("name")
+        or "Unknown Player"
     )
 
 
-def topN_from_url(url: str, stat_candidates: List[str], mode: str) -> List[Tuple[int, str, Number]]:
-    tables = fetch_tables(url)
+def extract_team_abbr(leader: Dict[str, Any]) -> str:
+    team_obj = leader.get("team") or leader.get("teamAthlete") or {}
 
-    name_t = pick_name_table(tables)
-    stat_t = find_stat_table(tables, stat_candidates)
+    if isinstance(team_obj, dict) and "$ref" in team_obj:
+        team_obj = resolve_ref(team_obj)
 
-    if stat_t is None:
-        stat_t = pick_widest_table(tables)
+    abbr = normalize_spaces(
+        team_obj.get("abbreviation")
+        or team_obj.get("shortDisplayName")
+        or team_obj.get("name")
+        or ""
+    ).upper()
 
-    if stat_t is None:
-        raise RuntimeError(f"Could not choose stat table at: {url}")
+    if abbr == "WAS":
+        abbr = "WSH"
 
-    df = stitch_tables_if_needed(name_t, stat_t)
+    if abbr in TEAM_ABBRS:
+        return abbr
 
-    cmap = col_lookup(list(df.columns))
+    return ""
 
-    if "name" not in cmap:
-        raise RuntimeError(f"No Name column after stitching. Columns={list(df.columns)}")
 
-    name_col = cmap["name"]
-    stat_col = choose_stat_col(df, stat_candidates)
+def extract_leader_value(leader: Dict[str, Any]) -> Optional[float]:
+    for key in ["value", "displayValue", "stat", "score"]:
+        if key in leader:
+            val = safe_float(leader.get(key))
+            if val is not None:
+                return val
 
-    work = df[[name_col, stat_col]].copy()
+    statistics = leader.get("statistics") or leader.get("stats") or []
+    if isinstance(statistics, list):
+        for s in statistics:
+            if isinstance(s, dict):
+                val = safe_float(s.get("value") or s.get("displayValue"))
+                if val is not None:
+                    return val
 
-    if mode == "float1":
-        work["__val__"] = work[stat_col].map(safe_float)
-    else:
-        work["__val__"] = work[stat_col].map(safe_int)
+    return None
 
-    work = (
-        work.dropna(subset=["__val__"])
-        .sort_values("__val__", ascending=False)
-        .head(TOP_N)
-    )
+
+def fetch_top_from_leaders_api(
+    season: int,
+    seasontype: int,
+    slug: str,
+    aliases: List[str],
+    mode: str,
+) -> List[Tuple[int, str, Number]]:
+    url = CORE_LEADERS_URL.format(season=season, seasontype=seasontype)
+    data = fetch_json(url)
+
+    categories = find_leader_categories(data)
+
+    matched = None
+    for category in categories:
+        if category_matches(category, aliases, slug):
+            matched = category
+            break
+
+    if not matched:
+        available = []
+        for c in categories[:40]:
+            available.append({
+                "name": c.get("name"),
+                "displayName": c.get("displayName"),
+                "shortDisplayName": c.get("shortDisplayName"),
+            })
+        raise RuntimeError(f"No matching category for {slug}. Available sample: {available}")
+
+    rows = []
+    for leader in matched.get("leaders", []):
+        if not isinstance(leader, dict):
+            continue
+
+        name = extract_athlete_name(leader)
+        team = extract_team_abbr(leader)
+        value = extract_leader_value(leader)
+
+        if value is None:
+            continue
+
+        display_name = f"{name} {team}".strip()
+        rows.append((display_name, value))
+
+    rows = sorted(rows, key=lambda x: x[1], reverse=True)[:TOP_N]
 
     output = []
-
-    for i, rec in enumerate(work.to_dict("records"), start=1):
-        raw = normalize_spaces(rec[name_col])
-        display_name = enforce_space_before_team(raw)
-        output.append((i, display_name, rec["__val__"]))
+    for i, (name, val) in enumerate(rows, start=1):
+        if mode == "float1":
+            output.append((i, name, float(val)))
+        else:
+            output.append((i, name, int(round(val))))
 
     if not output:
-        raise RuntimeError(f"No usable rows found at: {url}")
+        raise RuntimeError(f"No usable leaders for {slug}")
 
     return output
 
@@ -351,13 +271,11 @@ def load_font(size: int, bold: bool = False):
 def fmt_value(val: Number, mode: str) -> str:
     if mode == "float1":
         return f"{float(val):.1f}"
-
     return f"{int(val):,}"
 
 
 def fit_text(draw, text: str, font, max_width: int) -> str:
     text = str(text)
-
     if draw.textlength(text, font=font) <= max_width:
         return text
 
@@ -373,10 +291,8 @@ def split_name_team(display_name: str) -> Tuple[str, str]:
 
     if parts and parts[-1].upper() in TEAM_ABBRS:
         team = parts[-1].upper()
-
         if team == "WAS":
             team = "WSH"
-
         return " ".join(parts[:-1]), team
 
     return display_name, ""
@@ -526,15 +442,26 @@ def draw_single_stat_poster(
     img.save(out_path, "PNG")
 
 
-def build_stat_sections(season: int, seasontype: int) -> Dict[str, Tuple[str, List[Tuple[int, str, Number]], str]]:
-    urls = build_urls(season, seasontype)
-    output: Dict[str, Tuple[str, List[Tuple[int, str, Number]], str]] = {}
+def stat_mode_for_slug(slug: str) -> str:
+    if slug == "sacks":
+        return "float1"
+    return "int"
 
-    for slug, espn_title, short_title in STAT_CONFIG:
-        url, candidates, mode = urls[espn_title]
+
+def build_stat_sections(season: int, seasontype: int) -> Dict[str, Tuple[str, List[Tuple[int, str, Number]], str]]:
+    output = {}
+
+    for slug, _espn_title, short_title, aliases in STAT_CONFIG:
+        mode = stat_mode_for_slug(slug)
 
         try:
-            items = topN_from_url(url, candidates, mode)
+            items = fetch_top_from_leaders_api(
+                season=season,
+                seasontype=seasontype,
+                slug=slug,
+                aliases=aliases,
+                mode=mode,
+            )
             output[slug] = (short_title, items, mode)
             print(f"Generated data for {slug}: {len(items)} rows")
         except Exception as e:
@@ -551,15 +478,14 @@ def generate_all_stat_leader_posters(season: int, seasontype: int, outdir: str) 
     subtitle = f"Season {season} • {phase} • Updated {updated}"
 
     sections = build_stat_sections(season, seasontype)
-    outputs: Dict[str, str] = {}
+    outputs = {}
 
-    for slug, _espn_title, short_title in STAT_CONFIG:
+    for slug, _espn_title, short_title, _aliases in STAT_CONFIG:
         if slug not in sections:
             print(f"WARNING: Skipping poster for {slug}; no data available")
             continue
 
         stat_title, items, mode = sections[slug]
-
         out_path = os.path.join(outdir, f"{slug}_s{season}_t{seasontype}.png")
 
         draw_single_stat_poster(
@@ -582,19 +508,8 @@ def generate_all_stat_leader_posters(season: int, seasontype: int, outdir: str) 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--season", type=int, default=2025)
-    parser.add_argument(
-        "--seasontype",
-        type=int,
-        default=2,
-        choices=[2, 3],
-        help="2=Regular, 3=Postseason",
-    )
-    parser.add_argument(
-        "--outdir",
-        type=str,
-        default=os.path.join(os.path.expanduser("~"), "Desktop"),
-    )
-
+    parser.add_argument("--seasontype", type=int, default=2, choices=[2, 3])
+    parser.add_argument("--outdir", type=str, default=os.path.join(os.path.expanduser("~"), "Desktop"))
     args = parser.parse_args()
 
     outputs = generate_all_stat_leader_posters(
