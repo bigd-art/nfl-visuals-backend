@@ -23,6 +23,17 @@ TEAM_ABBRS = {
     "NYJ", "PHI", "PIT", "SEA", "SF", "TB", "TEN", "WAS", "WSH",
 }
 
+TEAM_LOGO_SLUGS = {
+    "ARI": "ari", "ATL": "atl", "BAL": "bal", "BUF": "buf",
+    "CAR": "car", "CHI": "chi", "CIN": "cin", "CLE": "cle",
+    "DAL": "dal", "DEN": "den", "DET": "det", "GB": "gb",
+    "HOU": "hou", "IND": "ind", "JAX": "jax", "KC": "kc",
+    "LAC": "lac", "LAR": "lar", "LV": "lv", "MIA": "mia",
+    "MIN": "min", "NE": "ne", "NO": "no", "NYG": "nyg",
+    "NYJ": "nyj", "PHI": "phi", "PIT": "pit", "SEA": "sea",
+    "SF": "sf", "TB": "tb", "TEN": "ten", "WAS": "wsh", "WSH": "wsh",
+}
+
 STAT_CONFIG = [
     ("passing_yards", "Passing Yards", "Passing Yards", ["passingYards", "passing yards"]),
     ("passing_tds", "Passing TDs", "Passing TDs", ["passingTouchdowns", "passing touchdowns", "passing tds"]),
@@ -61,13 +72,6 @@ def safe_float(x) -> Optional[float]:
         return float(s)
     except Exception:
         return None
-
-
-def safe_int(x) -> Optional[int]:
-    f = safe_float(x)
-    if f is None:
-        return None
-    return int(round(f))
 
 
 def fetch_json(url: str) -> Dict[str, Any]:
@@ -298,6 +302,35 @@ def split_name_team(display_name: str) -> Tuple[str, str]:
     return display_name, ""
 
 
+def fetch_team_logo(team: str, cache: Dict[str, Optional[Image.Image]]) -> Optional[Image.Image]:
+    if not team:
+        return None
+
+    team = team.upper()
+    if team == "WAS":
+        team = "WSH"
+
+    if team in cache:
+        return cache[team]
+
+    slug = TEAM_LOGO_SLUGS.get(team)
+    if not slug:
+        cache[team] = None
+        return None
+
+    url = f"https://a.espncdn.com/i/teamlogos/nfl/500/{slug}.png"
+
+    try:
+        r = requests.get(url, headers=HEADERS, timeout=20)
+        r.raise_for_status()
+        logo = Image.open(requests.compat.BytesIO(r.content)).convert("RGBA")
+        cache[team] = logo
+        return logo
+    except Exception:
+        cache[team] = None
+        return None
+
+
 def draw_single_stat_poster(
     out_path: str,
     poster_title: str,
@@ -316,8 +349,8 @@ def draw_single_stat_poster(
     sub_font = load_font(22, bold=False)
 
     rank_font = load_font(31, bold=True)
-    name_font = load_font(43, bold=True)
-    team_font = load_font(24, bold=True)
+    name_font = load_font(39, bold=True)
+    team_font = load_font(22, bold=True)
     value_font = load_font(45, bold=True)
 
     white = (246, 248, 252)
@@ -325,6 +358,8 @@ def draw_single_stat_poster(
     blue = (128, 183, 255)
     dark = (24, 29, 42)
     border = (64, 74, 98)
+
+    logo_cache: Dict[str, Optional[Image.Image]] = {}
 
     draw.rectangle((0, 0, width, 178), fill=(22, 38, 74))
     draw.rectangle((0, 178, width, 187), fill=blue)
@@ -403,25 +438,54 @@ def draw_single_stat_poster(
             fill=white,
         )
 
-        max_name_w = x1 - x0 - 150 - value_w - 55
+        logo_x = x0 + 112
+        logo_y = y0 + 26
+        logo_box = 66
+
+        if team:
+            logo = fetch_team_logo(team, logo_cache)
+            if logo:
+                logo_copy = logo.copy()
+                logo_copy.thumbnail((logo_box, logo_box), Image.LANCZOS)
+                lx = logo_x + (logo_box - logo_copy.width) // 2
+                ly = logo_y + (logo_box - logo_copy.height) // 2
+                img.paste(logo_copy.convert("RGBA"), (lx, ly), logo_copy.convert("RGBA"))
+            else:
+                draw.rounded_rectangle(
+                    (logo_x, logo_y, logo_x + logo_box, logo_y + logo_box),
+                    radius=16,
+                    fill=(16, 28, 54),
+                    outline=(86, 104, 140),
+                    width=1,
+                )
+                team_w = draw.textlength(team, font=team_font)
+                draw.text(
+                    (logo_x + (logo_box - team_w) / 2, logo_y + 19),
+                    team,
+                    font=team_font,
+                    fill=blue,
+                )
+
+        name_x = x0 + 196
+        max_name_w = x1 - name_x - value_w - 50
         name_text = fit_text(draw, player_name.upper(), name_font, max_name_w)
 
         draw.text(
-            (x0 + 112, y0 + 24),
+            (name_x, y0 + 25),
             name_text,
             font=name_font,
             fill=white,
         )
 
         if team:
-            tag_x1 = x0 + 114
-            tag_y1 = y0 + 83
-            tag_x2 = tag_x1 + 92
-            tag_y2 = tag_y1 + 38
+            tag_x1 = name_x
+            tag_y1 = y0 + 84
+            tag_x2 = tag_x1 + 90
+            tag_y2 = tag_y1 + 34
 
             draw.rounded_rectangle(
                 (tag_x1, tag_y1, tag_x2, tag_y2),
-                radius=13,
+                radius=12,
                 fill=(16, 28, 54),
                 outline=(86, 104, 140),
                 width=1,
@@ -430,7 +494,7 @@ def draw_single_stat_poster(
             team_w = draw.textlength(team, font=team_font)
 
             draw.text(
-                (tag_x1 + (tag_x2 - tag_x1 - team_w) / 2, tag_y1 + 5),
+                (tag_x1 + (tag_x2 - tag_x1 - team_w) / 2, tag_y1 + 4),
                 team,
                 font=team_font,
                 fill=blue,
