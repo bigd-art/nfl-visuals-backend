@@ -3,6 +3,7 @@ import argparse
 import io
 import os
 import re
+import shutil
 from typing import Dict, List, Tuple, Optional
 
 import requests
@@ -85,13 +86,13 @@ TEAM_META = {
 
 POSITION_MAP = {
     "QB": ["QB"],
-    "RB": ["RB", "FB", "HB"],
+    "RB": ["RB", "HB", "FB"],
     "WR": ["WR"],
     "TE": ["TE"],
     "C": ["C"],
     "G": ["G", "OG", "LG", "RG"],
     "T": ["T", "OT", "LT", "RT"],
-    "ED": ["DE", "OLB", "EDGE"],
+    "ED": ["DE", "EDGE", "OLB"],
     "DI": ["DT", "NT", "DL"],
     "DL": ["DE", "DT", "NT", "DL", "EDGE"],
     "LB": ["LB", "ILB", "OLB", "MLB"],
@@ -160,6 +161,22 @@ def clean_text(value) -> str:
     return re.sub(r"\s+", " ", str(value).replace("\xa0", " ").strip())
 
 
+def fetch_json(url: str) -> Dict:
+    last_error = None
+
+    for attempt in range(3):
+        try:
+            resp = requests.get(url, headers=HEADERS, timeout=30)
+            if resp.status_code != 200:
+                raise RuntimeError(f"Bad status code: {resp.status_code}")
+            return resp.json()
+        except Exception as e:
+            last_error = e
+            print(f"Retry {attempt + 1}/3 failed for {url}")
+
+    raise RuntimeError(f"Failed API request: {url}\n{last_error}")
+
+
 def fetch_image(url: str) -> Optional[Image.Image]:
     try:
         resp = requests.get(url, headers=HEADERS, timeout=20)
@@ -171,8 +188,7 @@ def fetch_image(url: str) -> Optional[Image.Image]:
 
 def get_logo(team: str) -> Optional[Image.Image]:
     _, slug, _ = TEAM_META[team]
-    logo_url = f"https://a.espncdn.com/i/teamlogos/nfl/500/{slug}.png"
-    return fetch_image(logo_url)
+    return fetch_image(f"https://a.espncdn.com/i/teamlogos/nfl/500/{slug}.png")
 
 
 def normalize_position(pos: str) -> str:
@@ -194,11 +210,11 @@ def normalize_position(pos: str) -> str:
         return "C"
     if p in {"DE", "EDGE", "LDE", "RDE"}:
         return "DE"
-    if p in {"DT", "NT"}:
+    if p in {"DT", "NT", "DL", "LDT", "RDT"}:
         return "DT"
-    if p in {"LB", "ILB", "OLB", "MLB"}:
+    if p in {"LB", "ILB", "OLB", "MLB", "WLB", "SLB"}:
         return "LB"
-    if p == "CB":
+    if p in {"CB", "LCB", "RCB", "NB", "DB"}:
         return "CB"
     if p in {"S", "FS", "SS"}:
         return "S"
@@ -208,11 +224,9 @@ def normalize_position(pos: str) -> str:
 
 def fetch_roster_json(team: str) -> Dict:
     team_id, _, _ = TEAM_META[team]
-    url = f"https://site.web.api.espn.com/apis/common/v3/sports/football/nfl/teams/{team_id}/roster"
-
-    resp = requests.get(url, headers=HEADERS, timeout=30)
-    resp.raise_for_status()
-    return resp.json()
+    return fetch_json(
+        f"https://site.web.api.espn.com/apis/common/v3/sports/football/nfl/teams/{team_id}/roster"
+    )
 
 
 def parse_player(raw: Dict) -> Optional[Tuple[str, str]]:
@@ -220,6 +234,7 @@ def parse_player(raw: Dict) -> Optional[Tuple[str, str]]:
         raw.get("displayName")
         or raw.get("fullName")
         or raw.get("shortName")
+        or raw.get("name")
         or ""
     )
 
@@ -241,12 +256,8 @@ def get_players(team: str) -> Dict[str, List[str]]:
     data = fetch_roster_json(team)
     roster: Dict[str, List[str]] = {}
 
-    groups = data.get("positionGroups", [])
-
-    for group in groups:
-        athletes = group.get("athletes", []) or []
-
-        for raw in athletes:
+    for group in data.get("positionGroups", []):
+        for raw in group.get("athletes", []) or []:
             parsed = parse_player(raw)
             if not parsed:
                 continue
@@ -258,20 +269,22 @@ def get_players(team: str) -> Dict[str, List[str]]:
                 roster[pos].append(name)
 
     if not roster:
-        raise RuntimeError(f"No roster players parsed for {team}. ESPN API structure may have changed.")
+        raise RuntimeError(f"No roster players parsed for {team}.")
 
     return roster
 
 
-def players_for_position(pos: str, roster: Dict[str, List[str]]) -> List[str]:
+def players_for_position(pos: str, roster: Dict[str, List[str]], max_players: int = 8) -> List[str]:
     result = []
 
     for mapped_pos in POSITION_MAP.get(pos, [pos]):
-        for player in roster.get(mapped_pos, []):
+        normalized = normalize_position(mapped_pos)
+
+        for player in roster.get(normalized, []):
             if player not in result:
                 result.append(player)
 
-    return result[:8]
+    return result[:max_players]
 
 
 def text_size(draw: ImageDraw.ImageDraw, text: str, font) -> Tuple[int, int]:
@@ -279,25 +292,16 @@ def text_size(draw: ImageDraw.ImageDraw, text: str, font) -> Tuple[int, int]:
     return bbox[2] - bbox[0], bbox[3] - bbox[1]
 
 
-def wrap_players(draw: ImageDraw.ImageDraw, players: List[str], font, max_width: int) -> List[str]:
-    if not players:
-        return ["No players found"]
+def fit_text(draw: ImageDraw.ImageDraw, text: str, font, max_width: int) -> str:
+    text = str(text)
 
-    lines = []
-    current = players[0]
+    if draw.textlength(text, font=font) <= max_width:
+        return text
 
-    for player in players[1:]:
-        test = current + ", " + player
-        w, _ = text_size(draw, test, font)
+    while len(text) > 3 and draw.textlength(text + "…", font=font) > max_width:
+        text = text[:-1]
 
-        if w <= max_width:
-            current = test
-        else:
-            lines.append(current)
-            current = player
-
-    lines.append(current)
-    return lines
+    return text.rstrip() + "…"
 
 
 def draw_centered(draw: ImageDraw.ImageDraw, text: str, y: int, font, fill, canvas_width: int) -> int:
@@ -328,6 +332,39 @@ def make_gradient(width: int, height: int, top_color: Tuple[int, int, int], bott
     return img
 
 
+def draw_need_block(
+    draw: ImageDraw.ImageDraw,
+    pos: str,
+    players: List[str],
+    x: int,
+    y: int,
+    width: int,
+    accent: str,
+    pos_font,
+    player_font,
+    small_font,
+) -> int:
+    draw.text((x, y), pos, fill=accent, font=pos_font)
+
+    label = "POSITION GROUP NEED"
+    label_w, _ = text_size(draw, label, small_font)
+    draw.text((x + width - label_w, y + 8), label, fill="#555555", font=small_font)
+
+    y += 52
+
+    if not players:
+        draw.text((x + 18, y), "1 - No players found", fill="black", font=player_font)
+        return y + 42
+
+    for idx, player in enumerate(players, 1):
+        line = f"{idx} - {player}"
+        line = fit_text(draw, line, player_font, width - 24)
+        draw.text((x + 18, y), line, fill="black", font=player_font)
+        y += 38
+
+    return y
+
+
 def poster(team: str, out_file: Optional[str] = None):
     team = ALIASES.get(team, team)
 
@@ -342,70 +379,83 @@ def poster(team: str, out_file: Optional[str] = None):
     img = make_gradient(W, H, hex_to_rgb(primary_hex), (10, 10, 10)).convert("RGBA")
     draw = ImageDraw.Draw(img)
 
-    title_font = load_font(84, True)
-    team_font = load_font(58, True)
+    title_font = load_font(82, True)
+    team_font = load_font(56, True)
     pos_font = load_font(38, True)
-    body_font = load_font(29, False)
+    player_font = load_font(27, False)
+    small_font = load_font(19, True)
     footer_font = load_font(22, False)
 
-    white = "white"
-    accent = accent_hex
-
-    y = 70
+    y = 65
 
     logo = get_logo(team)
     if logo:
-        logo.thumbnail((220, 220), Image.LANCZOS)
+        logo.thumbnail((215, 215), Image.LANCZOS)
         logo_x = (W - logo.width) // 2
         img.alpha_composite(logo, (logo_x, y))
-        y += logo.height + 30
+        y += logo.height + 28
 
-    y = draw_centered(draw, name.upper(), y, team_font, white, W) + 20
-    y = draw_centered(draw, "TOP POSITIONS OF NEED", y, title_font, white, W) + 45
+    y = draw_centered(draw, name.upper(), y, team_font, "white", W) + 18
+    y = draw_centered(draw, "TEAM NEEDS BOARD", y, title_font, "white", W) + 40
 
-    panel_x1, panel_y1 = 110, y
-    panel_x2, panel_y2 = W - 110, H - 120
+    panel_x1, panel_y1 = 105, y
+    panel_x2, panel_y2 = W - 105, H - 120
 
     draw.rounded_rectangle(
         (panel_x1, panel_y1, panel_x2, panel_y2),
         radius=34,
-        fill=(245, 245, 245, 235),
-        outline=(255, 255, 255, 80),
+        fill=(245, 245, 245, 238),
+        outline=(255, 255, 255, 85),
         width=3,
     )
 
-    y = panel_y1 + 40
+    y = panel_y1 + 38
     left = panel_x1 + 45
     right = panel_x2 - 45
-    max_width = right - left
+    block_width = right - left
 
-    for i, pos in enumerate(TEAM_NEEDS[team], 1):
-        draw.text((left, y), f"{i}. {pos}", fill=accent, font=pos_font)
-        y += 54
+    needs = TEAM_NEEDS[team]
 
-        players = players_for_position(pos, roster)
-        player_lines = wrap_players(draw, players, body_font, max_width)
+    for i, pos in enumerate(needs, 1):
+        players = players_for_position(pos, roster, max_players=8)
 
-        for line in player_lines:
-            draw.text((left + 20, y), line, fill="black", font=body_font)
-            y += 40
+        y = draw_need_block(
+            draw=draw,
+            pos=f"{i}. {pos}",
+            players=players,
+            x=left,
+            y=y,
+            width=block_width,
+            accent=accent_hex,
+            pos_font=pos_font,
+            player_font=player_font,
+            small_font=small_font,
+        )
 
         y += 18
 
-        if i != len(TEAM_NEEDS[team]):
+        if i != len(needs):
             draw.line((left, y, right, y), fill=(190, 190, 190), width=2)
-            y += 28
+            y += 26
+
+        if y > panel_y2 - 120:
+            break
 
     draw_centered(draw, f"{team} TEAM NEEDS", H - 60, footer_font, "#DADADA", W)
 
     out_file = out_file or f"{team.lower()}_team_needs.png"
     os.makedirs(os.path.dirname(out_file) or ".", exist_ok=True)
     img.convert("RGB").save(out_file, quality=95)
+
     return out_file
 
 
 def generate_all_team_needs_posters(outdir: str):
+    if os.path.exists(outdir):
+        shutil.rmtree(outdir)
+
     os.makedirs(outdir, exist_ok=True)
+
     outputs = {}
     failures = {}
 
@@ -424,24 +474,30 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("team", nargs="?", help="Example: BUF, DAL, WSH")
     parser.add_argument("--all", action="store_true", help="Generate all 32 teams")
-    parser.add_argument("--outdir", default=".", help="Output directory")
+    parser.add_argument("--outdir", default="team_needs_numbered_posters", help="Output directory")
     args = parser.parse_args()
 
     if args.all:
         outputs, failures = generate_all_team_needs_posters(args.outdir)
-        print(f"Generated {len(outputs)} posters")
+        print(f"Generated {len(outputs)} posters in {args.outdir}")
+
         if failures:
             print("Failures:")
             for team, err in failures.items():
                 print(f"{team}: {err}")
+
         return
 
     if not args.team:
         raise SystemExit("Provide a team abbreviation like BUF, or use --all")
 
     team = ALIASES.get(args.team.upper(), args.team.upper())
+
+    os.makedirs(args.outdir, exist_ok=True)
+
     out_file = os.path.join(args.outdir, f"{team.lower()}_team_needs.png")
     saved = poster(team, out_file=out_file)
+
     print(f"Saved {saved}")
 
 
