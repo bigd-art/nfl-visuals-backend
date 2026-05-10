@@ -2,7 +2,6 @@ import os
 import re
 import sys
 from io import BytesIO
-from typing import Dict, List
 
 import requests
 from PIL import Image, ImageDraw, ImageFont
@@ -70,6 +69,53 @@ def clean_text(value):
     if value is None:
         return ""
     return re.sub(r"\s+", " ", str(value).replace("\xa0", " ").strip())
+
+
+def normalize_name(name):
+    name = clean_text(name).lower()
+    name = re.sub(r"[^a-z0-9 ]", "", name)
+    return re.sub(r"\s+", " ", name).strip()
+
+
+def normalize_position(pos):
+    p = clean_text(pos).upper()
+
+    if p == "QB":
+        return "QB"
+    if p in {"RB", "HB", "FB"}:
+        return "RB"
+    if p == "WR":
+        return "WR"
+    if p == "TE":
+        return "TE"
+    if p in {"G", "OG", "LG", "RG"}:
+        return "G"
+    if p in {"T", "OT", "LT", "RT"}:
+        return "T"
+    if p == "C":
+        return "C"
+
+    if p in {"DE", "EDGE", "LDE", "RDE"}:
+        return "DE"
+    if p in {"DT", "NT", "LDT", "RDT"}:
+        return "DT"
+    if p in {"LB", "ILB", "OLB", "MLB", "WLB", "SLB"}:
+        return "LB"
+    if p in {"CB", "LCB", "RCB", "NB", "DB"}:
+        return "CB"
+    if p in {"S", "FS", "SS"}:
+        return "S"
+
+    if p in {"PK", "K"}:
+        return "K"
+    if p == "P":
+        return "P"
+    if p == "LS":
+        return "LS"
+    if p in {"PR", "KR"}:
+        return p
+
+    return p
 
 
 def get_font(size, bold=False):
@@ -152,6 +198,12 @@ def wrap_text(draw, text, font, max_width):
     return lines
 
 
+def fetch_json(url):
+    response = requests.get(url, headers=HEADERS, timeout=30)
+    response.raise_for_status()
+    return response.json()
+
+
 def fetch_team_logo(team_code):
     logo_url = f"https://a.espncdn.com/i/teamlogos/nfl/500/{team_code}.png"
     response = requests.get(logo_url, headers=HEADERS, timeout=30)
@@ -166,46 +218,16 @@ def paste_logo_centered(base_image, logo, center_x, top_y, max_width=135, max_he
     base_image.paste(logo, (x, top_y), logo)
 
 
-def normalize_position(pos):
-    p = clean_text(pos).upper()
-
-    if p == "QB":
-        return "QB"
-    if p in {"RB", "HB", "FB"}:
-        return "RB"
-    if p == "WR":
-        return "WR"
-    if p == "TE":
-        return "TE"
-
-    if p in {"G", "OG", "LG", "RG"}:
-        return "G"
-    if p in {"T", "OT", "LT", "RT"}:
-        return "T"
-    if p == "C":
-        return "C"
-
-    if p in {"DE", "EDGE", "LDE", "RDE"}:
-        return "DE"
-    if p in {"DT", "NT"}:
-        return "DT"
-    if p in {"LB", "ILB", "OLB", "MLB"}:
-        return "LB"
-    if p == "CB":
-        return "CB"
-    if p in {"S", "FS", "SS"}:
-        return "S"
-
-    return p
-
-
 def fetch_roster_json(team_code):
     team_id = TEAM_INFO[team_code]["id"]
     url = f"https://site.web.api.espn.com/apis/common/v3/sports/football/nfl/teams/{team_id}/roster"
+    return fetch_json(url)
 
-    response = requests.get(url, headers=HEADERS, timeout=30)
-    response.raise_for_status()
-    return response.json()
+
+def fetch_depthchart_json(team_code):
+    team_id = TEAM_INFO[team_code]["id"]
+    url = f"https://site.api.espn.com/apis/site/v2/sports/football/nfl/teams/{team_id}/depthcharts"
+    return fetch_json(url)
 
 
 def parse_player(raw):
@@ -213,6 +235,7 @@ def parse_player(raw):
         raw.get("displayName")
         or raw.get("fullName")
         or raw.get("shortName")
+        or raw.get("name")
         or ""
     )
 
@@ -244,6 +267,7 @@ def parse_player(raw):
 
     return {
         "name": name,
+        "name_key": normalize_name(name),
         "pos": pos,
         "display_pos": normalize_position(pos),
         "age": age,
@@ -284,15 +308,136 @@ def parse_team_roster(team_code):
             if player["name"] and player["pos"]:
                 sections[section_key].append(player)
 
-    print("Parsed rows:")
+    print("Roster API rows:")
     print("Offense:", len(sections["offense"]))
     print("Defense:", len(sections["defense"]))
     print("Special Teams:", len(sections["special_teams"]))
 
-    if not sections["offense"] and not sections["defense"] and not sections["special_teams"]:
-        raise RuntimeError(f"No roster players parsed for {team_code}. JSON format changed.")
-
     return sections
+
+
+def depth_position_from_position_data(position_data):
+    position_obj = position_data.get("position", {})
+    parent_obj = position_obj.get("parent", {})
+
+    own_abbr = clean_text(position_obj.get("abbreviation", ""))
+    parent_abbr = clean_text(parent_obj.get("abbreviation", ""))
+
+    if own_abbr:
+        normalized_own = normalize_position(own_abbr)
+        if normalized_own not in {"OFF", "DEF", "ST"}:
+            return normalized_own
+
+    if parent_abbr:
+        normalized_parent = normalize_position(parent_abbr)
+        if normalized_parent not in {"OFF", "DEF", "ST"}:
+            return normalized_parent
+
+    return normalize_position(own_abbr or parent_abbr)
+
+
+def parse_depthchart_order(team_code):
+    data = fetch_depthchart_json(team_code)
+
+    depthchart = data.get("depthchart", [])
+
+    depth_sections = {
+        "offense": [],
+        "defense": [],
+        "special_teams": [],
+    }
+
+    seen_by_section = {
+        "offense": set(),
+        "defense": set(),
+        "special_teams": set(),
+    }
+
+    for group in depthchart:
+        group_name = clean_text(group.get("name", "")).lower()
+        positions = group.get("positions", {})
+
+        if not isinstance(positions, dict):
+            continue
+
+        if "special" in group_name:
+            section_key = "special_teams"
+        elif "base" in group_name or "defense" in group_name or "4-3" in group_name or "3-4" in group_name:
+            section_key = "defense"
+        else:
+            section_key = "offense"
+
+        for position_key, position_data in positions.items():
+            if not isinstance(position_data, dict):
+                continue
+
+            display_pos = depth_position_from_position_data(position_data)
+            athletes = position_data.get("athletes", [])
+
+            if not isinstance(athletes, list):
+                continue
+
+            for depth_rank, athlete in enumerate(athletes, start=1):
+                if not isinstance(athlete, dict):
+                    continue
+
+                name = clean_text(
+                    athlete.get("displayName")
+                    or athlete.get("fullName")
+                    or athlete.get("shortName")
+                    or athlete.get("name")
+                    or ""
+                )
+
+                if not name:
+                    continue
+
+                name_key = normalize_name(name)
+
+                if name_key in seen_by_section[section_key]:
+                    continue
+
+                seen_by_section[section_key].add(name_key)
+
+                depth_sections[section_key].append({
+                    "name": name,
+                    "name_key": name_key,
+                    "display_pos": display_pos,
+                    "depth_position_key": position_key.upper(),
+                    "depth_rank": depth_rank,
+                    "group_name": group.get("name", ""),
+                })
+
+    print("Depth chart API rows:")
+    print("Offense:", len(depth_sections["offense"]))
+    print("Defense:", len(depth_sections["defense"]))
+    print("Special Teams:", len(depth_sections["special_teams"]))
+
+    return depth_sections
+
+
+def order_section_by_depthchart(roster_players, depth_players):
+    roster_by_name = {p["name_key"]: p for p in roster_players}
+
+    ordered = []
+    used = set()
+
+    for depth_player in depth_players:
+        key = depth_player["name_key"]
+
+        if key in roster_by_name:
+            player = roster_by_name[key].copy()
+            player["display_pos"] = depth_player.get("display_pos", player.get("display_pos", player.get("pos", "")))
+            player["depth_position_key"] = depth_player.get("depth_position_key", "")
+            player["depth_rank"] = depth_player.get("depth_rank", "")
+            ordered.append(player)
+            used.add(key)
+
+    for player in roster_players:
+        if player["name_key"] not in used:
+            ordered.append(player)
+
+    return ordered
 
 
 def select_players_by_requirements(players, requirements):
@@ -317,29 +462,50 @@ def select_players_by_requirements(players, requirements):
     return selected
 
 
+def apply_numbered_position_labels(players):
+    counts = {}
+
+    labeled = []
+    for player in players:
+        player = player.copy()
+        base_pos = player.get("display_pos") or player.get("pos") or ""
+        base_pos = normalize_position(base_pos)
+
+        counts[base_pos] = counts.get(base_pos, 0) + 1
+        player["poster_pos_label"] = f"{base_pos}{counts[base_pos]}"
+
+        labeled.append(player)
+
+    return labeled
+
+
 def build_display_players(unit_key, players):
     if unit_key == "offense":
         selected = select_players_by_requirements(players, OFFENSE_REQUIREMENTS)
-        return selected if selected else players[:18]
+        if len(selected) >= 14:
+            return apply_numbered_position_labels(selected)
+        return apply_numbered_position_labels(players[:18])
 
     if unit_key == "defense":
         selected = select_players_by_requirements(players, DEFENSE_REQUIREMENTS)
-        return selected if selected else players[:18]
+        if len(selected) >= 14:
+            return apply_numbered_position_labels(selected)
+        return apply_numbered_position_labels(players[:18])
 
-    return players
+    return apply_numbered_position_labels(players)
 
 
 def draw_players_block(draw, players, start_x, start_y, content_width, row_height, fonts, colors):
     y = start_y
 
     for player in players:
-        pos = player.get("display_pos", player["pos"])
+        pos = player.get("poster_pos_label") or player.get("display_pos", player["pos"])
         name = player["name"]
 
         draw.text((start_x, y), pos, font=fonts["pos"], fill=colors["accent"])
 
-        name_x = start_x + 95
-        display_name = fit_text(draw, name.upper(), fonts["name"], content_width - 95)
+        name_x = start_x + 105
+        display_name = fit_text(draw, name.upper(), fonts["name"], content_width - 105)
         draw.text((name_x, y), display_name, font=fonts["name"], fill=colors["name"])
 
         meta_parts = []
@@ -356,7 +522,7 @@ def draw_players_block(draw, players, start_x, start_y, content_width, row_heigh
             meta_parts.append(player["college"])
 
         meta = " • ".join(meta_parts)
-        meta_lines = wrap_text(draw, meta, fonts["meta"], content_width - 95)
+        meta_lines = wrap_text(draw, meta, fonts["meta"], content_width - 105)
 
         meta_y = y + 32
         for line in meta_lines[:2]:
@@ -380,13 +546,13 @@ def create_single_poster(team_code, unit_key, players, output_dir):
 
     if unit_key == "offense":
         unit_title = "OFFENSE"
-        section_label = "FEATURED OFFENSE"
+        section_label = "DEPTH CHART OFFENSE"
     elif unit_key == "defense":
         unit_title = "DEFENSE"
-        section_label = "FEATURED DEFENSE"
+        section_label = "DEPTH CHART DEFENSE"
     else:
         unit_title = "SPECIAL TEAMS"
-        section_label = "FULL ROSTER"
+        section_label = "DEPTH CHART SPECIAL TEAMS"
 
     width = 1080
     height = 1920
@@ -397,7 +563,7 @@ def create_single_poster(team_code, unit_key, players, output_dir):
     big_font = get_font(62, True)
     team_font = get_font(28, True)
     section_font = get_font(26, True)
-    pos_font = get_font(28, True)
+    pos_font = get_font(27, True)
     name_font = get_font(25, True)
     meta_font = get_font(18, False)
     footer_font = get_font(16, False)
@@ -474,7 +640,7 @@ def create_single_poster(team_code, unit_key, players, output_dir):
 
     os.makedirs(output_dir, exist_ok=True)
 
-    file_name = f"{team_code}_{unit_key}_roster.png"
+    file_name = f"{team_code}_{unit_key}_espn_depthchart_labels_roster.png"
     output_path = os.path.join(output_dir, file_name)
     bg.save(output_path)
 
@@ -483,8 +649,8 @@ def create_single_poster(team_code, unit_key, players, output_dir):
 
 def get_team_code_from_args():
     if len(sys.argv) < 2:
-        print("Usage: python3 nfl_rosters_generate.py <team_code>")
-        print("Example: python3 nfl_rosters_generate.py phi")
+        print("Usage: python3 nfl_rosters_espn_depthchart_labels.py <team_code>")
+        print("Example: python3 nfl_rosters_espn_depthchart_labels.py ari")
         print("")
         print("Valid team codes:")
         print(", ".join(sorted(TEAM_INFO.keys())))
@@ -507,7 +673,18 @@ def main():
     print(f"Fetching roster API for {TEAM_INFO[team_code]['name']}...")
     sections = parse_team_roster(team_code)
 
-    output_dir = "single_team_roster_posters"
+    print("")
+    print("Fetching ESPN depth chart API...")
+    depth_sections = parse_depthchart_order(team_code)
+
+    if any(depth_sections.values()):
+        sections["offense"] = order_section_by_depthchart(sections["offense"], depth_sections["offense"])
+        sections["defense"] = order_section_by_depthchart(sections["defense"], depth_sections["defense"])
+        sections["special_teams"] = order_section_by_depthchart(sections["special_teams"], depth_sections["special_teams"])
+    else:
+        print("WARNING: No depth chart order found. Falling back to roster API order.")
+
+    output_dir = "single_team_roster_espn_depthchart_labels_posters"
 
     offense_path = create_single_poster(team_code, "offense", sections["offense"], output_dir)
     defense_path = create_single_poster(team_code, "defense", sections["defense"], output_dir)
