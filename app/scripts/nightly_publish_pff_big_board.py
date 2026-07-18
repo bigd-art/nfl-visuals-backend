@@ -24,7 +24,7 @@ def draft_cycle_has_big_board(season: int) -> bool:
 
 
 def publish_pff_big_board(keep_versioned: bool = False) -> dict:
-    season = resolve_first_valid(current_draft_cycle_candidates(), draft_cycle_has_big_board)
+    season = 2027
 
     with tempfile.TemporaryDirectory() as tmpdir:
         bigboard.OUTPUT_DIR = tmpdir
@@ -35,10 +35,13 @@ def publish_pff_big_board(keep_versioned: bool = False) -> dict:
         grouped = bigboard.group_top_players(players)
 
         posters = {}
+
         for pos, plist in grouped.items():
             bigboard.create_poster(pos, plist, season)
+
             filename = f"{bigboard.safe_filename(pos)}_top_5.png"
             local_path = os.path.join(tmpdir, filename)
+
             posters[pos] = upload_file_return_url(
                 local_path,
                 f"pff_big_board/current/{filename}"
@@ -51,10 +54,14 @@ def publish_pff_big_board(keep_versioned: bool = False) -> dict:
         }
 
         local_json = os.path.join(tmpdir, "current.json")
+
         with open(local_json, "w", encoding="utf-8") as f:
             json.dump(payload, f, indent=2)
 
-        payload["metadata_url"] = upload_file_return_url(local_json, "pff_big_board/current.json")
+        payload["metadata_url"] = upload_file_return_url(
+            local_json,
+            "pff_big_board/current.json"
+        )
 
         if keep_versioned:
             payload["versioned_metadata_url"] = upload_file_return_url(
@@ -79,7 +86,15 @@ def parse_args():
 
 def main():
     args = parse_args()
-    print(json.dumps(publish_pff_big_board(keep_versioned=args.keep_versioned), indent=2))
+
+    print(
+        json.dumps(
+            publish_pff_big_board(
+                keep_versioned=args.keep_versioned
+            ),
+            indent=2
+        )
+    )
 
 
 if __name__ == "__main__":
