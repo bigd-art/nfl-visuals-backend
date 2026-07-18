@@ -129,9 +129,13 @@ def safe_float(x) -> Optional[float]:
 
 
 def fetch_json(url: str) -> Dict[str, Any]:
-    r = requests.get(url, headers=HEADERS, timeout=30)
-    r.raise_for_status()
-    return r.json()
+    response = requests.get(
+        url,
+        headers=HEADERS,
+        timeout=30,
+    )
+    response.raise_for_status()
+    return response.json()
 
 
 def resolve_ref(obj: Any) -> Dict[str, Any]:
@@ -148,7 +152,12 @@ def resolve_ref(obj: Any) -> Dict[str, Any]:
 
 
 def text_key(value: str) -> str:
-    return normalize_spaces(value).lower().replace("_", " ").replace("-", " ")
+    return (
+        normalize_spaces(value)
+        .lower()
+        .replace("_", " ")
+        .replace("-", " ")
+    )
 
 
 def category_matches(
@@ -164,23 +173,36 @@ def category_matches(
         category.get("abbreviation"),
     ]
 
-    combined = " ".join(text_key(x) for x in raw_fields if x)
+    combined = " ".join(
+        text_key(value)
+        for value in raw_fields
+        if value
+    )
 
-    for alias in aliases:
-        a = text_key(alias)
-
-        if a and a in combined:
-            return True
-
+    # Check interception categories before generic aliases so the two
+    # posters cannot accidentally select the same ESPN category.
     if slug == "interceptions_thrown":
-        return "interception" in combined and "defensive" not in combined
+        return (
+            "interception" in combined
+            and "defensive" not in combined
+            and "defense" not in combined
+        )
 
     if slug == "interceptions_defense":
-        return "interception" in combined and (
-            "defensive" in combined
-            or "defense" in combined
-            or "def" in combined
+        return (
+            "interception" in combined
+            and (
+                "defensive" in combined
+                or "defense" in combined
+                or "def" in combined
+            )
         )
+
+    for alias in aliases:
+        normalized_alias = text_key(alias)
+
+        if normalized_alias and normalized_alias in combined:
+            return True
 
     return False
 
@@ -221,7 +243,11 @@ def extract_athlete_name(leader: Dict[str, Any]) -> str:
 
 
 def extract_team_abbr(leader: Dict[str, Any]) -> str:
-    team_obj = leader.get("team") or leader.get("teamAthlete") or {}
+    team_obj = (
+        leader.get("team")
+        or leader.get("teamAthlete")
+        or {}
+    )
 
     if isinstance(team_obj, dict) and "$ref" in team_obj:
         team_obj = resolve_ref(team_obj)
@@ -242,26 +268,37 @@ def extract_team_abbr(leader: Dict[str, Any]) -> str:
     return ""
 
 
-def extract_leader_value(leader: Dict[str, Any]) -> Optional[float]:
-    for key in ["value", "displayValue", "stat", "score"]:
+def extract_leader_value(
+    leader: Dict[str, Any],
+) -> Optional[float]:
+    for key in [
+        "value",
+        "displayValue",
+        "stat",
+        "score",
+    ]:
         if key in leader:
-            val = safe_float(leader.get(key))
+            value = safe_float(leader.get(key))
 
-            if val is not None:
-                return val
+            if value is not None:
+                return value
 
-    statistics = leader.get("statistics") or leader.get("stats") or []
+    statistics = (
+        leader.get("statistics")
+        or leader.get("stats")
+        or []
+    )
 
     if isinstance(statistics, list):
         for stat in statistics:
             if isinstance(stat, dict):
-                val = safe_float(
+                value = safe_float(
                     stat.get("value")
                     or stat.get("displayValue")
                 )
 
-                if val is not None:
-                    return val
+                if value is not None:
+                    return value
 
     return None
 
@@ -284,7 +321,11 @@ def fetch_top_from_leaders_api(
     matched = None
 
     for category in categories:
-        if category_matches(category, aliases, slug):
+        if category_matches(
+            category,
+            aliases,
+            slug,
+        ):
             matched = category
             break
 
@@ -329,19 +370,31 @@ def fetch_top_from_leaders_api(
 
     output = []
 
-    for rank, (name, value) in enumerate(rows, start=1):
+    for rank, (name, value) in enumerate(
+        rows,
+        start=1,
+    ):
         if mode == "float1":
-            output.append((rank, name, float(value)))
+            output.append(
+                (rank, name, float(value))
+            )
         else:
-            output.append((rank, name, int(round(value))))
+            output.append(
+                (rank, name, int(round(value)))
+            )
 
     if not output:
-        raise RuntimeError(f"No usable leaders for {slug}")
+        raise RuntimeError(
+            f"No usable leaders for {slug}"
+        )
 
     return output
 
 
-def load_font(size: int, bold: bool = False):
+def load_font(
+    size: int,
+    bold: bool = False,
+):
     candidates = [
         (
             "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
@@ -367,18 +420,24 @@ def load_font(size: int, bold: bool = False):
 
     for path in candidates:
         try:
-            return ImageFont.truetype(path, size=size)
+            return ImageFont.truetype(
+                path,
+                size=size,
+            )
         except Exception:
             pass
 
     return ImageFont.load_default()
 
 
-def fmt_value(val: Number, mode: str) -> str:
+def fmt_value(
+    value: Number,
+    mode: str,
+) -> str:
     if mode == "float1":
-        return f"{float(val):.1f}"
+        return f"{float(value):.1f}"
 
-    return f"{int(val):,}"
+    return f"{int(value):,}"
 
 
 def fit_text(
@@ -389,23 +448,34 @@ def fit_text(
 ) -> str:
     text = str(text)
 
-    if draw.textlength(text, font=font) <= max_width:
+    if draw.textlength(
+        text,
+        font=font,
+    ) <= max_width:
         return text
 
     while (
         len(text) > 3
-        and draw.textlength(text + "…", font=font) > max_width
+        and draw.textlength(
+            text + "…",
+            font=font,
+        ) > max_width
     ):
         text = text[:-1]
 
     return text.rstrip() + "…"
 
 
-def split_name_team(display_name: str) -> Tuple[str, str]:
+def split_name_team(
+    display_name: str,
+) -> Tuple[str, str]:
     display_name = normalize_spaces(display_name)
     parts = display_name.split()
 
-    if parts and parts[-1].upper() in TEAM_ABBRS:
+    if (
+        parts
+        and parts[-1].upper() in TEAM_ABBRS
+    ):
         team = parts[-1].upper()
 
         if team == "WAS":
@@ -437,7 +507,10 @@ def fetch_team_logo(
         cache[team] = None
         return None
 
-    url = f"https://a.espncdn.com/i/teamlogos/nfl/500/{slug}.png"
+    url = (
+        "https://a.espncdn.com/i/"
+        f"teamlogos/nfl/500/{slug}.png"
+    )
 
     try:
         response = requests.get(
@@ -456,8 +529,10 @@ def fetch_team_logo(
 
     except Exception as error:
         print(
-            f"WARNING: Failed to load logo for {team}: {error}"
+            f"WARNING: Failed to load logo "
+            f"for {team}: {error}"
         )
+
         cache[team] = None
         return None
 
@@ -470,7 +545,8 @@ def draw_single_stat_poster(
     items: List[Tuple[int, str, Number]],
     mode: str,
 ):
-    width, height = 1080, 1920
+    width = 1080
+    height = 1920
 
     img = Image.new(
         "RGB",
@@ -495,7 +571,10 @@ def draw_single_stat_poster(
     dark = (24, 29, 42)
     border = (64, 74, 98)
 
-    logo_cache: Dict[str, Optional[Image.Image]] = {}
+    logo_cache: Dict[
+        str,
+        Optional[Image.Image],
+    ] = {}
 
     draw.rectangle(
         (0, 0, width, 178),
@@ -542,7 +621,13 @@ def draw_single_stat_poster(
 
     draw.text(
         (
-            (width - draw.textlength(title, font=title_font)) / 2,
+            (
+                width
+                - draw.textlength(
+                    title,
+                    font=title_font,
+                )
+            ) / 2,
             24,
         ),
         title,
@@ -552,7 +637,13 @@ def draw_single_stat_poster(
 
     draw.text(
         (
-            (width - draw.textlength(stat, font=stat_font)) / 2,
+            (
+                width
+                - draw.textlength(
+                    stat,
+                    font=stat_font,
+                )
+            ) / 2,
             78,
         ),
         stat,
@@ -562,7 +653,13 @@ def draw_single_stat_poster(
 
     draw.text(
         (
-            (width - draw.textlength(sub, font=sub_font)) / 2,
+            (
+                width
+                - draw.textlength(
+                    sub,
+                    font=sub_font,
+                )
+            ) / 2,
             143,
         ),
         sub,
@@ -570,18 +667,28 @@ def draw_single_stat_poster(
         fill=muted,
     )
 
-    x0, x1 = 42, width - 42
+    x0 = 42
+    x1 = width - 42
     top = 220
     bottom = height - 42
     gap = 14
 
-    row_h = int(
-        (bottom - top - gap * (TOP_N - 1)) / TOP_N
+    row_height = int(
+        (
+            bottom
+            - top
+            - gap * (TOP_N - 1)
+        )
+        / TOP_N
     )
 
     for rank, display_name, value in items:
-        y0 = top + (rank - 1) * (row_h + gap)
-        y1 = y0 + row_h
+        y0 = (
+            top
+            + (rank - 1)
+            * (row_height + gap)
+        )
+        y1 = y0 + row_height
 
         draw.rounded_rectangle(
             (x0, y0, x1, y1),
@@ -605,14 +712,20 @@ def draw_single_stat_poster(
         )
 
         rank_text = str(rank)
-        rank_w = draw.textlength(
+
+        rank_width = draw.textlength(
             rank_text,
             font=rank_font,
         )
 
         draw.text(
             (
-                pill[0] + (pill[2] - pill[0] - rank_w) / 2,
+                pill[0]
+                + (
+                    pill[2]
+                    - pill[0]
+                    - rank_width
+                ) / 2,
                 pill[1] + 12,
             ),
             rank_text,
@@ -620,17 +733,23 @@ def draw_single_stat_poster(
             fill=(15, 20, 28),
         )
 
-        player_name, team = split_name_team(display_name)
+        player_name, team = (
+            split_name_team(display_name)
+        )
 
-        value_text = fmt_value(value, mode)
-        value_w = draw.textlength(
+        value_text = fmt_value(
+            value,
+            mode,
+        )
+
+        value_width = draw.textlength(
             value_text,
             font=value_font,
         )
 
         draw.text(
             (
-                x1 - 30 - value_w,
+                x1 - 30 - value_width,
                 y0 + 31,
             ),
             value_text,
@@ -641,7 +760,7 @@ def draw_single_stat_poster(
         name_x = x0 + 120
         logo_box = 66
         logo_gap = 18
-        value_left = x1 - 30 - value_w
+        value_left = x1 - 30 - value_width
 
         max_player_area = (
             value_left
@@ -667,13 +786,21 @@ def draw_single_stat_poster(
             fill=white,
         )
 
-        name_w = draw.textlength(
+        name_width = draw.textlength(
             name_text,
             font=name_font,
         )
 
-        logo_x = int(name_x + name_w + logo_gap)
-        logo_y = y0 + (row_h - logo_box) // 2
+        logo_x = int(
+            name_x
+            + name_width
+            + logo_gap
+        )
+
+        logo_y = (
+            y0
+            + (row_height - logo_box) // 2
+        )
 
         if team:
             logo = fetch_team_logo(
@@ -683,6 +810,7 @@ def draw_single_stat_poster(
 
             if logo is not None:
                 logo_copy = logo.copy()
+
                 logo_copy.thumbnail(
                     (logo_box, logo_box),
                     Image.LANCZOS,
@@ -690,15 +818,23 @@ def draw_single_stat_poster(
 
                 logo_left = (
                     logo_x
-                    + (logo_box - logo_copy.width) // 2
+                    + (
+                        logo_box
+                        - logo_copy.width
+                    ) // 2
                 )
 
                 logo_top = (
                     logo_y
-                    + (logo_box - logo_copy.height) // 2
+                    + (
+                        logo_box
+                        - logo_copy.height
+                    ) // 2
                 )
 
-                logo_rgba = logo_copy.convert("RGBA")
+                logo_rgba = (
+                    logo_copy.convert("RGBA")
+                )
 
                 img.paste(
                     logo_rgba,
@@ -720,14 +856,18 @@ def draw_single_stat_poster(
                     width=1,
                 )
 
-                team_w = draw.textlength(
+                team_width = draw.textlength(
                     team,
                     font=team_font,
                 )
 
                 draw.text(
                     (
-                        logo_x + (logo_box - team_w) / 2,
+                        logo_x
+                        + (
+                            logo_box
+                            - team_width
+                        ) / 2,
                         logo_y + 19,
                     ),
                     team,
@@ -750,10 +890,15 @@ def draw_single_stat_poster(
         exist_ok=True,
     )
 
-    img.save(out_path, "PNG")
+    img.save(
+        out_path,
+        "PNG",
+    )
 
 
-def stat_mode_for_slug(slug: str) -> str:
+def stat_mode_for_slug(
+    slug: str,
+) -> str:
     if slug == "sacks":
         return "float1"
 
@@ -803,7 +948,8 @@ def build_stat_sections(
 
         except Exception as error:
             print(
-                f"WARNING: Failed to fetch {slug}: {error}"
+                f"WARNING: Failed to fetch "
+                f"{slug}: {error}"
             )
 
     return output
@@ -850,21 +996,28 @@ def generate_all_stat_leader_posters(
     ) in STAT_CONFIG:
         if slug not in sections:
             print(
-                f"WARNING: Skipping poster for {slug}; "
-                f"no data available"
+                f"WARNING: Skipping poster "
+                f"for {slug}; no data available"
             )
             continue
 
-        stat_title, items, mode = sections[slug]
+        stat_title, items, mode = (
+            sections[slug]
+        )
 
         out_path = os.path.join(
             outdir,
-            f"{slug}_s{season}_t{seasontype}.png",
+            (
+                f"{slug}_s{season}_"
+                f"t{seasontype}.png"
+            ),
         )
 
         draw_single_stat_poster(
             out_path=out_path,
-            poster_title="NFL Statistical Leaders",
+            poster_title=(
+                "NFL Statistical Leaders"
+            ),
             stat_title=stat_title,
             subtitle=subtitle,
             items=items,
@@ -875,8 +1028,8 @@ def generate_all_stat_leader_posters(
 
     if not outputs:
         raise RuntimeError(
-            "No stat leader posters generated for "
-            f"season={season}, "
+            "No stat leader posters generated "
+            f"for season={season}, "
             f"seasontype={seasontype}"
         )
 
@@ -910,16 +1063,22 @@ def main():
 
     args = parser.parse_args()
 
-    outputs = generate_all_stat_leader_posters(
-        season=args.season,
-        seasontype=args.seasontype,
-        outdir=args.outdir,
+    outputs = (
+        generate_all_stat_leader_posters(
+            season=args.season,
+            seasontype=args.seasontype,
+            outdir=args.outdir,
+        )
     )
 
     print("\nDONE")
 
     for slug, path in outputs.items():
-        print(slug, "->", path)
+        print(
+            slug,
+            "->",
+            path,
+        )
 
 
 if __name__ == "__main__":
