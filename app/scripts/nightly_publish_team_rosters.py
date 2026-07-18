@@ -19,13 +19,51 @@ def publish_team_rosters(keep_versioned: bool = False):
         posters = {}
 
         for team_code in sorted(rosters.TEAM_INFO.keys()):
+            print(f"Generating roster posters for {team_code.upper()}...")
+
             sections = rosters.parse_team_roster(team_code)
+            depth_sections = rosters.parse_depthchart_order(team_code)
+
+            if any(depth_sections.values()):
+                sections["offense"] = rosters.order_section_by_depthchart(
+                    sections["offense"],
+                    depth_sections["offense"],
+                )
+
+                sections["defense"] = rosters.order_section_by_depthchart(
+                    sections["defense"],
+                    depth_sections["defense"],
+                )
+
+                sections["special_teams"] = rosters.order_section_by_depthchart(
+                    sections["special_teams"],
+                    depth_sections["special_teams"],
+                )
+            else:
+                print(
+                    f"WARNING: No depth chart order found for "
+                    f"{team_code.upper()}. Using roster API order."
+                )
+
             posters[team_code.upper()] = {}
 
             for unit in ["offense", "defense", "special_teams"]:
-                local_path = rosters.create_single_poster(team_code, unit, sections[unit], tmpdir)
-                storage_key = f"team_rosters/current/{team_code.upper()}_{unit}.png"
-                posters[team_code.upper()][unit] = upload_file_return_url(local_path, storage_key)
+                local_path = rosters.create_single_poster(
+                    team_code,
+                    unit,
+                    sections[unit],
+                    tmpdir,
+                )
+
+                storage_key = (
+                    f"team_rosters/current/"
+                    f"{team_code.upper()}_{unit}.png"
+                )
+
+                posters[team_code.upper()][unit] = upload_file_return_url(
+                    local_path,
+                    storage_key,
+                )
 
         payload = {
             "count": len(posters),
@@ -33,15 +71,19 @@ def publish_team_rosters(keep_versioned: bool = False):
         }
 
         local_json = os.path.join(tmpdir, "current.json")
+
         with open(local_json, "w", encoding="utf-8") as f:
             json.dump(payload, f, indent=2)
 
-        payload["metadata_url"] = upload_file_return_url(local_json, "team_rosters/current.json")
+        payload["metadata_url"] = upload_file_return_url(
+            local_json,
+            "team_rosters/current.json",
+        )
 
         if keep_versioned:
             payload["versioned_metadata_url"] = upload_file_return_url(
                 local_json,
-                "team_rosters/history/metadata.json"
+                "team_rosters/history/metadata.json",
             )
 
         return payload
@@ -49,19 +91,30 @@ def publish_team_rosters(keep_versioned: bool = False):
 
 def get_current_team_rosters_payload():
     return {
-        "metadata_url": public_storage_url("team_rosters/current.json"),
+        "metadata_url": public_storage_url(
+            "team_rosters/current.json"
+        ),
     }
 
 
 def parse_args():
-    p = argparse.ArgumentParser()
-    p.add_argument("--keep_versioned", action="store_true")
-    return p.parse_args()
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument(
+        "--keep_versioned",
+        action="store_true",
+    )
+
+    return parser.parse_args()
 
 
 def main():
     args = parse_args()
-    result = publish_team_rosters(keep_versioned=args.keep_versioned)
+
+    result = publish_team_rosters(
+        keep_versioned=args.keep_versioned
+    )
+
     print(json.dumps(result, indent=2))
 
 
