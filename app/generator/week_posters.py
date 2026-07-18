@@ -756,7 +756,7 @@ def make_poster_style_image(
     away_total = safe_int(away_yards.get("total_yards"), 0)
     home_total = safe_int(home_yards.get("total_yards"), 0)
     diff = home_total - away_total
-    diff_text = f"+{diff}" if diff >= 0 else str(diff)
+    diff_text = str(abs(diff))
 
     stat_line(d, sx0 + 80, sy0 + 95, f"{away.get('abbr')} TOTAL", f"{away_total}", stat_label_font, stat_value_font)
     stat_line(d, sx0 + 380, sy0 + 95, f"{home.get('abbr')} TOTAL", f"{home_total}", stat_label_font, stat_value_font)
