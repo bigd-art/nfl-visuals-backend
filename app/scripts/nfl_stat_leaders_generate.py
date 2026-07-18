@@ -1,6 +1,7 @@
 import os
 import re
 import argparse
+from io import BytesIO
 from datetime import datetime
 from typing import List, Optional, Tuple, Union, Dict, Any
 
@@ -35,16 +36,66 @@ TEAM_LOGO_SLUGS = {
 }
 
 STAT_CONFIG = [
-    ("passing_yards", "Passing Yards", "Passing Yards", ["passingYards", "passing yards"]),
-    ("passing_tds", "Passing TDs", "Passing TDs", ["passingTouchdowns", "passing touchdowns", "passing tds"]),
-    ("interceptions_thrown", "Interceptions Thrown", "Interceptions Thrown", ["interceptions", "interceptions thrown"]),
-    ("rushing_yards", "Rushing Yards", "Rushing Yards", ["rushingYards", "rushing yards"]),
-    ("rushing_tds", "Rushing TDs", "Rushing TDs", ["rushingTouchdowns", "rushing touchdowns", "rushing tds"]),
-    ("receiving_yards", "Receiving Yards", "Receiving Yards", ["receivingYards", "receiving yards"]),
-    ("receiving_tds", "Receiving TDs", "Receiving TDs", ["receivingTouchdowns", "receiving touchdowns", "receiving tds"]),
-    ("sacks", "Sacks", "Sacks", ["sacks"]),
-    ("tackles", "Tackles", "Tackles", ["totalTackles", "total tackles", "tackles"]),
-    ("interceptions_defense", "Interceptions (Defense)", "Interceptions", ["defensiveInterceptions", "interceptions"]),
+    (
+        "passing_yards",
+        "Passing Yards",
+        "Passing Yards",
+        ["passingYards", "passing yards"],
+    ),
+    (
+        "passing_tds",
+        "Passing TDs",
+        "Passing TDs",
+        ["passingTouchdowns", "passing touchdowns", "passing tds"],
+    ),
+    (
+        "interceptions_thrown",
+        "Interceptions Thrown",
+        "Interceptions Thrown",
+        ["interceptions", "interceptions thrown"],
+    ),
+    (
+        "rushing_yards",
+        "Rushing Yards",
+        "Rushing Yards",
+        ["rushingYards", "rushing yards"],
+    ),
+    (
+        "rushing_tds",
+        "Rushing TDs",
+        "Rushing TDs",
+        ["rushingTouchdowns", "rushing touchdowns", "rushing tds"],
+    ),
+    (
+        "receiving_yards",
+        "Receiving Yards",
+        "Receiving Yards",
+        ["receivingYards", "receiving yards"],
+    ),
+    (
+        "receiving_tds",
+        "Receiving TDs",
+        "Receiving TDs",
+        ["receivingTouchdowns", "receiving touchdowns", "receiving tds"],
+    ),
+    (
+        "sacks",
+        "Sacks",
+        "Sacks",
+        ["sacks"],
+    ),
+    (
+        "tackles",
+        "Tackles",
+        "Tackles",
+        ["totalTackles", "total tackles", "tackles"],
+    ),
+    (
+        "interceptions_defense",
+        "Interceptions (Defense)",
+        "Interceptions",
+        ["defensiveInterceptions", "interceptions"],
+    ),
 ]
 
 CORE_LEADERS_URL = (
@@ -202,11 +253,11 @@ def extract_leader_value(leader: Dict[str, Any]) -> Optional[float]:
     statistics = leader.get("statistics") or leader.get("stats") or []
 
     if isinstance(statistics, list):
-        for s in statistics:
-            if isinstance(s, dict):
+        for stat in statistics:
+            if isinstance(stat, dict):
                 val = safe_float(
-                    s.get("value")
-                    or s.get("displayValue")
+                    stat.get("value")
+                    or stat.get("displayValue")
                 )
 
                 if val is not None:
@@ -240,12 +291,12 @@ def fetch_top_from_leaders_api(
     if not matched:
         available = []
 
-        for c in categories[:40]:
+        for category in categories[:40]:
             available.append(
                 {
-                    "name": c.get("name"),
-                    "displayName": c.get("displayName"),
-                    "shortDisplayName": c.get("shortDisplayName"),
+                    "name": category.get("name"),
+                    "displayName": category.get("displayName"),
+                    "shortDisplayName": category.get("shortDisplayName"),
                 }
             )
 
@@ -272,17 +323,17 @@ def fetch_top_from_leaders_api(
 
     rows = sorted(
         rows,
-        key=lambda x: x[1],
+        key=lambda item: item[1],
         reverse=True,
     )[:TOP_N]
 
     output = []
 
-    for i, (name, val) in enumerate(rows, start=1):
+    for rank, (name, value) in enumerate(rows, start=1):
         if mode == "float1":
-            output.append((i, name, float(val)))
+            output.append((rank, name, float(value)))
         else:
-            output.append((i, name, int(round(val))))
+            output.append((rank, name, int(round(value))))
 
     if not output:
         raise RuntimeError(f"No usable leaders for {slug}")
@@ -292,21 +343,26 @@ def fetch_top_from_leaders_api(
 
 def load_font(size: int, bold: bool = False):
     candidates = [
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
-        if bold
-        else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-
-        "/System/Library/Fonts/Supplemental/Arial Bold.ttf"
-        if bold
-        else "/System/Library/Fonts/Supplemental/Arial.ttf",
-
-        "/Library/Fonts/Arial Bold.ttf"
-        if bold
-        else "/Library/Fonts/Arial.ttf",
-
-        "/System/Library/Fonts/Supplemental/Helvetica Bold.ttf"
-        if bold
-        else "/System/Library/Fonts/Supplemental/Helvetica.ttf",
+        (
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+            if bold
+            else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+        ),
+        (
+            "/System/Library/Fonts/Supplemental/Arial Bold.ttf"
+            if bold
+            else "/System/Library/Fonts/Supplemental/Arial.ttf"
+        ),
+        (
+            "/Library/Fonts/Arial Bold.ttf"
+            if bold
+            else "/Library/Fonts/Arial.ttf"
+        ),
+        (
+            "/System/Library/Fonts/Supplemental/Helvetica Bold.ttf"
+            if bold
+            else "/System/Library/Fonts/Supplemental/Helvetica.ttf"
+        ),
     ]
 
     for path in candidates:
@@ -384,21 +440,24 @@ def fetch_team_logo(
     url = f"https://a.espncdn.com/i/teamlogos/nfl/500/{slug}.png"
 
     try:
-        r = requests.get(
+        response = requests.get(
             url,
             headers=HEADERS,
             timeout=20,
         )
-        r.raise_for_status()
+        response.raise_for_status()
 
         logo = Image.open(
-            requests.compat.BytesIO(r.content)
+            BytesIO(response.content)
         ).convert("RGBA")
 
         cache[team] = logo
         return logo
 
-    except Exception:
+    except Exception as error:
+        print(
+            f"WARNING: Failed to load logo for {team}: {error}"
+        )
         cache[team] = None
         return None
 
@@ -520,7 +579,7 @@ def draw_single_stat_poster(
         (bottom - top - gap * (TOP_N - 1)) / TOP_N
     )
 
-    for rank, display_name, val in items:
+    for rank, display_name, value in items:
         y0 = top + (rank - 1) * (row_h + gap)
         y1 = y0 + row_h
 
@@ -563,7 +622,7 @@ def draw_single_stat_poster(
 
         player_name, team = split_name_team(display_name)
 
-        value_text = fmt_value(val, mode)
+        value_text = fmt_value(value, mode)
         value_w = draw.textlength(
             value_text,
             font=value_font,
@@ -622,19 +681,19 @@ def draw_single_stat_poster(
                 logo_cache,
             )
 
-            if logo:
+            if logo is not None:
                 logo_copy = logo.copy()
                 logo_copy.thumbnail(
                     (logo_box, logo_box),
                     Image.LANCZOS,
                 )
 
-                lx = (
+                logo_left = (
                     logo_x
                     + (logo_box - logo_copy.width) // 2
                 )
 
-                ly = (
+                logo_top = (
                     logo_y
                     + (logo_box - logo_copy.height) // 2
                 )
@@ -643,7 +702,7 @@ def draw_single_stat_poster(
 
                 img.paste(
                     logo_rgba,
-                    (lx, ly),
+                    (logo_left, logo_top),
                     logo_rgba,
                 )
 
@@ -668,8 +727,7 @@ def draw_single_stat_poster(
 
                 draw.text(
                     (
-                        logo_x
-                        + (logo_box - team_w) / 2,
+                        logo_x + (logo_box - team_w) / 2,
                         logo_y + 19,
                     ),
                     team,
@@ -743,9 +801,9 @@ def build_stat_sections(
                 f"{len(items)} rows"
             )
 
-        except Exception as e:
+        except Exception as error:
             print(
-                f"WARNING: Failed to fetch {slug}: {e}"
+                f"WARNING: Failed to fetch {slug}: {error}"
             )
 
     return output
