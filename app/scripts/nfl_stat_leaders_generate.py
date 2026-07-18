@@ -38,7 +38,6 @@ TEAM_LOGO_SLUGS = {
 STAT_CONFIG = [
     ("passing_yards", "Passing Yards", "Passing Yards", ["passingYards", "passing yards"]),
     ("passing_tds", "Passing TDs", "Passing TDs", ["passingTouchdowns", "passing touchdowns", "passing tds"]),
-    ("interceptions_thrown", "Interceptions Thrown", "Interceptions Thrown", ["interceptions", "interceptions thrown"]),
     ("rushing_yards", "Rushing Yards", "Rushing Yards", ["rushingYards", "rushing yards"]),
     ("rushing_tds", "Rushing TDs", "Rushing TDs", ["rushingTouchdowns", "rushing touchdowns", "rushing tds"]),
     ("receiving_yards", "Receiving Yards", "Receiving Yards", ["receivingYards", "receiving yards"]),
