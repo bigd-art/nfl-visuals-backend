@@ -1,7 +1,6 @@
 import os
 import re
 import argparse
-from io import BytesIO
 from datetime import datetime
 from typing import List, Optional, Tuple, Union, Dict, Any
 
@@ -36,66 +35,16 @@ TEAM_LOGO_SLUGS = {
 }
 
 STAT_CONFIG = [
-    (
-        "passing_yards",
-        "Passing Yards",
-        "Passing Yards",
-        ["passingYards", "passing yards"],
-    ),
-    (
-        "passing_tds",
-        "Passing TDs",
-        "Passing TDs",
-        ["passingTouchdowns", "passing touchdowns", "passing tds"],
-    ),
-    (
-        "interceptions_thrown",
-        "Interceptions Thrown",
-        "Interceptions Thrown",
-        ["interceptions", "interceptions thrown"],
-    ),
-    (
-        "rushing_yards",
-        "Rushing Yards",
-        "Rushing Yards",
-        ["rushingYards", "rushing yards"],
-    ),
-    (
-        "rushing_tds",
-        "Rushing TDs",
-        "Rushing TDs",
-        ["rushingTouchdowns", "rushing touchdowns", "rushing tds"],
-    ),
-    (
-        "receiving_yards",
-        "Receiving Yards",
-        "Receiving Yards",
-        ["receivingYards", "receiving yards"],
-    ),
-    (
-        "receiving_tds",
-        "Receiving TDs",
-        "Receiving TDs",
-        ["receivingTouchdowns", "receiving touchdowns", "receiving tds"],
-    ),
-    (
-        "sacks",
-        "Sacks",
-        "Sacks",
-        ["sacks"],
-    ),
-    (
-        "tackles",
-        "Tackles",
-        "Tackles",
-        ["totalTackles", "total tackles", "tackles"],
-    ),
-    (
-        "interceptions_defense",
-        "Interceptions (Defense)",
-        "Interceptions",
-        ["defensiveInterceptions", "interceptions"],
-    ),
+    ("passing_yards", "Passing Yards", "Passing Yards", ["passingYards", "passing yards"]),
+    ("passing_tds", "Passing TDs", "Passing TDs", ["passingTouchdowns", "passing touchdowns", "passing tds"]),
+    ("interceptions_thrown", "Interceptions Thrown", "Interceptions Thrown", ["interceptions", "interceptions thrown"]),
+    ("rushing_yards", "Rushing Yards", "Rushing Yards", ["rushingYards", "rushing yards"]),
+    ("rushing_tds", "Rushing TDs", "Rushing TDs", ["rushingTouchdowns", "rushing touchdowns", "rushing tds"]),
+    ("receiving_yards", "Receiving Yards", "Receiving Yards", ["receivingYards", "receiving yards"]),
+    ("receiving_tds", "Receiving TDs", "Receiving TDs", ["receivingTouchdowns", "receiving touchdowns", "receiving tds"]),
+    ("sacks", "Sacks", "Sacks", ["sacks"]),
+    ("tackles", "Tackles", "Tackles", ["totalTackles", "total tackles", "tackles"]),
+    ("interceptions_defense", "Interceptions (Defense)", "Interceptions", ["defensiveInterceptions", "interceptions"]),
 ]
 
 CORE_LEADERS_URL = (
@@ -115,13 +64,10 @@ def normalize_spaces(s: str) -> str:
 def safe_float(x) -> Optional[float]:
     if x is None:
         return None
-
     s = str(x).replace(",", "").strip()
     s = re.sub(r"[^\d\.\-]", "", s)
-
     if s in {"", "-", "."}:
         return None
-
     try:
         return float(s)
     except Exception:
@@ -129,13 +75,9 @@ def safe_float(x) -> Optional[float]:
 
 
 def fetch_json(url: str) -> Dict[str, Any]:
-    response = requests.get(
-        url,
-        headers=HEADERS,
-        timeout=30,
-    )
-    response.raise_for_status()
-    return response.json()
+    r = requests.get(url, headers=HEADERS, timeout=30)
+    r.raise_for_status()
+    return r.json()
 
 
 def resolve_ref(obj: Any) -> Dict[str, Any]:
@@ -144,27 +86,16 @@ def resolve_ref(obj: Any) -> Dict[str, Any]:
             return fetch_json(obj["$ref"])
         except Exception:
             return obj
-
     if isinstance(obj, dict):
         return obj
-
     return {}
 
 
 def text_key(value: str) -> str:
-    return (
-        normalize_spaces(value)
-        .lower()
-        .replace("_", " ")
-        .replace("-", " ")
-    )
+    return normalize_spaces(value).lower().replace("_", " ").replace("-", " ")
 
 
-def category_matches(
-    category: Dict[str, Any],
-    aliases: List[str],
-    slug: str,
-) -> bool:
+def category_matches(category: Dict[str, Any], aliases: List[str], slug: str) -> bool:
     raw_fields = [
         category.get("name"),
         category.get("displayName"),
@@ -173,36 +104,20 @@ def category_matches(
         category.get("abbreviation"),
     ]
 
-    combined = " ".join(
-        text_key(value)
-        for value in raw_fields
-        if value
-    )
-
-    # Check interception categories before generic aliases so the two
-    # posters cannot accidentally select the same ESPN category.
-    if slug == "interceptions_thrown":
-        return (
-            "interception" in combined
-            and "defensive" not in combined
-            and "defense" not in combined
-        )
-
-    if slug == "interceptions_defense":
-        return (
-            "interception" in combined
-            and (
-                "defensive" in combined
-                or "defense" in combined
-                or "def" in combined
-            )
-        )
+    combined = " ".join(text_key(x) for x in raw_fields if x)
 
     for alias in aliases:
-        normalized_alias = text_key(alias)
-
-        if normalized_alias and normalized_alias in combined:
+        a = text_key(alias)
+        if a and a in combined:
             return True
+
+    if slug == "interceptions_thrown":
+        return "interception" in combined and "defensive" not in combined
+
+    if slug == "interceptions_defense":
+        return "interception" in combined and (
+            "defensive" in combined or "defense" in combined or "def" in combined
+        )
 
     return False
 
@@ -243,11 +158,7 @@ def extract_athlete_name(leader: Dict[str, Any]) -> str:
 
 
 def extract_team_abbr(leader: Dict[str, Any]) -> str:
-    team_obj = (
-        leader.get("team")
-        or leader.get("teamAthlete")
-        or {}
-    )
+    team_obj = leader.get("team") or leader.get("teamAthlete") or {}
 
     if isinstance(team_obj, dict) and "$ref" in team_obj:
         team_obj = resolve_ref(team_obj)
@@ -268,37 +179,20 @@ def extract_team_abbr(leader: Dict[str, Any]) -> str:
     return ""
 
 
-def extract_leader_value(
-    leader: Dict[str, Any],
-) -> Optional[float]:
-    for key in [
-        "value",
-        "displayValue",
-        "stat",
-        "score",
-    ]:
+def extract_leader_value(leader: Dict[str, Any]) -> Optional[float]:
+    for key in ["value", "displayValue", "stat", "score"]:
         if key in leader:
-            value = safe_float(leader.get(key))
+            val = safe_float(leader.get(key))
+            if val is not None:
+                return val
 
-            if value is not None:
-                return value
-
-    statistics = (
-        leader.get("statistics")
-        or leader.get("stats")
-        or []
-    )
-
+    statistics = leader.get("statistics") or leader.get("stats") or []
     if isinstance(statistics, list):
-        for stat in statistics:
-            if isinstance(stat, dict):
-                value = safe_float(
-                    stat.get("value")
-                    or stat.get("displayValue")
-                )
-
-                if value is not None:
-                    return value
+        for s in statistics:
+            if isinstance(s, dict):
+                val = safe_float(s.get("value") or s.get("displayValue"))
+                if val is not None:
+                    return val
 
     return None
 
@@ -310,44 +204,28 @@ def fetch_top_from_leaders_api(
     aliases: List[str],
     mode: str,
 ) -> List[Tuple[int, str, Number]]:
-    url = CORE_LEADERS_URL.format(
-        season=season,
-        seasontype=seasontype,
-    )
-
+    url = CORE_LEADERS_URL.format(season=season, seasontype=seasontype)
     data = fetch_json(url)
+
     categories = find_leader_categories(data)
 
     matched = None
-
     for category in categories:
-        if category_matches(
-            category,
-            aliases,
-            slug,
-        ):
+        if category_matches(category, aliases, slug):
             matched = category
             break
 
     if not matched:
         available = []
-
-        for category in categories[:40]:
-            available.append(
-                {
-                    "name": category.get("name"),
-                    "displayName": category.get("displayName"),
-                    "shortDisplayName": category.get("shortDisplayName"),
-                }
-            )
-
-        raise RuntimeError(
-            f"No matching category for {slug}. "
-            f"Available sample: {available}"
-        )
+        for c in categories[:40]:
+            available.append({
+                "name": c.get("name"),
+                "displayName": c.get("displayName"),
+                "shortDisplayName": c.get("shortDisplayName"),
+            })
+        raise RuntimeError(f"No matching category for {slug}. Available sample: {available}")
 
     rows = []
-
     for leader in matched.get("leaders", []):
         if not isinstance(leader, dict):
             continue
@@ -362,139 +240,73 @@ def fetch_top_from_leaders_api(
         display_name = f"{name} {team}".strip()
         rows.append((display_name, value))
 
-    rows = sorted(
-        rows,
-        key=lambda item: item[1],
-        reverse=True,
-    )[:TOP_N]
+    rows = sorted(rows, key=lambda x: x[1], reverse=True)[:TOP_N]
 
     output = []
-
-    for rank, (name, value) in enumerate(
-        rows,
-        start=1,
-    ):
+    for i, (name, val) in enumerate(rows, start=1):
         if mode == "float1":
-            output.append(
-                (rank, name, float(value))
-            )
+            output.append((i, name, float(val)))
         else:
-            output.append(
-                (rank, name, int(round(value)))
-            )
+            output.append((i, name, int(round(val))))
 
     if not output:
-        raise RuntimeError(
-            f"No usable leaders for {slug}"
-        )
+        raise RuntimeError(f"No usable leaders for {slug}")
 
     return output
 
 
-def load_font(
-    size: int,
-    bold: bool = False,
-):
+def load_font(size: int, bold: bool = False):
     candidates = [
-        (
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
-            if bold
-            else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
-        ),
-        (
-            "/System/Library/Fonts/Supplemental/Arial Bold.ttf"
-            if bold
-            else "/System/Library/Fonts/Supplemental/Arial.ttf"
-        ),
-        (
-            "/Library/Fonts/Arial Bold.ttf"
-            if bold
-            else "/Library/Fonts/Arial.ttf"
-        ),
-        (
-            "/System/Library/Fonts/Supplemental/Helvetica Bold.ttf"
-            if bold
-            else "/System/Library/Fonts/Supplemental/Helvetica.ttf"
-        ),
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/System/Library/Fonts/Supplemental/Arial Bold.ttf" if bold else "/System/Library/Fonts/Supplemental/Arial.ttf",
+        "/Library/Fonts/Arial Bold.ttf" if bold else "/Library/Fonts/Arial.ttf",
+        "/System/Library/Fonts/Supplemental/Helvetica Bold.ttf" if bold else "/System/Library/Fonts/Supplemental/Helvetica.ttf",
     ]
 
     for path in candidates:
         try:
-            return ImageFont.truetype(
-                path,
-                size=size,
-            )
+            return ImageFont.truetype(path, size=size)
         except Exception:
             pass
 
     return ImageFont.load_default()
 
 
-def fmt_value(
-    value: Number,
-    mode: str,
-) -> str:
+def fmt_value(val: Number, mode: str) -> str:
     if mode == "float1":
-        return f"{float(value):.1f}"
+        return f"{float(val):.1f}"
+    return f"{int(val):,}"
 
-    return f"{int(value):,}"
 
-
-def fit_text(
-    draw,
-    text: str,
-    font,
-    max_width: int,
-) -> str:
+def fit_text(draw, text: str, font, max_width: int) -> str:
     text = str(text)
-
-    if draw.textlength(
-        text,
-        font=font,
-    ) <= max_width:
+    if draw.textlength(text, font=font) <= max_width:
         return text
 
-    while (
-        len(text) > 3
-        and draw.textlength(
-            text + "…",
-            font=font,
-        ) > max_width
-    ):
+    while len(text) > 3 and draw.textlength(text + "…", font=font) > max_width:
         text = text[:-1]
 
     return text.rstrip() + "…"
 
 
-def split_name_team(
-    display_name: str,
-) -> Tuple[str, str]:
+def split_name_team(display_name: str) -> Tuple[str, str]:
     display_name = normalize_spaces(display_name)
     parts = display_name.split()
 
-    if (
-        parts
-        and parts[-1].upper() in TEAM_ABBRS
-    ):
+    if parts and parts[-1].upper() in TEAM_ABBRS:
         team = parts[-1].upper()
-
         if team == "WAS":
             team = "WSH"
-
         return " ".join(parts[:-1]), team
 
     return display_name, ""
 
 
-def fetch_team_logo(
-    team: str,
-    cache: Dict[str, Optional[Image.Image]],
-) -> Optional[Image.Image]:
+def fetch_team_logo(team: str, cache: Dict[str, Optional[Image.Image]]) -> Optional[Image.Image]:
     if not team:
         return None
 
     team = team.upper()
-
     if team == "WAS":
         team = "WSH"
 
@@ -502,37 +314,19 @@ def fetch_team_logo(
         return cache[team]
 
     slug = TEAM_LOGO_SLUGS.get(team)
-
     if not slug:
         cache[team] = None
         return None
 
-    url = (
-        "https://a.espncdn.com/i/"
-        f"teamlogos/nfl/500/{slug}.png"
-    )
+    url = f"https://a.espncdn.com/i/teamlogos/nfl/500/{slug}.png"
 
     try:
-        response = requests.get(
-            url,
-            headers=HEADERS,
-            timeout=20,
-        )
-        response.raise_for_status()
-
-        logo = Image.open(
-            BytesIO(response.content)
-        ).convert("RGBA")
-
+        r = requests.get(url, headers=HEADERS, timeout=20)
+        r.raise_for_status()
+        logo = Image.open(requests.compat.BytesIO(r.content)).convert("RGBA")
         cache[team] = logo
         return logo
-
-    except Exception as error:
-        print(
-            f"WARNING: Failed to load logo "
-            f"for {team}: {error}"
-        )
-
+    except Exception:
         cache[team] = None
         return None
 
@@ -545,15 +339,9 @@ def draw_single_stat_poster(
     items: List[Tuple[int, str, Number]],
     mode: str,
 ):
-    width = 1080
-    height = 1920
+    width, height = 1080, 1920
 
-    img = Image.new(
-        "RGB",
-        (width, height),
-        (10, 14, 24),
-    )
-
+    img = Image.new("RGB", (width, height), (10, 14, 24))
     draw = ImageDraw.Draw(img)
 
     title_font = load_font(48, bold=True)
@@ -571,124 +359,49 @@ def draw_single_stat_poster(
     dark = (24, 29, 42)
     border = (64, 74, 98)
 
-    logo_cache: Dict[
-        str,
-        Optional[Image.Image],
-    ] = {}
+    logo_cache: Dict[str, Optional[Image.Image]] = {}
 
-    draw.rectangle(
-        (0, 0, width, 178),
-        fill=(22, 38, 74),
-    )
-
-    draw.rectangle(
-        (0, 178, width, 187),
-        fill=blue,
-    )
+    draw.rectangle((0, 0, width, 178), fill=(22, 38, 74))
+    draw.rectangle((0, 178, width, 187), fill=blue)
 
     for y in range(198, height, 30):
-        color = (
-            (14, 18, 28)
-            if (y // 30) % 2 == 0
-            else (12, 16, 26)
-        )
+        color = (14, 18, 28) if (y // 30) % 2 == 0 else (12, 16, 26)
+        draw.rectangle((0, y, width, y + 15), fill=color)
 
-        draw.rectangle(
-            (0, y, width, y + 15),
-            fill=color,
-        )
-
-    title = fit_text(
-        draw,
-        poster_title.upper(),
-        title_font,
-        width - 90,
-    )
-
-    stat = fit_text(
-        draw,
-        stat_title.upper(),
-        stat_font,
-        width - 90,
-    )
-
-    sub = fit_text(
-        draw,
-        subtitle,
-        sub_font,
-        width - 90,
-    )
+    title = fit_text(draw, poster_title.upper(), title_font, width - 90)
+    stat = fit_text(draw, stat_title.upper(), stat_font, width - 90)
+    sub = fit_text(draw, subtitle, sub_font, width - 90)
 
     draw.text(
-        (
-            (
-                width
-                - draw.textlength(
-                    title,
-                    font=title_font,
-                )
-            ) / 2,
-            24,
-        ),
+        ((width - draw.textlength(title, font=title_font)) / 2, 24),
         title,
         font=title_font,
         fill=white,
     )
 
     draw.text(
-        (
-            (
-                width
-                - draw.textlength(
-                    stat,
-                    font=stat_font,
-                )
-            ) / 2,
-            78,
-        ),
+        ((width - draw.textlength(stat, font=stat_font)) / 2, 78),
         stat,
         font=stat_font,
         fill=white,
     )
 
     draw.text(
-        (
-            (
-                width
-                - draw.textlength(
-                    sub,
-                    font=sub_font,
-                )
-            ) / 2,
-            143,
-        ),
+        ((width - draw.textlength(sub, font=sub_font)) / 2, 143),
         sub,
         font=sub_font,
         fill=muted,
     )
 
-    x0 = 42
-    x1 = width - 42
+    x0, x1 = 42, width - 42
     top = 220
     bottom = height - 42
     gap = 14
+    row_h = int((bottom - top - gap * (TOP_N - 1)) / TOP_N)
 
-    row_height = int(
-        (
-            bottom
-            - top
-            - gap * (TOP_N - 1)
-        )
-        / TOP_N
-    )
-
-    for rank, display_name, value in items:
-        y0 = (
-            top
-            + (rank - 1)
-            * (row_height + gap)
-        )
-        y1 = y0 + row_height
+    for rank, display_name, val in items:
+        y0 = top + (rank - 1) * (row_h + gap)
+        y1 = y0 + row_h
 
         draw.rounded_rectangle(
             (x0, y0, x1, y1),
@@ -698,34 +411,15 @@ def draw_single_stat_poster(
             width=3,
         )
 
-        pill = (
-            x0 + 18,
-            y0 + 22,
-            x0 + 92,
-            y0 + 84,
-        )
-
-        draw.rounded_rectangle(
-            pill,
-            radius=18,
-            fill=blue,
-        )
+        pill = (x0 + 18, y0 + 22, x0 + 92, y0 + 84)
+        draw.rounded_rectangle(pill, radius=18, fill=blue)
 
         rank_text = str(rank)
-
-        rank_width = draw.textlength(
-            rank_text,
-            font=rank_font,
-        )
+        rank_w = draw.textlength(rank_text, font=rank_font)
 
         draw.text(
             (
-                pill[0]
-                + (
-                    pill[2]
-                    - pill[0]
-                    - rank_width
-                ) / 2,
+                pill[0] + (pill[2] - pill[0] - rank_w) / 2,
                 pill[1] + 12,
             ),
             rank_text,
@@ -733,197 +427,95 @@ def draw_single_stat_poster(
             fill=(15, 20, 28),
         )
 
-        player_name, team = (
-            split_name_team(display_name)
-        )
-
-        value_text = fmt_value(
-            value,
-            mode,
-        )
-
-        value_width = draw.textlength(
-            value_text,
-            font=value_font,
-        )
+        player_name, team = split_name_team(display_name)
+        value_text = fmt_value(val, mode)
+        value_w = draw.textlength(value_text, font=value_font)
 
         draw.text(
-            (
-                x1 - 30 - value_width,
-                y0 + 31,
-            ),
+            (x1 - 30 - value_w, y0 + 31),
             value_text,
             font=value_font,
             fill=white,
         )
 
-        name_x = x0 + 120
+        logo_x = x0 + 112
+        logo_y = y0 + 26
         logo_box = 66
-        logo_gap = 18
-        value_left = x1 - 30 - value_width
-
-        max_player_area = (
-            value_left
-            - name_x
-            - logo_box
-            - logo_gap
-            - 24
-        )
-
-        name_text = fit_text(
-            draw,
-            player_name.upper(),
-            name_font,
-            max_player_area,
-        )
-
-        name_y = y0 + 43
-
-        draw.text(
-            (name_x, name_y),
-            name_text,
-            font=name_font,
-            fill=white,
-        )
-
-        name_width = draw.textlength(
-            name_text,
-            font=name_font,
-        )
-
-        logo_x = int(
-            name_x
-            + name_width
-            + logo_gap
-        )
-
-        logo_y = (
-            y0
-            + (row_height - logo_box) // 2
-        )
 
         if team:
-            logo = fetch_team_logo(
-                team,
-                logo_cache,
-            )
-
-            if logo is not None:
+            logo = fetch_team_logo(team, logo_cache)
+            if logo:
                 logo_copy = logo.copy()
-
-                logo_copy.thumbnail(
-                    (logo_box, logo_box),
-                    Image.LANCZOS,
-                )
-
-                logo_left = (
-                    logo_x
-                    + (
-                        logo_box
-                        - logo_copy.width
-                    ) // 2
-                )
-
-                logo_top = (
-                    logo_y
-                    + (
-                        logo_box
-                        - logo_copy.height
-                    ) // 2
-                )
-
-                logo_rgba = (
-                    logo_copy.convert("RGBA")
-                )
-
-                img.paste(
-                    logo_rgba,
-                    (logo_left, logo_top),
-                    logo_rgba,
-                )
-
+                logo_copy.thumbnail((logo_box, logo_box), Image.LANCZOS)
+                lx = logo_x + (logo_box - logo_copy.width) // 2
+                ly = logo_y + (logo_box - logo_copy.height) // 2
+                img.paste(logo_copy.convert("RGBA"), (lx, ly), logo_copy.convert("RGBA"))
             else:
                 draw.rounded_rectangle(
-                    (
-                        logo_x,
-                        logo_y,
-                        logo_x + logo_box,
-                        logo_y + logo_box,
-                    ),
+                    (logo_x, logo_y, logo_x + logo_box, logo_y + logo_box),
                     radius=16,
                     fill=(16, 28, 54),
                     outline=(86, 104, 140),
                     width=1,
                 )
-
-                team_width = draw.textlength(
-                    team,
-                    font=team_font,
-                )
-
+                team_w = draw.textlength(team, font=team_font)
                 draw.text(
-                    (
-                        logo_x
-                        + (
-                            logo_box
-                            - team_width
-                        ) / 2,
-                        logo_y + 19,
-                    ),
+                    (logo_x + (logo_box - team_w) / 2, logo_y + 19),
                     team,
                     font=team_font,
                     fill=blue,
                 )
 
-        draw.rectangle(
-            (
-                x0 + 18,
-                y1 - 12,
-                x1 - 18,
-                y1 - 8,
-            ),
-            fill=blue,
+        name_x = x0 + 196
+        max_name_w = x1 - name_x - value_w - 50
+        name_text = fit_text(draw, player_name.upper(), name_font, max_name_w)
+
+        draw.text(
+            (name_x, y0 + 25),
+            name_text,
+            font=name_font,
+            fill=white,
         )
 
-    os.makedirs(
-        os.path.dirname(out_path) or ".",
-        exist_ok=True,
-    )
+        if team:
+            tag_x1 = name_x
+            tag_y1 = y0 + 84
+            tag_x2 = tag_x1 + 90
+            tag_y2 = tag_y1 + 34
 
-    img.save(
-        out_path,
-        "PNG",
-    )
+            draw.rounded_rectangle(
+                (tag_x1, tag_y1, tag_x2, tag_y2),
+                radius=12,
+                fill=(16, 28, 54),
+                outline=(86, 104, 140),
+                width=1,
+            )
+
+            team_w = draw.textlength(team, font=team_font)
+
+            draw.text(
+                (tag_x1 + (tag_x2 - tag_x1 - team_w) / 2, tag_y1 + 4),
+                team,
+                font=team_font,
+                fill=blue,
+            )
+
+        draw.rectangle((x0 + 18, y1 - 12, x1 - 18, y1 - 8), fill=blue)
+
+    os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+    img.save(out_path, "PNG")
 
 
-def stat_mode_for_slug(
-    slug: str,
-) -> str:
+def stat_mode_for_slug(slug: str) -> str:
     if slug == "sacks":
         return "float1"
-
     return "int"
 
 
-def build_stat_sections(
-    season: int,
-    seasontype: int,
-) -> Dict[
-    str,
-    Tuple[
-        str,
-        List[Tuple[int, str, Number]],
-        str,
-    ],
-]:
+def build_stat_sections(season: int, seasontype: int) -> Dict[str, Tuple[str, List[Tuple[int, str, Number]], str]]:
     output = {}
 
-    for (
-        slug,
-        _espn_title,
-        short_title,
-        aliases,
-    ) in STAT_CONFIG:
+    for slug, _espn_title, short_title, aliases in STAT_CONFIG:
         mode = stat_mode_for_slug(slug)
 
         try:
@@ -934,90 +526,35 @@ def build_stat_sections(
                 aliases=aliases,
                 mode=mode,
             )
-
-            output[slug] = (
-                short_title,
-                items,
-                mode,
-            )
-
-            print(
-                f"Generated data for {slug}: "
-                f"{len(items)} rows"
-            )
-
-        except Exception as error:
-            print(
-                f"WARNING: Failed to fetch "
-                f"{slug}: {error}"
-            )
+            output[slug] = (short_title, items, mode)
+            print(f"Generated data for {slug}: {len(items)} rows")
+        except Exception as e:
+            print(f"WARNING: Failed to fetch {slug}: {e}")
 
     return output
 
 
-def generate_all_stat_leader_posters(
-    season: int,
-    seasontype: int,
-    outdir: str,
-) -> Dict[str, str]:
-    os.makedirs(
-        outdir,
-        exist_ok=True,
-    )
+def generate_all_stat_leader_posters(season: int, seasontype: int, outdir: str) -> Dict[str, str]:
+    os.makedirs(outdir, exist_ok=True)
 
-    phase = (
-        "Regular Season"
-        if seasontype == 2
-        else "Postseason"
-    )
+    phase = "Regular Season" if seasontype == 2 else "Postseason"
+    updated = datetime.utcnow().strftime("%b %d, %Y • %I:%M %p UTC")
+    subtitle = f"Season {season} • {phase} • Updated {updated}"
 
-    updated = datetime.utcnow().strftime(
-        "%b %d, %Y • %I:%M %p UTC"
-    )
-
-    subtitle = (
-        f"Season {season} • "
-        f"{phase} • "
-        f"Updated {updated}"
-    )
-
-    sections = build_stat_sections(
-        season,
-        seasontype,
-    )
-
+    sections = build_stat_sections(season, seasontype)
     outputs = {}
 
-    for (
-        slug,
-        _espn_title,
-        short_title,
-        _aliases,
-    ) in STAT_CONFIG:
+    for slug, _espn_title, short_title, _aliases in STAT_CONFIG:
         if slug not in sections:
-            print(
-                f"WARNING: Skipping poster "
-                f"for {slug}; no data available"
-            )
+            print(f"WARNING: Skipping poster for {slug}; no data available")
             continue
 
-        stat_title, items, mode = (
-            sections[slug]
-        )
-
-        out_path = os.path.join(
-            outdir,
-            (
-                f"{slug}_s{season}_"
-                f"t{seasontype}.png"
-            ),
-        )
+        stat_title, items, mode = sections[slug]
+        out_path = os.path.join(outdir, f"{slug}_s{season}_t{seasontype}.png")
 
         draw_single_stat_poster(
             out_path=out_path,
-            poster_title=(
-                "NFL Statistical Leaders"
-            ),
+            poster_title="NFL Statistical Leaders",
             stat_title=stat_title,
             subtitle=subtitle,
             items=items,
@@ -1027,58 +564,27 @@ def generate_all_stat_leader_posters(
         outputs[slug] = out_path
 
     if not outputs:
-        raise RuntimeError(
-            "No stat leader posters generated "
-            f"for season={season}, "
-            f"seasontype={seasontype}"
-        )
+        raise RuntimeError(f"No stat leader posters generated for season={season}, seasontype={seasontype}")
 
     return outputs
 
 
 def main():
     parser = argparse.ArgumentParser()
-
-    parser.add_argument(
-        "--season",
-        type=int,
-        default=2025,
-    )
-
-    parser.add_argument(
-        "--seasontype",
-        type=int,
-        default=2,
-        choices=[2, 3],
-    )
-
-    parser.add_argument(
-        "--outdir",
-        type=str,
-        default=os.path.join(
-            os.path.expanduser("~"),
-            "Desktop",
-        ),
-    )
-
+    parser.add_argument("--season", type=int, default=2025)
+    parser.add_argument("--seasontype", type=int, default=2, choices=[2, 3])
+    parser.add_argument("--outdir", type=str, default=os.path.join(os.path.expanduser("~"), "Desktop"))
     args = parser.parse_args()
 
-    outputs = (
-        generate_all_stat_leader_posters(
-            season=args.season,
-            seasontype=args.seasontype,
-            outdir=args.outdir,
-        )
+    outputs = generate_all_stat_leader_posters(
+        season=args.season,
+        seasontype=args.seasontype,
+        outdir=args.outdir,
     )
 
     print("\nDONE")
-
     for slug, path in outputs.items():
-        print(
-            slug,
-            "->",
-            path,
-        )
+        print(slug, "->", path)
 
 
 if __name__ == "__main__":
