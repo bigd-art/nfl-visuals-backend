@@ -1,6 +1,7 @@
 import os
 import re
 import argparse
+from io import BytesIO
 from datetime import datetime
 from typing import List, Optional, Tuple, Union, Dict, Any
 
@@ -323,7 +324,7 @@ def fetch_team_logo(team: str, cache: Dict[str, Optional[Image.Image]]) -> Optio
     try:
         r = requests.get(url, headers=HEADERS, timeout=20)
         r.raise_for_status()
-        logo = Image.open(requests.compat.BytesIO(r.content)).convert("RGBA")
+        logo = Image.open(BytesIO(r.content)).convert("RGBA")
         cache[team] = logo
         return logo
     except Exception:
@@ -449,56 +450,18 @@ def draw_single_stat_poster(
                 logo_copy.thumbnail((logo_box, logo_box), Image.LANCZOS)
                 lx = logo_x + (logo_box - logo_copy.width) // 2
                 ly = logo_y + (logo_box - logo_copy.height) // 2
-                img.paste(logo_copy.convert("RGBA"), (lx, ly), logo_copy.convert("RGBA"))
-            else:
-                draw.rounded_rectangle(
-                    (logo_x, logo_y, logo_x + logo_box, logo_y + logo_box),
-                    radius=16,
-                    fill=(16, 28, 54),
-                    outline=(86, 104, 140),
-                    width=1,
-                )
-                team_w = draw.textlength(team, font=team_font)
-                draw.text(
-                    (logo_x + (logo_box - team_w) / 2, logo_y + 19),
-                    team,
-                    font=team_font,
-                    fill=blue,
-                )
+                img.paste(logo_copy, (lx, ly), logo_copy)
 
         name_x = x0 + 196
         max_name_w = x1 - name_x - value_w - 50
         name_text = fit_text(draw, player_name.upper(), name_font, max_name_w)
 
         draw.text(
-            (name_x, y0 + 25),
+            (name_x, y0 + 43),
             name_text,
             font=name_font,
             fill=white,
         )
-
-        if team:
-            tag_x1 = name_x
-            tag_y1 = y0 + 84
-            tag_x2 = tag_x1 + 90
-            tag_y2 = tag_y1 + 34
-
-            draw.rounded_rectangle(
-                (tag_x1, tag_y1, tag_x2, tag_y2),
-                radius=12,
-                fill=(16, 28, 54),
-                outline=(86, 104, 140),
-                width=1,
-            )
-
-            team_w = draw.textlength(team, font=team_font)
-
-            draw.text(
-                (tag_x1 + (tag_x2 - tag_x1 - team_w) / 2, tag_y1 + 4),
-                team,
-                font=team_font,
-                fill=blue,
-            )
 
         draw.rectangle((x0 + 18, y1 - 12, x1 - 18, y1 - 8), fill=blue)
 
