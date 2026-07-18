@@ -4,13 +4,12 @@ import argparse
 import os
 import re
 from collections import defaultdict
-from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 from PIL import Image, ImageDraw, ImageFont
 
 
-SEASON_DEFAULT = 2027
+SEASON_DEFAULT = 2026
 VERSION = 4
 TOP_N = 5
 OUTPUT_DIR = "pff_posters"
@@ -23,11 +22,7 @@ USER_AGENT = (
     "Chrome/138.0.0.0 Safari/537.36"
 )
 
-SKIP_POSITIONS = {
-    "FB",
-    "K",
-    "P",
-}
+SKIP_POSITIONS = {"FB", "K", "P"}
 
 POSTER_WIDTH = 1450
 HEADER_HEIGHT = 280
@@ -36,7 +31,7 @@ BOTTOM_PADDING = 60
 MARGIN = 44
 
 
-def ensure_output_dir() -> None:
+def ensure_output_dir():
     os.makedirs(
         OUTPUT_DIR,
         exist_ok=True,
@@ -47,13 +42,13 @@ def safe_filename(name: str) -> str:
     return re.sub(
         r"[^A-Za-z0-9._-]+",
         "_",
-        str(name),
+        name,
     ).strip("_")
 
 
 def get_font(
-    size: int = 30,
-    bold: bool = False,
+    size=30,
+    bold=False,
 ):
     candidates = [
         (
@@ -88,10 +83,15 @@ def get_font(
                 size,
             )
         except Exception:
-            continue
+            pass
 
     return ImageFont.load_default()
 
+
+TITLE_FONT = get_font(
+    84,
+    bold=True,
+)
 
 SUBTITLE_FONT = get_font(
     34,
@@ -103,10 +103,28 @@ HEADER_FONT = get_font(
     bold=True,
 )
 
+TEXT_FONT = get_font(
+    36,
+    bold=False,
+)
 
-def get_headers(
-    season: int,
-) -> Dict[str, str]:
+RANK_FONT = get_font(
+    42,
+    bold=True,
+)
+
+NAME_FONT = get_font(
+    44,
+    bold=True,
+)
+
+SMALL_TEXT_FONT = get_font(
+    32,
+    bold=False,
+)
+
+
+def get_headers(season):
     return {
         "accept": "application/json, text/plain, */*",
         "referer": (
@@ -117,119 +135,47 @@ def get_headers(
     }
 
 
-def clean_text(
-    value: Any,
-    default: str = "N/A",
-) -> str:
-    if value in (
-        None,
-        "",
-        [],
-        {},
-    ):
-        return default
-
-    return re.sub(
-        r"\s+",
-        " ",
-        str(value),
-    ).strip()
-
-
 def pick(
-    data: Dict[str, Any],
-    keys: List[str],
-    default: Any = "N/A",
-) -> Any:
-    if not isinstance(
-        data,
-        dict,
-    ):
-        return default
-
+    data,
+    keys,
+    default="N/A",
+):
     for key in keys:
-        value = data.get(key)
-
-        if value not in (
-            None,
-            "",
-            [],
-            {},
+        if (
+            key in data
+            and data[key] not in (
+                None,
+                "",
+                [],
+            )
         ):
-            return value
+            return data[key]
 
     return default
 
 
-def normalize_position(
-    position: Any,
-) -> str:
-    if isinstance(
-        position,
-        dict,
-    ):
-        position = pick(
-            position,
-            [
-                "abbreviation",
-                "shortName",
-                "shortDisplayName",
-                "displayName",
-                "name",
-                "code",
-            ],
-            "UNK",
-        )
+def normalize_position(position):
+    if not position:
+        return "UNK"
 
-    position = clean_text(
+    position = str(
         position,
-        "UNK",
-    ).upper()
+    ).strip().upper()
 
     mapping = {
-        "HALFBACK": "RB",
         "HB": "RB",
         "TB": "RB",
-        "RUNNING BACK": "RB",
-        "RUNNINGBACK": "RB",
-        "WIDE RECEIVER": "WR",
-        "TIGHT END": "TE",
-        "OFFENSIVE TACKLE": "OT",
-        "TACKLE": "OT",
-        "OFFENSIVE GUARD": "IOL",
-        "GUARD": "IOL",
-        "CENTER": "IOL",
-        "INTERIOR OFFENSIVE LINE": "IOL",
-        "INTERIOR OFFENSIVE LINEMAN": "IOL",
-        "G": "IOL",
-        "C": "IOL",
-        "OL": "IOL",
-        "OG": "IOL",
-        "OFFENSIVE LINE": "IOL",
-        "DEFENSIVE END": "EDGE",
-        "EDGE DEFENDER": "EDGE",
-        "EDGE RUSHER": "EDGE",
-        "DE": "EDGE",
-        "DEFENSIVE TACKLE": "DL",
-        "DEFENSIVE LINE": "DL",
-        "DEFENSIVE LINEMAN": "DL",
-        "NOSE TACKLE": "DL",
-        "DT": "DL",
-        "NT": "DL",
-        "OUTSIDE LINEBACKER": "LB",
-        "INSIDE LINEBACKER": "LB",
-        "MIDDLE LINEBACKER": "LB",
-        "LINEBACKER": "LB",
         "OLB": "LB",
         "ILB": "LB",
         "MLB": "LB",
-        "CORNERBACK": "CB",
-        "CORNER": "CB",
-        "FREE SAFETY": "S",
-        "STRONG SAFETY": "S",
-        "SAFETY": "S",
-        "FS": "S",
         "SS": "S",
+        "FS": "S",
+        "NT": "DL",
+        "DT": "DL",
+        "DE": "EDGE",
+        "G": "IOL",
+        "C": "IOL",
+        "OL": "IOL",
     }
 
     return mapping.get(
@@ -238,539 +184,160 @@ def normalize_position(
     )
 
 
-def get_nested_value(
-    data: Any,
-    keys: List[str],
-    default: Any = None,
-) -> Any:
+def get_player_list(data):
+    if isinstance(
+        data,
+        list,
+    ):
+        if data:
+            return data
+
+        return []
+
     if isinstance(
         data,
         dict,
     ):
-        for key in keys:
-            value = data.get(key)
+        preferred_keys = [
+            "players",
+            "big_board",
+            "bigBoard",
+            "results",
+            "prospects",
+            "data",
+        ]
 
-            if value not in (
-                None,
-                "",
-                [],
-                {},
+        for key in preferred_keys:
+            value = data.get(
+                key,
+            )
+
+            if (
+                isinstance(value, list)
+                and value
             ):
                 return value
 
-        preferred_nested_keys = [
-            "player",
-            "athlete",
-            "prospect",
-            "profile",
-            "bio",
-            "measurements",
-            "combine",
-            "school",
-            "team",
-            "position",
-            "data",
-            "attributes",
-        ]
-
-        for nested_key in preferred_nested_keys:
-            nested = data.get(nested_key)
-
             if isinstance(
-                nested,
+                value,
                 dict,
             ):
-                found = get_nested_value(
-                    nested,
-                    keys,
-                    default=None,
-                )
-
-                if found not in (
-                    None,
-                    "",
-                    [],
-                    {},
-                ):
-                    return found
-
-    return default
-
-
-def extract_player_name(
-    raw: Dict[str, Any],
-) -> Optional[str]:
-    value = get_nested_value(
-        raw,
-        [
-            "player_name",
-            "playerName",
-            "displayName",
-            "display_name",
-            "fullName",
-            "full_name",
-            "name",
-        ],
-        default=None,
-    )
-
-    if isinstance(
-        value,
-        dict,
-    ):
-        value = pick(
-            value,
-            [
-                "displayName",
-                "fullName",
-                "name",
-            ],
-            None,
-        )
-
-    if value in (
-        None,
-        "",
-    ):
-        first_name = get_nested_value(
-            raw,
-            [
-                "firstName",
-                "first_name",
-            ],
-            default="",
-        )
-
-        last_name = get_nested_value(
-            raw,
-            [
-                "lastName",
-                "last_name",
-            ],
-            default="",
-        )
-
-        combined = clean_text(
-            f"{first_name} {last_name}",
-            "",
-        )
-
-        return combined or None
-
-    cleaned = clean_text(
-        value,
-        "",
-    )
-
-    return cleaned or None
-
-
-def extract_position(
-    raw: Dict[str, Any],
-) -> str:
-    value = get_nested_value(
-        raw,
-        [
-            "position",
-            "position_name",
-            "positionName",
-            "position_abbreviation",
-            "positionAbbreviation",
-            "position_code",
-            "positionCode",
-            "pos",
-        ],
-        default=None,
-    )
-
-    return normalize_position(
-        value,
-    )
-
-
-def looks_like_player(
-    raw: Any,
-) -> bool:
-    if not isinstance(
-        raw,
-        dict,
-    ):
-        return False
-
-    name = extract_player_name(
-        raw,
-    )
-
-    position = extract_position(
-        raw,
-    )
-
-    return bool(
-        name
-        and position
-        and position != "UNK"
-    )
-
-
-def collect_candidate_lists(
-    data: Any,
-) -> List[Tuple[str, List[Dict[str, Any]]]]:
-    candidates = []
-
-    def walk(
-        value: Any,
-        path: str = "root",
-    ) -> None:
-        if isinstance(
-            value,
-            list,
-        ):
-            dictionary_items = [
-                item
-                for item in value
-                if isinstance(
-                    item,
-                    dict,
-                )
-            ]
-
-            if dictionary_items:
-                candidates.append(
-                    (
-                        path,
-                        dictionary_items,
+                try:
+                    nested_players = get_player_list(
+                        value,
                     )
-                )
 
-            for index, item in enumerate(
-                value,
+                    if nested_players:
+                        return nested_players
+
+                except ValueError:
+                    pass
+
+        for value in data.values():
+            if (
+                isinstance(value, list)
+                and value
             ):
                 if isinstance(
-                    item,
-                    (
-                        dict,
-                        list,
-                    ),
+                    value[0],
+                    dict,
                 ):
-                    walk(
-                        item,
-                        f"{path}[{index}]",
+                    return value
+
+            if isinstance(
+                value,
+                dict,
+            ):
+                try:
+                    nested_players = get_player_list(
+                        value,
                     )
 
-        elif isinstance(
-            value,
-            dict,
-        ):
-            for key, nested in value.items():
-                if isinstance(
-                    nested,
-                    (
-                        dict,
-                        list,
-                    ),
-                ):
-                    walk(
-                        nested,
-                        f"{path}.{key}",
-                    )
+                    if nested_players:
+                        return nested_players
 
-    walk(
-        data,
-    )
+                except ValueError:
+                    pass
 
-    return candidates
-
-
-def score_player_list(
-    path: str,
-    items: List[Dict[str, Any]],
-) -> int:
-    if not items:
-        return -1
-
-    sample = items[
-        :min(
-            len(items),
-            50,
-        )
-    ]
-
-    player_matches = sum(
-        1
-        for item in sample
-        if looks_like_player(item)
-    )
-
-    name_matches = sum(
-        1
-        for item in sample
-        if extract_player_name(item)
-    )
-
-    position_matches = sum(
-        1
-        for item in sample
-        if extract_position(item) != "UNK"
-    )
-
-    path_key = path.lower()
-
-    preferred_tokens = [
-        "players",
-        "prospects",
-        "big_board",
-        "bigboard",
-        "rankings",
-        "draft",
-        "results",
-    ]
-
-    path_bonus = sum(
-        25
-        for token in preferred_tokens
-        if token in path_key
-    )
-
-    invalid_penalty = sum(
-        1
-        for item in sample
-        if not isinstance(
-            item,
-            dict,
-        )
-    )
-
-    return (
-        player_matches * 1000
-        + name_matches * 100
-        + position_matches * 100
-        + min(
-            len(items),
-            200,
-        )
-        + path_bonus
-        - invalid_penalty * 100
-    )
-
-
-def get_player_list(
-    data: Any,
-) -> List[Dict[str, Any]]:
-    candidates = collect_candidate_lists(
-        data,
-    )
-
-    if not candidates:
-        raise RuntimeError(
-            "Could not find any non-empty object lists "
-            "inside the PFF response."
-        )
-
-    ranked_candidates = sorted(
-        candidates,
-        key=lambda item: score_player_list(
-            item[0],
-            item[1],
-        ),
-        reverse=True,
-    )
-
-    for path, items in ranked_candidates:
-        valid_players = [
-            item
-            for item in items
-            if looks_like_player(item)
-        ]
-
-        if len(valid_players) >= 5:
-            print(
-                "Using PFF prospect list at "
-                f"{path}: {len(valid_players)} valid players."
-            )
-
-            return valid_players
-
-    diagnostic = [
-        {
-            "path": path,
-            "items": len(items),
-            "score": score_player_list(
-                path,
-                items,
-            ),
-            "valid_players": sum(
-                1
-                for item in items
-                if looks_like_player(item)
-            ),
-        }
-        for path, items in ranked_candidates[:10]
-    ]
-
-    raise RuntimeError(
-        "PFF returned JSON, but no valid prospect list "
-        f"could be identified. Candidates: {diagnostic}"
-    )
-
-
-def parse_rank(
-    raw: Dict[str, Any],
-    fallback_rank: int,
-) -> int:
-    value = get_nested_value(
-        raw,
-        [
-            "rank",
-            "overall_rank",
-            "overallRank",
-            "big_board_rank",
-            "bigBoardRank",
-            "boardRank",
-            "ranking",
-        ],
-        default=fallback_rank,
-    )
-
-    try:
-        rank = int(
-            float(
-                str(value).strip()
-            )
-        )
-
-        if rank > 0:
-            return rank
-
-    except Exception:
-        pass
-
-    return fallback_rank
-
-
-def parse_college(
-    raw: Dict[str, Any],
-) -> str:
-    value = get_nested_value(
-        raw,
-        [
-            "college",
-            "college_name",
-            "collegeName",
-            "school",
-            "school_name",
-            "schoolName",
-            "team_name",
-            "teamName",
-            "team",
-        ],
-        default="N/A",
-    )
-
-    if isinstance(
-        value,
-        dict,
-    ):
-        value = pick(
-            value,
-            [
-                "displayName",
-                "shortDisplayName",
-                "fullName",
-                "name",
-                "abbreviation",
-            ],
-            "N/A",
-        )
-
-    return clean_text(
-        value,
-        "N/A",
-    )
-
-
-def parse_measurement(
-    raw: Dict[str, Any],
-    keys: List[str],
-) -> str:
-    value = get_nested_value(
-        raw,
-        keys,
-        default="N/A",
-    )
-
-    if isinstance(
-        value,
-        dict,
-    ):
-        value = pick(
-            value,
-            [
-                "displayValue",
-                "display",
-                "formatted",
-                "value",
-            ],
-            "N/A",
-        )
-
-    return clean_text(
-        value,
-        "N/A",
+    raise ValueError(
+        "Could not find a non-empty player list."
     )
 
 
 def parse_player(
-    raw: Dict[str, Any],
-    fallback_rank: int,
-) -> Dict[str, Any]:
+    raw,
+    rank,
+):
     return {
-        "rank": parse_rank(
-            raw,
-            fallback_rank,
+        "rank": rank,
+        "name": str(
+            pick(
+                raw,
+                [
+                    "player_name",
+                    "playerName",
+                    "name",
+                ],
+                "Unknown",
+            )
         ),
-        "name": extract_player_name(
-            raw,
-        ) or "Unknown",
-        "position": extract_position(
-            raw,
+        "position": normalize_position(
+            pick(
+                raw,
+                [
+                    "position",
+                    "pos",
+                ],
+                "UNK",
+            )
         ),
-        "college": parse_college(
-            raw,
+        "college": str(
+            pick(
+                raw,
+                [
+                    "college",
+                    "school",
+                    "team_name",
+                    "teamName",
+                ],
+                "N/A",
+            )
         ),
-        "height": parse_measurement(
-            raw,
-            [
-                "height",
-                "height_display",
-                "heightDisplay",
-                "displayHeight",
-                "formattedHeight",
-            ],
+        "height": str(
+            pick(
+                raw,
+                [
+                    "height",
+                    "height_display",
+                    "heightDisplay",
+                ],
+                "N/A",
+            )
         ),
-        "weight": parse_measurement(
-            raw,
-            [
-                "weight",
-                "weight_display",
-                "weightDisplay",
-                "displayWeight",
-                "formattedWeight",
-            ],
+        "weight": str(
+            pick(
+                raw,
+                [
+                    "weight",
+                    "weight_display",
+                    "weightDisplay",
+                ],
+                "N/A",
+            )
         ),
-        "age": parse_measurement(
-            raw,
-            [
-                "age",
-                "draftAge",
-                "draft_age",
-            ],
+        "age": str(
+            pick(
+                raw,
+                [
+                    "age",
+                ],
+                "N/A",
+            )
         ),
     }
 
 
-def fetch_big_board(
-    season: int,
-) -> Any:
+def fetch_big_board(season):
     response = requests.get(
         BOARD_URL,
         params={
@@ -785,100 +352,52 @@ def fetch_big_board(
 
     response.raise_for_status()
 
-    try:
-        return response.json()
-
-    except ValueError as error:
-        preview = response.text[:500]
-
-        raise RuntimeError(
-            "PFF did not return valid JSON. "
-            f"Response preview: {preview}"
-        ) from error
+    return response.json()
 
 
-def group_top_players(
-    raw_players: List[Dict[str, Any]],
-) -> Dict[str, List[Dict[str, Any]]]:
-    parsed_players = []
-
-    for index, raw in enumerate(
-        raw_players,
-        start=1,
-    ):
-        player = parse_player(
-            raw,
-            index,
-        )
-
-        if player["name"] == "Unknown":
-            print(
-                "WARNING: Skipping prospect with no name."
-            )
-            continue
-
-        if player["position"] == "UNK":
-            print(
-                "WARNING: Skipping player with unknown "
-                f"position: {player['name']}"
-            )
-            continue
-
-        if player["position"] in SKIP_POSITIONS:
-            continue
-
-        parsed_players.append(
-            player,
-        )
-
-    parsed_players.sort(
-        key=lambda player: player["rank"],
-    )
-
+def group_top_players(players):
     grouped = defaultdict(
         list,
     )
 
-    for player in parsed_players:
-        position = player["position"]
+    for index, raw in enumerate(
+        players,
+    ):
+        player = parse_player(
+            raw,
+            index + 1,
+        )
 
-        if len(
-            grouped[position]
-        ) < TOP_N:
-            grouped[position].append(
-                player,
-            )
+        if player["position"] in SKIP_POSITIONS:
+            continue
 
-    output = dict(
+        grouped[
+            player["position"]
+        ].append(
+            player,
+        )
+
+    for position in grouped:
+        grouped[position] = grouped[
+            position
+        ][:TOP_N]
+
+    return dict(
         sorted(
             grouped.items(),
         )
     )
 
-    if "UNK" in output:
-        del output["UNK"]
-
-    if not output:
-        raise RuntimeError(
-            "PFF data was fetched, but no valid "
-            "position groups were parsed."
-        )
-
-    return output
-
 
 def fit_font(
-    draw: ImageDraw.ImageDraw,
-    text: Any,
-    max_width: int,
-    start_size: int,
-    min_size: int = 20,
-    bold: bool = False,
+    draw,
+    text,
+    max_width,
+    start_size,
+    min_size=20,
+    bold=False,
 ):
     size = start_size
-    text = str(
-        text,
-    )
 
     while size >= min_size:
         font = get_font(
@@ -887,7 +406,7 @@ def fit_font(
         )
 
         if draw.textlength(
-            text,
+            str(text),
             font=font,
         ) <= max_width:
             return font
@@ -901,12 +420,12 @@ def fit_font(
 
 
 def draw_vertical_gradient(
-    draw: ImageDraw.ImageDraw,
-    width: int,
-    height: int,
-    top_color: Tuple[int, int, int],
-    bottom_color: Tuple[int, int, int],
-) -> None:
+    draw,
+    width,
+    height,
+    top_color,
+    bottom_color,
+):
     for y in range(
         height,
     ):
@@ -946,15 +465,10 @@ def draw_vertical_gradient(
 
 
 def create_poster(
-    position: str,
-    players: List[Dict[str, Any]],
-    season: int,
-) -> str:
-    if position == "UNK":
-        raise RuntimeError(
-            "Refusing to create an UNK position poster."
-        )
-
+    position,
+    players,
+    season,
+):
     height = (
         HEADER_HEIGHT
         + len(players) * ROW_HEIGHT
@@ -997,7 +511,7 @@ def create_poster(
         150,
     )
 
-    title_bar_highlight = (
+    title_bar_hi = (
         45,
         100,
         220,
@@ -1021,7 +535,7 @@ def create_poster(
         228,
     )
 
-    text_color = (
+    text = (
         245,
         248,
         255,
@@ -1125,8 +639,8 @@ def create_poster(
     )
 
     title = (
-        f"{position} - TOP {len(players)} "
-        "PFF PROSPECTS"
+        f"{position} - TOP "
+        f"{len(players)} PFF PROSPECTS"
     )
 
     title_font = fit_font(
@@ -1152,7 +666,7 @@ def create_poster(
             top_y + 28,
         ),
         title,
-        fill=text_color,
+        fill=text,
         font=title_font,
     )
 
@@ -1201,9 +715,7 @@ def create_poster(
 
     column_widths[-1] += (
         table_width
-        - sum(
-            column_widths,
-        )
+        - sum(column_widths)
     )
 
     headers = [
@@ -1239,11 +751,10 @@ def create_poster(
             table_left,
             header_y,
             table_right,
-            header_y
-            + header_height // 2,
+            header_y + header_height // 2,
         ),
         radius=16,
-        fill=title_bar_highlight,
+        fill=title_bar_hi,
     )
 
     x = table_left
@@ -1251,16 +762,20 @@ def create_poster(
     for index, header in enumerate(
         headers,
     ):
-        column_width = column_widths[
-            index
-        ]
-
         if index in (
             0,
             1,
             2,
         ):
-            text_x = x + 14
+            draw.text(
+                (
+                    x + 14,
+                    header_y + 12,
+                ),
+                header,
+                fill=muted,
+                font=HEADER_FONT,
+            )
 
         else:
             header_width = draw.textlength(
@@ -1268,28 +783,22 @@ def create_poster(
                 font=HEADER_FONT,
             )
 
-            text_x = (
-                x
-                + column_width
-                - 14
-                - header_width
+            draw.text(
+                (
+                    x
+                    + column_widths[index]
+                    - 14
+                    - header_width,
+                    header_y + 12,
+                ),
+                header,
+                fill=muted,
+                font=HEADER_FONT,
             )
 
-        draw.text(
-            (
-                text_x,
-                header_y + 12,
-            ),
-            header,
-            fill=muted,
-            font=HEADER_FONT,
-        )
+        x += column_widths[index]
 
-        x += column_width
-
-        if index != len(
-            headers,
-        ) - 1:
+        if index != len(headers) - 1:
             draw.line(
                 (
                     x,
@@ -1312,7 +821,7 @@ def create_poster(
     for row_index, player in enumerate(
         players,
     ):
-        row_fill = (
+        fill = (
             row_a
             if row_index % 2 == 0
             else row_b
@@ -1323,33 +832,19 @@ def create_poster(
                 table_left,
                 row_y,
                 table_right,
-                row_y
-                + ROW_HEIGHT
-                - 12,
+                row_y + ROW_HEIGHT - 12,
             ),
             radius=18,
-            fill=row_fill,
+            fill=fill,
         )
 
         values = [
-            str(
-                player["rank"],
-            ),
-            str(
-                player["name"],
-            ),
-            str(
-                player["college"],
-            ),
-            str(
-                player["height"],
-            ),
-            str(
-                player["weight"],
-            ),
-            str(
-                player["age"],
-            ),
+            str(player["rank"]),
+            str(player["name"]),
+            str(player["college"]),
+            str(player["height"]),
+            str(player["weight"]),
+            str(player["age"]),
         ]
 
         x = table_left
@@ -1371,9 +866,17 @@ def create_poster(
                     bold=True,
                 )
 
-                text_x = x + 14
                 text_y = row_y + 24
-                fill = gold
+
+                draw.text(
+                    (
+                        x + 14,
+                        text_y,
+                    ),
+                    value,
+                    fill=gold,
+                    font=font,
+                )
 
             elif column_index == 1:
                 font = fit_font(
@@ -1385,9 +888,17 @@ def create_poster(
                     bold=True,
                 )
 
-                text_x = x + 14
                 text_y = row_y + 18
-                fill = text_color
+
+                draw.text(
+                    (
+                        x + 14,
+                        text_y,
+                    ),
+                    value,
+                    fill=text,
+                    font=font,
+                )
 
             elif column_index == 2:
                 font = fit_font(
@@ -1399,9 +910,17 @@ def create_poster(
                     bold=False,
                 )
 
-                text_x = x + 14
                 text_y = row_y + 64
-                fill = accent
+
+                draw.text(
+                    (
+                        x + 14,
+                        text_y,
+                    ),
+                    value,
+                    fill=accent,
+                    font=font,
+                )
 
             elif column_index in (
                 3,
@@ -1416,20 +935,25 @@ def create_poster(
                     bold=False,
                 )
 
-                value_width = draw.textlength(
+                text_width = draw.textlength(
                     value,
                     font=font,
                 )
 
-                text_x = (
-                    x
-                    + column_width
-                    - 14
-                    - value_width
-                )
-
                 text_y = row_y + 42
-                fill = text_color
+
+                draw.text(
+                    (
+                        x
+                        + column_width
+                        - 14
+                        - text_width,
+                        text_y,
+                    ),
+                    value,
+                    fill=text,
+                    font=font,
+                )
 
             else:
                 font = fit_font(
@@ -1441,36 +965,29 @@ def create_poster(
                     bold=False,
                 )
 
-                value_width = draw.textlength(
+                text_width = draw.textlength(
                     value,
                     font=font,
                 )
 
-                text_x = (
-                    x
-                    + column_width
-                    - 14
-                    - value_width
-                )
-
                 text_y = row_y + 42
-                fill = text_color
 
-            draw.text(
-                (
-                    text_x,
-                    text_y,
-                ),
-                value,
-                fill=fill,
-                font=font,
-            )
+                draw.text(
+                    (
+                        x
+                        + column_width
+                        - 14
+                        - text_width,
+                        text_y,
+                    ),
+                    value,
+                    fill=text,
+                    font=font,
+                )
 
             x += column_width
 
-            if column_index != len(
-                values,
-            ) - 1:
+            if column_index != len(values) - 1:
                 draw.line(
                     (
                         x,
@@ -1496,35 +1013,15 @@ def create_poster(
 
     image.save(
         path,
-        "PNG",
     )
 
     print(
-        f"Saved: {path}"
+        "Saved",
+        path,
     )
 
-    return path
 
-
-def remove_old_unk_poster() -> None:
-    unk_path = os.path.join(
-        OUTPUT_DIR,
-        "UNK_top_5.png",
-    )
-
-    if os.path.exists(
-        unk_path,
-    ):
-        os.remove(
-            unk_path,
-        )
-
-        print(
-            f"Removed old invalid poster: {unk_path}"
-        )
-
-
-def main() -> None:
+def main():
     parser = argparse.ArgumentParser()
 
     parser.add_argument(
@@ -1536,7 +1033,6 @@ def main() -> None:
     args = parser.parse_args()
 
     ensure_output_dir()
-    remove_old_unk_poster()
 
     print(
         "Fetching PFF big board for "
@@ -1551,37 +1047,19 @@ def main() -> None:
         data,
     )
 
-    print(
-        f"Parsed {len(players)} valid prospects."
-    )
-
     grouped = group_top_players(
         players,
     )
 
-    print(
-        "Position groups found: "
-        + ", ".join(
-            grouped.keys(),
-        )
-    )
-
-    outputs = {}
-
     for position, player_list in grouped.items():
-        outputs[position] = create_poster(
+        create_poster(
             position,
             player_list,
             args.season,
         )
 
-    if not outputs:
-        raise RuntimeError(
-            "No PFF Big Board posters were generated."
-        )
-
     print(
-        f"Done. Generated {len(outputs)} posters."
+        "Done."
     )
 
 
