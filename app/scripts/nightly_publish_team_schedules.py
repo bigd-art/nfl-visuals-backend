@@ -33,7 +33,7 @@ def season_has_schedule_data(season: int) -> bool:
 
 
 def publish_team_schedules(keep_versioned: bool = False) -> dict:
-    season = resolve_first_valid(candidate_regular_seasons(), season_has_schedule_data)
+    season = 2026
     team_map = build_team_map()
 
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -46,7 +46,10 @@ def publish_team_schedules(keep_versioned: bool = False) -> dict:
             data = get_json(SCHEDULE_URL.format(team_id=team_id, year=season))
             games = build_full_18_week_schedule(team_abbr, data, team_map)
 
-            local_path = os.path.join(tmpdir, f"{team_abbr.lower()}_{season}_schedule_poster.png")
+            local_path = os.path.join(
+                tmpdir,
+                f"{team_abbr.lower()}_{season}_schedule_poster.png"
+            )
             make_poster(team_abbr, team_name, season, games, local_path)
 
             posters[team_abbr] = upload_file_return_url(
@@ -64,7 +67,10 @@ def publish_team_schedules(keep_versioned: bool = False) -> dict:
         with open(local_json, "w", encoding="utf-8") as f:
             json.dump(payload, f, indent=2)
 
-        payload["metadata_url"] = upload_file_return_url(local_json, "team_schedules/current.json")
+        payload["metadata_url"] = upload_file_return_url(
+            local_json,
+            "team_schedules/current.json"
+        )
 
         if keep_versioned:
             payload["versioned_metadata_url"] = upload_file_return_url(
@@ -89,7 +95,12 @@ def parse_args():
 
 def main():
     args = parse_args()
-    print(json.dumps(publish_team_schedules(keep_versioned=args.keep_versioned), indent=2))
+    print(
+        json.dumps(
+            publish_team_schedules(keep_versioned=args.keep_versioned),
+            indent=2
+        )
+    )
 
 
 if __name__ == "__main__":
