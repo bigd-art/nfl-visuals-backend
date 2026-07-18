@@ -50,6 +50,7 @@ TEAM_FIXES = {
 
 POSITION_TOKENS = [
     "LB/EDGE",
+    "OT/IOL",
     "IOL",
     "EDGE",
     "QB", "RB", "WR", "TE", "OT", "OG", "C",
@@ -68,9 +69,15 @@ def ensure_dir(path: str) -> None:
 
 def load_font(size: int, bold: bool = False):
     candidates = [
-        "/System/Library/Fonts/Supplemental/Arial Bold.ttf" if bold else "/System/Library/Fonts/Supplemental/Arial.ttf",
-        "/Library/Fonts/Arial Bold.ttf" if bold else "/Library/Fonts/Arial.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/System/Library/Fonts/Supplemental/Arial Bold.ttf"
+        if bold
+        else "/System/Library/Fonts/Supplemental/Arial.ttf",
+        "/Library/Fonts/Arial Bold.ttf"
+        if bold
+        else "/Library/Fonts/Arial.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+        if bold
+        else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
     ]
 
     for path in candidates:
@@ -105,8 +112,10 @@ def normalize_team_abbr(team: str) -> str:
 def get_logo_url(team_abbr: str) -> str:
     team_abbr = normalize_team_abbr(team_abbr)
     slug = TEAM_LOGO_SLUGS.get(team_abbr)
+
     if not slug:
         return ""
+
     return f"https://a.espncdn.com/i/teamlogos/nfl/500/{slug}.png"
 
 
@@ -117,6 +126,7 @@ def fetch_logo(team_abbr: str, size: int = 116) -> Image.Image:
         try:
             resp = requests.get(url, headers=HEADERS, timeout=20)
             resp.raise_for_status()
+
             img = Image.open(BytesIO(resp.content)).convert("RGBA")
             img.thumbnail((size, size), Image.LANCZOS)
 
@@ -124,22 +134,32 @@ def fetch_logo(team_abbr: str, size: int = 116) -> Image.Image:
             x = (size - img.width) // 2
             y = (size - img.height) // 2
             canvas.paste(img, (x, y), img)
+
             return canvas
         except Exception:
             pass
 
     canvas = Image.new("RGBA", (size, size), (30, 34, 48, 255))
-    d = ImageDraw.Draw(canvas)
-    d.rounded_rectangle(
+    draw = ImageDraw.Draw(canvas)
+
+    draw.rounded_rectangle(
         (2, 2, size - 2, size - 2),
         radius=20,
         outline=(120, 130, 160),
         width=3,
     )
-    f = load_font(26, bold=True)
+
+    font = load_font(26, bold=True)
     text = team_abbr if team_abbr else "NFL"
-    tw = d.textlength(text, font=f)
-    d.text(((size - tw) / 2, size / 2 - 12), text, fill=(235, 240, 250), font=f)
+    text_width = draw.textlength(text, font=font)
+
+    draw.text(
+        ((size - text_width) / 2, size / 2 - 12),
+        text,
+        fill=(235, 240, 250),
+        font=font,
+    )
+
     return canvas
 
 
@@ -152,6 +172,7 @@ def soup_to_text_with_img_alts(html: str) -> str:
 
     for img in soup.find_all("img"):
         alt = clean_text(img.get("alt", ""))
+
         if alt:
             img.replace_with(f"\nImage: {alt}\n")
         else:
@@ -160,32 +181,41 @@ def soup_to_text_with_img_alts(html: str) -> str:
     text = soup.get_text("\n")
     text = text.replace("\r", "\n")
     text = re.sub(r"\n{3,}", "\n\n", text)
+
     return text
 
 
 def extract_round1_text(full_text: str) -> str:
-    m = re.search(
+    match = re.search(
         r"\bRound 1\b(.*?)(?:\bRound 2\b|$)",
         full_text,
         flags=re.DOTALL | re.IGNORECASE,
     )
-    if not m:
+
+    if not match:
         raise RuntimeError("Could not find Round 1 section.")
-    return m.group(1)
+
+    return match.group(1)
 
 
 def parse_pick_block(block_text: str):
-    team_matches = re.findall(r"Image:\s*([A-Z]{2,3})\b", block_text)
+    team_matches = re.findall(
+        r"Image:\s*([A-Z]{2,3})\b",
+        block_text,
+    )
+
     team = ""
 
-    for t in team_matches:
-        t = normalize_team_abbr(t)
-        if t in TEAM_LOGO_SLUGS:
-            team = t
+    for item in team_matches:
+        item = normalize_team_abbr(item)
+
+        if item in TEAM_LOGO_SLUGS:
+            team = item
             break
 
     player_match = re.search(
-        rf"\b([A-Z][A-Za-z\.'\-]+(?:\s+[A-Z][A-Za-z\.'\-]+)*)\s+({POSITION_PATTERN})\s*\|\s*([^\n]+)",
+        rf"\b([A-Z][A-Za-z\.'\-]+(?:\s+[A-Z][A-Za-z\.'\-]+)*)"
+        rf"\s+({POSITION_PATTERN})\s*\|\s*([^\n]+)",
         block_text,
     )
 
@@ -213,16 +243,22 @@ def parse_by_number_blocks(round1_text: str):
 
     picks = []
 
-    for idx, match in enumerate(matches):
+    for index, match in enumerate(matches):
         pick_num = int(match.group(1))
-        if not (1 <= pick_num <= 32):
+
+        if not 1 <= pick_num <= 32:
             continue
 
         start = match.end()
-        end = matches[idx + 1].start() if idx + 1 < len(matches) else len(round1_text)
-        block = round1_text[start:end]
+        end = (
+            matches[index + 1].start()
+            if index + 1 < len(matches)
+            else len(round1_text)
+        )
 
+        block = round1_text[start:end]
         parsed = parse_pick_block(block)
+
         if parsed:
             parsed["pick"] = pick_num
             picks.append(parsed)
@@ -231,11 +267,6 @@ def parse_by_number_blocks(round1_text: str):
 
 
 def parse_by_loose_regex(round1_text: str):
-    """
-    Fallback parser for cases where one Tankathon pick number is not isolated
-    on its own line. This catches rows where the number, logo alt text, player,
-    position, and college are still present but formatted differently.
-    """
     text = round1_text
     picks = []
 
@@ -254,27 +285,29 @@ def parse_by_loose_regex(round1_text: str):
         flags=re.VERBOSE,
     )
 
-    for m in loose_pattern.finditer(text):
+    for match in loose_pattern.finditer(text):
         try:
-            pick_num = int(m.group("pick"))
+            pick_num = int(match.group("pick"))
         except Exception:
             continue
 
-        if not (1 <= pick_num <= 32):
+        if not 1 <= pick_num <= 32:
             continue
 
-        team = normalize_team_abbr(m.group("team"))
+        team = normalize_team_abbr(match.group("team"))
+
         if team not in TEAM_LOGO_SLUGS:
             continue
 
-        player = clean_text(m.group("player"))
-        position = clean_text(m.group("position"))
-        college = clean_text(m.group("college"))
+        player = clean_text(match.group("player"))
+        position = clean_text(match.group("position"))
+        college = clean_text(match.group("college"))
 
         college = re.split(
             r"\s+(?:Image:|NFL|Draft|Player|Team|Pick|Round|\d{1,2}\b)",
             college,
         )[0]
+
         college = clean_text(college)
 
         if not player or not position or not college:
@@ -293,51 +326,77 @@ def parse_by_loose_regex(round1_text: str):
     return picks
 
 
-def write_debug(round1_text: str, out):
+def write_debug(round1_text: str, output):
     ensure_dir(OUTPUT_DIR)
-    debug_path = os.path.join(OUTPUT_DIR, "round1_debug.txt")
 
-    with open(debug_path, "w", encoding="utf-8") as f:
-        f.write(round1_text)
+    debug_path = os.path.join(
+        OUTPUT_DIR,
+        "round1_debug.txt",
+    )
+
+    with open(debug_path, "w", encoding="utf-8") as file:
+        file.write(round1_text)
 
     print(f"DEBUG WRITTEN: {debug_path}")
 
-    for p in out:
-        print(f"#{p['pick']} {p['team']} - {p['player']} ({p['position']}, {p['college']})")
+    for item in output:
+        print(
+            f"#{item['pick']} {item['team']} - "
+            f"{item['player']} ({item['position']}, {item['college']})"
+        )
 
 
 def parse_round1_picks(round1_text: str):
-    picks = []
-
-    picks.extend(parse_by_number_blocks(round1_text))
+    picks = parse_by_number_blocks(round1_text)
 
     deduped = {}
-    for p in picks:
-        if 1 <= p["pick"] <= 32:
-            deduped[p["pick"]] = p
 
-    missing_after_primary = [n for n in range(1, 33) if n not in deduped]
+    for pick in picks:
+        if 1 <= pick["pick"] <= 32:
+            deduped[pick["pick"]] = pick
+
+    missing_after_primary = [
+        number
+        for number in range(1, 33)
+        if number not in deduped
+    ]
 
     if missing_after_primary:
-        print(f"Primary parser missing picks: {missing_after_primary}")
+        print(
+            f"Primary parser missing picks: "
+            f"{missing_after_primary}"
+        )
+
         fallback_picks = parse_by_loose_regex(round1_text)
 
-        for p in fallback_picks:
-            if p["pick"] in missing_after_primary:
-                deduped[p["pick"]] = p
+        for pick in fallback_picks:
+            if pick["pick"] in missing_after_primary:
+                deduped[pick["pick"]] = pick
 
-    out = [deduped[k] for k in sorted(deduped.keys()) if 1 <= k <= 32]
+    output = [
+        deduped[key]
+        for key in sorted(deduped.keys())
+        if 1 <= key <= 32
+    ]
 
-    missing = [n for n in range(1, 33) if n not in deduped]
+    missing = [
+        number
+        for number in range(1, 33)
+        if number not in deduped
+    ]
 
     if missing:
-        print(f"WARNING: Expected 32 picks, found {len(out)}. Missing picks: {missing}")
-        write_debug(round1_text, out)
+        print(
+            f"WARNING: Expected 32 picks, found "
+            f"{len(output)}. Missing picks: {missing}"
+        )
 
-        for n in missing:
-            out.append(
+        write_debug(round1_text, output)
+
+        for number in missing:
+            output.append(
                 {
-                    "pick": n,
+                    "pick": number,
                     "team": "NFL",
                     "player": "TBD",
                     "position": "TBD",
@@ -345,21 +404,48 @@ def parse_round1_picks(round1_text: str):
                 }
             )
 
-    out = sorted(out, key=lambda p: p["pick"])
+    output = sorted(
+        output,
+        key=lambda item: item["pick"],
+    )
 
-    if len(out) != 32:
-        write_debug(round1_text, out)
-        raise RuntimeError(f"Expected 32 picks after fallback, found {len(out)}.")
+    if len(output) != 32:
+        write_debug(round1_text, output)
 
-    return out
+        raise RuntimeError(
+            f"Expected 32 picks after fallback, "
+            f"found {len(output)}."
+        )
+
+    return output
 
 
-def rounded_rect(draw, box, radius, fill, outline=None, width=1):
-    draw.rounded_rectangle(box, radius=radius, fill=fill, outline=outline, width=width)
+def rounded_rect(
+    draw,
+    box,
+    radius,
+    fill,
+    outline=None,
+    width=1,
+):
+    draw.rounded_rectangle(
+        box,
+        radius=radius,
+        fill=fill,
+        outline=outline,
+        width=width,
+    )
 
 
-def wrap_text(draw, text, font, max_width, max_lines=2):
+def wrap_text(
+    draw,
+    text,
+    font,
+    max_width,
+    max_lines=2,
+):
     words = text.split()
+
     if not words:
         return [""]
 
@@ -368,6 +454,7 @@ def wrap_text(draw, text, font, max_width, max_lines=2):
 
     for word in words[1:]:
         test = current + " " + word
+
         if draw.textlength(test, font=font) <= max_width:
             current = test
         else:
@@ -379,23 +466,48 @@ def wrap_text(draw, text, font, max_width, max_lines=2):
     if len(lines) > max_lines:
         lines = lines[:max_lines]
         last = lines[-1]
-        while last and draw.textlength(last + "…", font=font) > max_width:
+
+        while (
+            last
+            and draw.textlength(last + "…", font=font) > max_width
+        ):
             last = last[:-1]
+
         lines[-1] = last.rstrip() + "…"
 
     return lines
 
 
 def make_background():
-    img = Image.new("RGB", (POSTER_WIDTH, POSTER_HEIGHT), (10, 14, 24))
+    img = Image.new(
+        "RGB",
+        (POSTER_WIDTH, POSTER_HEIGHT),
+        (10, 14, 24),
+    )
+
     draw = ImageDraw.Draw(img)
 
-    draw.rectangle((0, 0, POSTER_WIDTH, 165), fill=(22, 38, 74))
-    draw.rectangle((0, 165, POSTER_WIDTH, 172), fill=(128, 183, 255))
+    draw.rectangle(
+        (0, 0, POSTER_WIDTH, 165),
+        fill=(22, 38, 74),
+    )
+
+    draw.rectangle(
+        (0, 165, POSTER_WIDTH, 172),
+        fill=(128, 183, 255),
+    )
 
     for y in range(180, POSTER_HEIGHT, 30):
-        color = (14, 18, 28) if (y // 30) % 2 == 0 else (12, 16, 26)
-        draw.rectangle((0, y, POSTER_WIDTH, y + 15), fill=color)
+        color = (
+            (14, 18, 28)
+            if (y // 30) % 2 == 0
+            else (12, 16, 26)
+        )
+
+        draw.rectangle(
+            (0, y, POSTER_WIDTH, y + 15),
+            fill=color,
+        )
 
     return img
 
@@ -412,43 +524,106 @@ def draw_card(base_img, draw, item, box):
         width=3,
     )
 
-    pill = (x1 + 22, y1 + 20, x1 + 160, y1 + 78)
-    rounded_rect(draw, pill, radius=18, fill=(128, 183, 255))
+    pill = (
+        x1 + 22,
+        y1 + 20,
+        x1 + 160,
+        y1 + 78,
+    )
+
+    rounded_rect(
+        draw,
+        pill,
+        radius=18,
+        fill=(128, 183, 255),
+    )
 
     pick_text = f"#{item['pick']}"
-    tw = draw.textlength(pick_text, font=FONT_PICK)
+    pick_width = draw.textlength(
+        pick_text,
+        font=FONT_PICK,
+    )
+
     draw.text(
-        (pill[0] + (pill[2] - pill[0] - tw) / 2, pill[1] + 7),
+        (
+            pill[0]
+            + (pill[2] - pill[0] - pick_width) / 2,
+            pill[1] + 7,
+        ),
         pick_text,
         font=FONT_PICK,
         fill=(15, 20, 28),
     )
 
     team_text = item["team"] if item["team"] else "NFL"
-    draw.text((x1 + 186, y1 + 28), team_text, font=FONT_TEAM, fill=(223, 231, 244))
 
-    logo = fetch_logo(item["team"], size=116)
+    draw.text(
+        (x1 + 186, y1 + 28),
+        team_text,
+        font=FONT_TEAM,
+        fill=(223, 231, 244),
+    )
+
+    logo = fetch_logo(
+        item["team"],
+        size=116,
+    )
+
     logo_x = x2 - 150
     logo_y = y1 + (y2 - y1 - 116) // 2
-    base_img.paste(logo, (logo_x, logo_y), logo)
+
+    base_img.paste(
+        logo,
+        (logo_x, logo_y),
+        logo,
+    )
 
     text_left = x1 + 28
     text_right = logo_x - 28
     max_width = text_right - text_left
 
-    player_lines = wrap_text(draw, item["player"], FONT_PLAYER, max_width, max_lines=2)
-    py = y1 + 92
+    player_lines = wrap_text(
+        draw,
+        item["player"],
+        FONT_PLAYER,
+        max_width,
+        max_lines=2,
+    )
+
+    y = y1 + 92
 
     for line in player_lines:
-        draw.text((text_left, py), line, font=FONT_PLAYER, fill=(246, 248, 252))
-        py += 46
+        draw.text(
+            (text_left, y),
+            line,
+            font=FONT_PLAYER,
+            fill=(246, 248, 252),
+        )
 
-    meta = f"{item['position']}  •  {item['college']}"
-    meta_lines = wrap_text(draw, meta, FONT_META, max_width, max_lines=2)
+        y += 46
+
+    meta = (
+        f"{item['position']}  •  "
+        f"{item['college']}"
+    )
+
+    meta_lines = wrap_text(
+        draw,
+        meta,
+        FONT_META,
+        max_width,
+        max_lines=2,
+    )
 
     for line in meta_lines:
-        draw.text((text_left, py + 2), line, font=FONT_META, fill=(188, 198, 217))
-        py += 32
+        draw.text(
+            (text_left, y + 2),
+            line,
+            font=FONT_META,
+            fill=(188, 198, 217),
+        )
+
+        y += 32
 
 
 def render_poster(chunk):
@@ -456,19 +631,36 @@ def render_poster(chunk):
     draw = ImageDraw.Draw(img)
 
     title = "NFL MOCK DRAFT"
-    subtitle = f"PICKS {chunk[0]['pick']}-{chunk[-1]['pick']}"
+    subtitle = (
+        f"PICKS {chunk[0]['pick']}-"
+        f"{chunk[-1]['pick']}"
+    )
 
-    tw = draw.textlength(title, font=FONT_TITLE)
-    sw = draw.textlength(subtitle, font=FONT_SUBTITLE)
+    title_width = draw.textlength(
+        title,
+        font=FONT_TITLE,
+    )
+
+    subtitle_width = draw.textlength(
+        subtitle,
+        font=FONT_SUBTITLE,
+    )
 
     draw.text(
-        ((POSTER_WIDTH - tw) / 2, 36),
+        (
+            (POSTER_WIDTH - title_width) / 2,
+            36,
+        ),
         title,
         font=FONT_TITLE,
         fill=(245, 247, 252),
     )
+
     draw.text(
-        ((POSTER_WIDTH - sw) / 2, 114),
+        (
+            (POSTER_WIDTH - subtitle_width) / 2,
+            114,
+        ),
         subtitle,
         font=FONT_SUBTITLE,
         fill=(208, 218, 238),
@@ -480,13 +672,26 @@ def render_poster(chunk):
     bottom = POSTER_HEIGHT - 40
     gap = 18
 
-    usable_h = bottom - top
-    row_h = int((usable_h - gap * (ROWS_PER_POSTER - 1)) / ROWS_PER_POSTER)
+    usable_height = bottom - top
 
-    for idx, item in enumerate(chunk):
-        y1 = top + idx * (row_h + gap)
-        y2 = y1 + row_h
-        draw_card(img, draw, item, (left, y1, right, y2))
+    row_height = int(
+        (
+            usable_height
+            - gap * (ROWS_PER_POSTER - 1)
+        )
+        / ROWS_PER_POSTER
+    )
+
+    for index, item in enumerate(chunk):
+        y1 = top + index * (row_height + gap)
+        y2 = y1 + row_height
+
+        draw_card(
+            img,
+            draw,
+            item,
+            (left, y1, right, y2),
+        )
 
     return img
 
@@ -507,18 +712,42 @@ def main():
     picks = parse_round1_picks(round1_text)
 
     print(f"Found {len(picks)} picks.")
-    for p in picks:
-        print(f"#{p['pick']} {p['team']} - {p['player']} ({p['position']}, {p['college']})")
 
-    chunks = [picks[i:i + ROWS_PER_POSTER] for i in range(0, 32, ROWS_PER_POSTER)]
+    for pick in picks:
+        print(
+            f"#{pick['pick']} {pick['team']} - "
+            f"{pick['player']} "
+            f"({pick['position']}, {pick['college']})"
+        )
+
+    chunks = [
+        picks[index:index + ROWS_PER_POSTER]
+        for index in range(
+            0,
+            32,
+            ROWS_PER_POSTER,
+        )
+    ]
 
     if len(chunks) != TOTAL_POSTERS:
-        raise RuntimeError(f"Expected {TOTAL_POSTERS} posters, got {len(chunks)}")
+        raise RuntimeError(
+            f"Expected {TOTAL_POSTERS} posters, "
+            f"got {len(chunks)}"
+        )
 
-    for idx, chunk in enumerate(chunks, start=1):
-        print(f"Rendering poster {idx}/4...")
+    for index, chunk in enumerate(chunks, start=1):
+        print(
+            f"Rendering poster {index}/"
+            f"{TOTAL_POSTERS}..."
+        )
+
         poster = render_poster(chunk)
-        out_path = os.path.join(OUTPUT_DIR, f"tankathon_mock_poster_{idx}.png")
+
+        out_path = os.path.join(
+            OUTPUT_DIR,
+            f"tankathon_mock_poster_{index}.png",
+        )
+
         poster.save(out_path)
         print(f"Saved: {out_path}")
 
@@ -529,9 +758,14 @@ def main():
 if __name__ == "__main__":
     try:
         main()
+
     except KeyboardInterrupt:
         print("\nStopped.")
         sys.exit(1)
-    except Exception as e:
-        print(f"\nERROR: {e}", file=sys.stderr)
+
+    except Exception as error:
+        print(
+            f"\nERROR: {error}",
+            file=sys.stderr,
+        )
         sys.exit(1)
