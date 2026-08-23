@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
+
 import argparse
-import os
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -10,13 +10,20 @@ import requests
 from PIL import Image, ImageDraw, ImageFont
 
 
+# ============================================================
+# CONFIG
+# ============================================================
+
 USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/120.0.0.0 Safari/537.36"
 )
 
-CORE_API_BASE = "https://sports.core.api.espn.com/v2/sports/football/leagues/nfl"
+CORE_API_BASE = (
+    "https://sports.core.api.espn.com/v2/"
+    "sports/football/leagues/nfl"
+)
 
 SUPABASE_PUBLIC_BASE = (
     "https://rojsabkwywygludonpdf.supabase.co/"
@@ -24,7 +31,10 @@ SUPABASE_PUBLIC_BASE = (
 )
 
 
-# HARDCODED DIVISIONS
+# ============================================================
+# TEAM → DIVISION MAPPING
+# ============================================================
+
 TEAM_TO_DIV: Dict[str, str] = {
     # AFC East
     "Buffalo Bills": "East",
@@ -77,8 +87,15 @@ TEAM_TO_DIV: Dict[str, str] = {
 
 
 def hardcoded_div(team_name: str) -> str:
-    return TEAM_TO_DIV.get((team_name or "").strip(), "")
+    return TEAM_TO_DIV.get(
+        (team_name or "").strip(),
+        "",
+    )
 
+
+# ============================================================
+# DATA MODEL
+# ============================================================
 
 @dataclass
 class TeamRow:
@@ -91,9 +108,13 @@ class TeamRow:
     espn_seed: Optional[int] = None
 
 
+# ============================================================
+# ESPN CORE API
+# ============================================================
+
 def core_get_json(url: str) -> dict:
     """
-    Fetch JSON from ESPN Core API.
+    Fetch JSON from ESPN's Core API.
     """
 
     if url.startswith("http://"):
@@ -105,23 +126,31 @@ def core_get_json(url: str) -> dict:
         "Accept-Language": "en-US,en;q=0.9",
     }
 
-    r = requests.get(
+    response = requests.get(
         url,
         headers=headers,
         timeout=25,
     )
 
-    r.raise_for_status()
+    response.raise_for_status()
 
-    return r.json()
+    return response.json()
 
 
-def get_json(season: int) -> dict:
+def get_json(season: int) -> Dict[str, dict]:
     """
-    Fetch AFC and NFC regular-season standings.
+    Fetch the actual overall AFC and NFC standings tables.
 
-    AFC group = 8
-    NFC group = 7
+    ESPN group IDs:
+
+        AFC = 8
+        NFC = 7
+
+    standings/0 is the overall standings table.
+
+    Example:
+
+        /seasons/2025/types/2/groups/8/standings/0
     """
 
     conference_ids = {
@@ -138,72 +167,108 @@ def get_json(season: int) -> dict:
             f"seasons/{season}/"
             f"types/2/"
             f"groups/{group_id}/"
-            f"standings"
+            f"standings/0"
         )
 
-        print(f"Fetching {conference}: {url}")
+        print(
+            f"Fetching {conference}: {url}"
+        )
 
-        data[conference] = core_get_json(url)
+        data[conference] = core_get_json(
+            url
+        )
 
     return data
 
 
-def to_int(v: Any) -> int:
+# ============================================================
+# BASIC HELPERS
+# ============================================================
+
+def to_int(value: Any) -> int:
     try:
-        return int(float(str(v).strip()))
+        return int(
+            float(
+                str(value).strip()
+            )
+        )
     except Exception:
         return 0
 
 
-def normalize_division_name(name: str) -> str:
+def normalize_division_name(
+    name: str,
+) -> str:
+
     if not name:
         return ""
 
-    n = name.strip().lower()
+    normalized = (
+        name
+        .strip()
+        .lower()
+    )
 
-    if "east" in n:
+    if "east" in normalized:
         return "East"
 
-    if "north" in n:
+    if "north" in normalized:
         return "North"
 
-    if "south" in n:
+    if "south" in normalized:
         return "South"
 
-    if "west" in n:
+    if "west" in normalized:
         return "West"
 
     return ""
 
 
-def extract_stats(entry: dict) -> Tuple[int, int, int]:
+# ============================================================
+# STATS PARSING
+# ============================================================
 
-    w = 0
-    l = 0
-    t = 0
+def extract_stats(
+    entry: dict,
+) -> Tuple[int, int, int]:
 
-    stats = entry.get("stats", []) or []
+    wins = 0
+    losses = 0
+    ties = 0
+
+    stats = (
+        entry.get("stats", [])
+        or []
+    )
 
     for stat in stats:
 
-        if not isinstance(stat, dict):
+        if not isinstance(
+            stat,
+            dict,
+        ):
             continue
 
         name = str(
-            stat.get("name") or ""
+            stat.get("name")
+            or ""
         ).strip().lower()
 
         display_name = str(
-            stat.get("displayName") or ""
+            stat.get("displayName")
+            or ""
         ).strip().lower()
 
         abbreviation = str(
-            stat.get("abbreviation") or ""
+            stat.get("abbreviation")
+            or ""
         ).strip().lower()
 
         value = stat.get(
             "value",
-            stat.get("displayValue"),
+            stat.get(
+                "displayValue"
+            ),
         )
 
         if (
@@ -211,56 +276,81 @@ def extract_stats(entry: dict) -> Tuple[int, int, int]:
             or display_name == "wins"
             or abbreviation == "w"
         ):
-            w = to_int(value)
+            wins = to_int(
+                value
+            )
 
         elif (
             name == "losses"
             or display_name == "losses"
             or abbreviation == "l"
         ):
-            l = to_int(value)
+            losses = to_int(
+                value
+            )
 
         elif (
             name == "ties"
             or display_name == "ties"
             or abbreviation == "t"
         ):
-            t = to_int(value)
+            ties = to_int(
+                value
+            )
 
-    return w, l, t
+    return (
+        wins,
+        losses,
+        ties,
+    )
 
 
-def extract_espn_seed(entry: dict) -> Optional[int]:
+def extract_espn_seed(
+    entry: dict,
+) -> Optional[int]:
 
-    stats = entry.get("stats", []) or []
+    stats = (
+        entry.get("stats", [])
+        or []
+    )
 
     for stat in stats:
 
-        if not isinstance(stat, dict):
+        if not isinstance(
+            stat,
+            dict,
+        ):
             continue
 
         name = (
-            stat.get("name") or ""
-        ).lower().replace("_", "")
+            stat.get("name")
+            or ""
+        ).lower().replace(
+            "_",
+            "",
+        )
 
         display_name = (
-            stat.get("displayName") or ""
-        ).lower().replace(" ", "")
+            stat.get("displayName")
+            or ""
+        ).lower().replace(
+            " ",
+            "",
+        )
 
         abbreviation = (
-            stat.get("abbreviation") or ""
+            stat.get("abbreviation")
+            or ""
         ).lower()
 
         if (
-            name
-            in (
+            name in (
                 "seed",
                 "playoffseed",
                 "rank",
                 "conferencerank",
             )
-            or display_name
-            in (
+            or display_name in (
                 "seed",
                 "playoffseed",
                 "rank",
@@ -271,10 +361,14 @@ def extract_espn_seed(entry: dict) -> Optional[int]:
 
             value = stat.get(
                 "value",
-                stat.get("displayValue"),
+                stat.get(
+                    "displayValue"
+                ),
             )
 
-            seed = to_int(value)
+            seed = to_int(
+                value
+            )
 
             if seed > 0:
                 return seed
@@ -282,43 +376,76 @@ def extract_espn_seed(entry: dict) -> Optional[int]:
     return None
 
 
-def _find_entries(obj: Any) -> List[dict]:
+# ============================================================
+# ENTRY DISCOVERY
+# ============================================================
+
+def _find_entries(
+    obj: Any,
+) -> List[dict]:
     """
-    Recursively search an ESPN response for a standings entries list.
+    Recursively search ESPN's JSON for the standings entries list.
     """
 
-    if isinstance(obj, dict):
+    if isinstance(
+        obj,
+        dict,
+    ):
 
-        entries = obj.get("entries")
+        entries = obj.get(
+            "entries"
+        )
 
-        if isinstance(entries, list) and entries:
+        if (
+            isinstance(
+                entries,
+                list,
+            )
+            and entries
+        ):
 
-            if any(
-                isinstance(item, dict)
+            has_standing_rows = any(
+                isinstance(
+                    item,
+                    dict,
+                )
                 and (
                     "team" in item
                     or "stats" in item
                 )
                 for item in entries
-            ):
+            )
+
+            if has_standing_rows:
+
                 return [
                     item
                     for item in entries
-                    if isinstance(item, dict)
+                    if isinstance(
+                        item,
+                        dict,
+                    )
                 ]
 
         for value in obj.values():
 
-            found = _find_entries(value)
+            found = _find_entries(
+                value
+            )
 
             if found:
                 return found
 
-    elif isinstance(obj, list):
+    elif isinstance(
+        obj,
+        list,
+    ):
 
         for item in obj:
 
-            found = _find_entries(item)
+            found = _find_entries(
+                item
+            )
 
             if found:
                 return found
@@ -326,134 +453,105 @@ def _find_entries(obj: Any) -> List[dict]:
     return []
 
 
-def _overall_entries(payload: dict) -> List[dict]:
+def _overall_entries(
+    payload: dict,
+) -> List[dict]:
     """
-    ESPN Core standings returns references to standings tables.
+    We directly request standings/0.
 
-    Follow the $ref for the overall standings table and retrieve the
-    actual team entries.
+    Therefore this payload should already represent the
+    overall standings table.
+
+    Simply search it for the team entries.
     """
 
-    items = payload.get("items") or []
-
-    if isinstance(items, list):
-
-        #
-        # First look specifically for the overall standings table.
-        #
-        for item in items:
-
-            if not isinstance(item, dict):
-                continue
-
-            name = str(
-                item.get("name") or ""
-            ).strip().lower()
-
-            display_name = str(
-                item.get("displayName") or ""
-            ).strip().lower()
-
-            ref = str(
-                item.get("$ref") or ""
-            ).strip()
-
-            if (
-                name == "overall"
-                or "overall" in display_name
-                or name == "playoff"
-            ):
-
-                if ref:
-
-                    detailed = core_get_json(ref)
-
-                    entries = _find_entries(detailed)
-
-                    if entries:
-                        return entries
-
-                entries = _find_entries(item)
-
-                if entries:
-                    return entries
-
-        #
-        # Fallback:
-        # follow every standings reference until one contains team rows.
-        #
-        for item in items:
-
-            if not isinstance(item, dict):
-                continue
-
-            ref = str(
-                item.get("$ref") or ""
-            ).strip()
-
-            if not ref:
-                continue
-
-            detailed = core_get_json(ref)
-
-            entries = _find_entries(detailed)
-
-            if entries:
-                return entries
-
-    #
-    # Final fallback in case ESPN embeds entries directly.
-    #
-    return _find_entries(payload)
+    return _find_entries(
+        payload
+    )
 
 
-def _team_id_from_ref(ref: str) -> str:
+# ============================================================
+# TEAM RESOLUTION
+# ============================================================
+
+def _team_id_from_ref(
+    ref: str,
+) -> str:
 
     if not ref:
         return ""
 
-    clean = ref.rstrip("/")
+    clean_ref = ref.rstrip(
+        "/"
+    )
 
-    last = clean.split("/")[-1]
+    last_part = (
+        clean_ref
+        .split("/")[-1]
+    )
 
-    if last.isdigit():
-        return last
+    if last_part.isdigit():
+        return last_part
 
     return ""
 
 
-def _resolve_team(team_obj: Any) -> Tuple[str, str]:
+def _resolve_team(
+    team_obj: Any,
+) -> Tuple[str, str]:
     """
-    Resolve ESPN team reference into team ID and team display name.
+    ESPN Core API may provide either:
+
+    1. A full team object
+    2. A $ref pointing to the team
+
+    Resolve either form.
     """
 
-    if not isinstance(team_obj, dict):
+    if not isinstance(
+        team_obj,
+        dict,
+    ):
         return "", ""
 
     team_id = str(
-        team_obj.get("id") or ""
+        team_obj.get("id")
+        or ""
     ).strip()
 
     team_name = str(
         team_obj.get("displayName")
-        or team_obj.get("shortDisplayName")
+        or team_obj.get(
+            "shortDisplayName"
+        )
         or team_obj.get("name")
         or ""
     ).strip()
 
     ref = str(
-        team_obj.get("$ref") or ""
+        team_obj.get("$ref")
+        or ""
     ).strip()
 
-    if not team_id and ref:
-        team_id = _team_id_from_ref(ref)
+    if (
+        not team_id
+        and ref
+    ):
+        team_id = _team_id_from_ref(
+            ref
+        )
 
     if team_name:
-        return team_id, team_name
+        return (
+            team_id,
+            team_name,
+        )
 
     if ref:
 
-        resolved = core_get_json(ref)
+        resolved = core_get_json(
+            ref
+        )
 
         team_id = str(
             resolved.get("id")
@@ -461,122 +559,205 @@ def _resolve_team(team_obj: Any) -> Tuple[str, str]:
         ).strip()
 
         team_name = str(
-            resolved.get("displayName")
-            or resolved.get("shortDisplayName")
-            or resolved.get("name")
+            resolved.get(
+                "displayName"
+            )
+            or resolved.get(
+                "shortDisplayName"
+            )
+            or resolved.get(
+                "name"
+            )
             or ""
         ).strip()
 
-    return team_id, team_name
+    return (
+        team_id,
+        team_name,
+    )
 
+
+# ============================================================
+# CONFERENCE EXTRACTION
+# ============================================================
 
 def extract_conferences(
-    data: dict,
+    data: Dict[str, dict],
 ) -> Dict[str, List[TeamRow]]:
 
-    conferences: Dict[str, List[TeamRow]] = {
+    conferences: Dict[
+        str,
+        List[TeamRow],
+    ] = {
         "AFC": [],
         "NFC": [],
     }
 
-    for conference in ("AFC", "NFC"):
+    for conference in (
+        "AFC",
+        "NFC",
+    ):
 
-        payload = data.get(conference) or {}
+        payload = (
+            data.get(
+                conference
+            )
+            or {}
+        )
 
-        entries = _overall_entries(payload)
+        entries = _overall_entries(
+            payload
+        )
 
         print(
             f"{conference}: "
-            f"found {len(entries)} raw standings entries"
+            f"found {len(entries)} "
+            f"raw standings entries"
         )
 
-        rows: List[TeamRow] = []
+        rows: List[
+            TeamRow
+        ] = []
 
         for entry in entries:
 
-            team_obj = entry.get("team") or {}
+            team_obj = (
+                entry.get("team")
+                or {}
+            )
 
-            team_id, team_name = _resolve_team(
-                team_obj
+            team_id, team_name = (
+                _resolve_team(
+                    team_obj
+                )
             )
 
             if not team_name:
                 continue
 
-            w, l, t = extract_stats(entry)
+            wins, losses, ties = (
+                extract_stats(
+                    entry
+                )
+            )
 
-            seed = extract_espn_seed(entry)
+            seed = extract_espn_seed(
+                entry
+            )
+
+            division = hardcoded_div(
+                team_name
+            )
 
             rows.append(
                 TeamRow(
                     team_id=team_id,
                     team_name=team_name,
-                    division=hardcoded_div(
-                        team_name
-                    ),
-                    w=w,
-                    l=l,
-                    t=t,
+                    division=division,
+                    w=wins,
+                    l=losses,
+                    t=ties,
                     espn_seed=seed,
                 )
             )
 
-        #
-        # Remove duplicate teams while preserving ESPN order.
-        #
+        # --------------------------------------------
+        # Remove duplicate teams while preserving
+        # original ESPN ordering.
+        # --------------------------------------------
+
         seen = set()
 
-        unique_rows: List[TeamRow] = []
+        unique_rows: List[
+            TeamRow
+        ] = []
 
         for row in rows:
 
-            key = row.team_id or row.team_name
+            key = (
+                row.team_id
+                or row.team_name
+            )
 
-            if key and key not in seen:
+            if (
+                key
+                and key not in seen
+            ):
 
-                seen.add(key)
+                seen.add(
+                    key
+                )
 
-                unique_rows.append(row)
+                unique_rows.append(
+                    row
+                )
 
-        #
-        # Use ESPN seed if most rows include one.
-        #
-        seeded = [
+        # --------------------------------------------
+        # If ESPN provides conference seed/rank for
+        # most teams, use that ordering.
+        # --------------------------------------------
+
+        seeded_rows = [
             row
             for row in unique_rows
-            if isinstance(
-                row.espn_seed,
-                int,
+            if (
+                isinstance(
+                    row.espn_seed,
+                    int,
+                )
+                and row.espn_seed > 0
             )
-            and row.espn_seed > 0
         ]
 
-        if len(seeded) >= max(
-            4,
-            int(
-                0.8
-                * len(unique_rows)
-            ),
-        ):
+        if len(
+            unique_rows
+        ) > 0:
 
-            unique_rows = sorted(
-                unique_rows,
-                key=lambda row: (
-                    row.espn_seed
-                    if row.espn_seed is not None
-                    else 999
+            threshold = max(
+                4,
+                int(
+                    0.8
+                    * len(
+                        unique_rows
+                    )
                 ),
             )
 
-        conferences[conference] = unique_rows
+            if (
+                len(
+                    seeded_rows
+                )
+                >= threshold
+            ):
+
+                unique_rows = sorted(
+                    unique_rows,
+                    key=lambda row: (
+                        row.espn_seed
+                        if (
+                            row.espn_seed
+                            is not None
+                        )
+                        else 999
+                    ),
+                )
+
+        conferences[
+            conference
+        ] = unique_rows
 
         print(
             f"{conference}: "
-            f"parsed {len(unique_rows)} teams"
+            f"parsed "
+            f"{len(unique_rows)} teams"
         )
 
     return conferences
 
+
+# ============================================================
+# FONT HELPERS
+# ============================================================
 
 def get_font(
     size: int,
@@ -591,20 +772,32 @@ def get_font(
     for path in candidates:
 
         try:
-            return ImageFont.truetype(
-                path,
-                size=size,
+
+            return (
+                ImageFont.truetype(
+                    path,
+                    size=size,
+                )
             )
 
         except Exception:
             pass
 
-    return ImageFont.load_default()
+    return (
+        ImageFont.load_default()
+    )
 
+
+# ============================================================
+# POSTER RENDERING
+# ============================================================
 
 def render_conference_poster(
     season: int,
-    conferences: Dict[str, List[TeamRow]],
+    conferences: Dict[
+        str,
+        List[TeamRow],
+    ],
     out_path: str,
 ):
 
@@ -639,44 +832,58 @@ def render_conference_poster(
         for path in candidates:
 
             try:
-                return ImageFont.truetype(
-                    path,
-                    size=size,
+
+                return (
+                    ImageFont.truetype(
+                        path,
+                        size=size,
+                    )
                 )
 
             except Exception:
                 pass
 
-        return ImageFont.load_default()
+        return (
+            ImageFont.load_default()
+        )
 
     def fit_font(
         draw: ImageDraw.ImageDraw,
-        text: str,
+        text_value: str,
         max_width: int,
         start_size: int,
         min_size: int = 18,
         bold: bool = False,
     ):
 
-        size = start_size
+        current_size = (
+            start_size
+        )
 
-        while size >= min_size:
+        while (
+            current_size
+            >= min_size
+        ):
 
             font = get_font_local(
-                size,
+                current_size,
                 bold=bold,
             )
 
-            if (
+            text_width = (
                 draw.textlength(
-                    text,
+                    text_value,
                     font=font,
                 )
+            )
+
+            if (
+                text_width
                 <= max_width
             ):
                 return font
 
-            size -= 1
+            current_size -= 1
 
         return get_font_local(
             min_size,
@@ -685,34 +892,39 @@ def render_conference_poster(
 
     def draw_vertical_gradient(
         draw: ImageDraw.ImageDraw,
-        width: int,
-        height: int,
+        canvas_width: int,
+        canvas_height: int,
         top_color,
         bottom_color,
     ):
 
-        for yy in range(height):
+        for yy in range(
+            canvas_height
+        ):
 
-            ratio = yy / max(
-                1,
-                height - 1,
+            ratio = (
+                yy
+                / max(
+                    1,
+                    canvas_height - 1,
+                )
             )
 
-            r = int(
+            red = int(
                 top_color[0]
                 * (1 - ratio)
                 + bottom_color[0]
                 * ratio
             )
 
-            g = int(
+            green = int(
                 top_color[1]
                 * (1 - ratio)
                 + bottom_color[1]
                 * ratio
             )
 
-            b = int(
+            blue = int(
                 top_color[2]
                 * (1 - ratio)
                 + bottom_color[2]
@@ -723,39 +935,115 @@ def render_conference_poster(
                 (
                     0,
                     yy,
-                    width,
+                    canvas_width,
                     yy,
                 ),
-                fill=(r, g, b),
+                fill=(
+                    red,
+                    green,
+                    blue,
+                ),
             )
 
-    bg_top = (6, 30, 88)
-    bg_bottom = (3, 10, 28)
+    # ========================================================
+    # COLORS
+    # ========================================================
 
-    outer_border = (120, 185, 255)
+    bg_top = (
+        6,
+        30,
+        88,
+    )
 
-    panel = (10, 28, 72)
-    panel_2 = (14, 39, 96)
+    bg_bottom = (
+        3,
+        10,
+        28,
+    )
 
-    title_bar = (23, 62, 150)
-    title_bar_hi = (45, 100, 220)
+    outer_border = (
+        120,
+        185,
+        255,
+    )
 
-    table_header = (15, 43, 104)
+    panel = (
+        10,
+        28,
+        72,
+    )
 
-    row_a = (10, 31, 78)
-    row_b = (16, 40, 95)
+    panel_2 = (
+        14,
+        39,
+        96,
+    )
 
-    grid = (78, 132, 228)
+    title_bar = (
+        23,
+        62,
+        150,
+    )
 
-    text = (245, 248, 255)
+    title_bar_hi = (
+        45,
+        100,
+        220,
+    )
 
-    muted = (192, 208, 242)
+    table_header = (
+        15,
+        43,
+        104,
+    )
 
-    accent = (154, 204, 255)
+    row_a = (
+        10,
+        31,
+        78,
+    )
 
-    gold = (255, 214, 90)
+    row_b = (
+        16,
+        40,
+        95,
+    )
 
-    img = Image.new(
+    grid = (
+        78,
+        132,
+        228,
+    )
+
+    text_color = (
+        245,
+        248,
+        255,
+    )
+
+    muted = (
+        192,
+        208,
+        242,
+    )
+
+    accent = (
+        154,
+        204,
+        255,
+    )
+
+    gold = (
+        255,
+        214,
+        90,
+    )
+
+    # ========================================================
+    # CANVAS
+    # ========================================================
+
+    image = Image.new(
         "RGB",
         (
             width,
@@ -764,7 +1052,9 @@ def render_conference_poster(
         bg_bottom,
     )
 
-    draw = ImageDraw.Draw(img)
+    draw = ImageDraw.Draw(
+        image
+    )
 
     draw_vertical_gradient(
         draw,
@@ -802,29 +1092,47 @@ def render_conference_poster(
         width=1,
     )
 
-    section_font = get_font_local(
-        36,
-        bold=True,
+    # ========================================================
+    # FONTS
+    # ========================================================
+
+    section_font = (
+        get_font_local(
+            36,
+            bold=True,
+        )
     )
 
-    header_font = get_font_local(
-        22,
-        bold=True,
+    header_font = (
+        get_font_local(
+            22,
+            bold=True,
+        )
     )
 
-    seed_font = get_font_local(
-        28,
-        bold=True,
+    seed_font = (
+        get_font_local(
+            28,
+            bold=True,
+        )
     )
 
-    stat_font = get_font_local(
-        28,
-        bold=False,
+    stat_font = (
+        get_font_local(
+            28,
+            bold=False,
+        )
     )
+
+    # ========================================================
+    # TOP HEADER
+    # ========================================================
 
     left = 38
 
-    right = width - 38
+    right = (
+        width - 38
+    )
 
     y = 38
 
@@ -854,13 +1162,17 @@ def render_conference_poster(
         fill=panel_2,
     )
 
-    title = f"NFL STANDINGS {season}"
+    title = (
+        f"NFL STANDINGS {season}"
+    )
 
     max_title_width = (
-        right - left
-    ) - 60
+        right
+        - left
+        - 60
+    )
 
-    fitted_title_font = fit_font(
+    title_font = fit_font(
         draw,
         title,
         max_title_width,
@@ -869,44 +1181,63 @@ def render_conference_poster(
         bold=True,
     )
 
-    tw = draw.textlength(
-        title,
-        font=fitted_title_font,
+    title_width = (
+        draw.textlength(
+            title,
+            font=title_font,
+        )
     )
 
-    th = fitted_title_font.size
+    title_height = (
+        title_font.size
+    )
 
     draw.text(
         (
-            (width - tw) / 2,
+            (
+                width
+                - title_width
+            )
+            / 2,
             y
             + (
-                top_h - th
+                top_h
+                - title_height
             )
             / 2
             - 8,
         ),
         title,
-        fill=text,
-        font=fitted_title_font,
+        fill=text_color,
+        font=title_font,
     )
 
-    y += top_h + 24
+    y += (
+        top_h
+        + 24
+    )
+
+    # ========================================================
+    # CONFERENCE SECTIONS
+    # ========================================================
 
     section_gap = 24
 
     bottom_margin = 34
 
-    available_h = (
+    available_height = (
         height
         - y
         - bottom_margin
     )
 
-    section_h = (
-        available_h
-        - section_gap
-    ) // 2
+    section_height = (
+        (
+            available_height
+            - section_gap
+        )
+        // 2
+    )
 
     headers = [
         "#",
@@ -917,7 +1248,7 @@ def render_conference_poster(
         "T",
     ]
 
-    col_fracs = [
+    column_fractions = [
         0.10,
         0.52,
         0.14,
@@ -928,13 +1259,13 @@ def render_conference_poster(
 
     def draw_section(
         top_y: int,
-        title: str,
+        section_title: str,
         rows: List[TeamRow],
     ):
 
-        sec_bottom = (
+        section_bottom = (
             top_y
-            + section_h
+            + section_height
         )
 
         draw.rounded_rectangle(
@@ -942,7 +1273,7 @@ def render_conference_poster(
                 left,
                 top_y,
                 right,
-                sec_bottom,
+                section_bottom,
             ),
             radius=28,
             fill=panel,
@@ -951,7 +1282,7 @@ def render_conference_poster(
         )
 
         bar_margin = 16
-        bar_h = 58
+        bar_height = 58
 
         draw.rounded_rectangle(
             (
@@ -960,7 +1291,7 @@ def render_conference_poster(
                 right - bar_margin,
                 top_y
                 + bar_margin
-                + bar_h,
+                + bar_height,
             ),
             radius=18,
             fill=title_bar,
@@ -974,59 +1305,77 @@ def render_conference_poster(
                 top_y
                 + bar_margin
                 + (
-                    bar_h // 2
+                    bar_height // 2
                 ),
             ),
             radius=18,
             fill=title_bar_hi,
         )
 
-        tw = draw.textlength(
-            title,
-            font=section_font,
+        section_title_width = (
+            draw.textlength(
+                section_title,
+                font=section_font,
+            )
         )
 
         draw.text(
             (
-                (width - tw) / 2,
+                (
+                    width
+                    - section_title_width
+                )
+                / 2,
                 top_y
                 + bar_margin
                 + 9,
             ),
-            title,
-            fill=text,
+            section_title,
+            fill=text_color,
             font=section_font,
         )
 
-        table_left = left + 16
+        # ====================================================
+        # TABLE
+        # ====================================================
 
-        table_right = right - 16
+        table_left = (
+            left + 16
+        )
 
-        table_w = (
+        table_right = (
+            right - 16
+        )
+
+        table_width = (
             table_right
             - table_left
         )
 
-        px = [
+        column_widths = [
             int(
-                table_w * fraction
+                table_width
+                * fraction
             )
-            for fraction in col_fracs
+            for fraction
+            in column_fractions
         ]
 
-        px[-1] += (
-            table_w
-            - sum(px)
+        column_widths[-1] += (
+            table_width
+            - sum(
+                column_widths
+            )
         )
 
         header_y = (
             top_y
             + bar_margin
-            + bar_h
+            + bar_height
             + 16
         )
 
-        header_h = 46
+        header_height = 46
 
         draw.rounded_rectangle(
             (
@@ -1034,7 +1383,7 @@ def render_conference_poster(
                 header_y,
                 table_right,
                 header_y
-                + header_h,
+                + header_height,
             ),
             radius=14,
             fill=table_header,
@@ -1042,48 +1391,60 @@ def render_conference_poster(
 
         x = table_left
 
-        for i, h in enumerate(
+        for index, header in enumerate(
             headers
         ):
 
-            if i in (0, 1):
+            if index in (
+                0,
+                1,
+            ):
 
                 draw.text(
                     (
                         x + 12,
                         header_y + 10,
                     ),
-                    h,
+                    header,
                     fill=muted,
                     font=header_font,
                 )
 
             else:
 
-                tw = draw.textlength(
-                    h,
-                    font=header_font,
+                header_width = (
+                    draw.textlength(
+                        header,
+                        font=header_font,
+                    )
                 )
 
                 draw.text(
                     (
                         x
-                        + px[i]
+                        + column_widths[
+                            index
+                        ]
                         - 12
-                        - tw,
+                        - header_width,
                         header_y
                         + 10,
                     ),
-                    h,
+                    header,
                     fill=muted,
                     font=header_font,
                 )
 
-            x += px[i]
+            x += column_widths[
+                index
+            ]
 
             if (
-                i
-                != len(headers) - 1
+                index
+                != len(
+                    headers
+                )
+                - 1
             ):
 
                 draw.line(
@@ -1092,53 +1453,63 @@ def render_conference_poster(
                         header_y + 7,
                         x,
                         header_y
-                        + header_h
+                        + header_height
                         - 7,
                     ),
                     fill=grid,
                     width=1,
                 )
 
+        # ====================================================
+        # ROWS
+        # ====================================================
+
         rows_top = (
             header_y
-            + header_h
+            + header_height
             + 10
         )
 
         rows_bottom = (
-            sec_bottom - 18
+            section_bottom
+            - 18
         )
 
-        n_rows = max(
+        number_of_rows = max(
             1,
             len(rows),
         )
 
-        gap = 6
+        row_gap = 6
 
-        usable_h = (
+        usable_height = (
             rows_bottom
             - rows_top
-            - gap
+            - row_gap
             * (
-                n_rows - 1
+                number_of_rows - 1
             )
         )
 
-        row_h = max(
+        row_height = max(
             34,
-            usable_h // n_rows,
+            usable_height
+            // number_of_rows,
         )
 
-        current_y = rows_top
+        current_y = (
+            rows_top
+        )
 
-        for idx, row in enumerate(
+        for index, row in enumerate(
             rows
         ):
 
-            fill = (
+            fill_color = (
                 row_a
-                if idx % 2 == 0
+                if (
+                    index % 2 == 0
+                )
                 else row_b
             )
 
@@ -1148,17 +1519,17 @@ def render_conference_poster(
                     current_y,
                     table_right,
                     current_y
-                    + row_h,
+                    + row_height,
                 ),
                 radius=14,
-                fill=fill,
+                fill=fill_color,
             )
 
             seed = str(
-                idx + 1
+                index + 1
             )
 
-            div = (
+            division = (
                 row.division
                 or hardcoded_div(
                     row.team_name
@@ -1168,32 +1539,47 @@ def render_conference_poster(
             values = [
                 seed,
                 row.team_name,
-                div,
-                str(row.w),
-                str(row.l),
-                str(row.t),
+                division,
+                str(
+                    row.w
+                ),
+                str(
+                    row.l
+                ),
+                str(
+                    row.t
+                ),
             ]
 
-            x = table_left
+            x = (
+                table_left
+            )
 
-            for c_i, value in enumerate(
+            for column_index, value in enumerate(
                 values
             ):
 
-                if c_i == 0:
+                # --------------------------------------------
+                # SEED
+                # --------------------------------------------
+
+                if (
+                    column_index == 0
+                ):
 
                     text_y = (
                         current_y
                         + (
-                            row_h - 28
+                            row_height
+                            - 28
                         )
                         / 2
                         - 2
                     )
 
-                    color = (
+                    seed_color = (
                         gold
-                        if idx < 7
+                        if index < 7
                         else accent
                     )
 
@@ -1203,30 +1589,40 @@ def render_conference_poster(
                             text_y,
                         ),
                         value,
-                        fill=color,
+                        fill=seed_color,
                         font=seed_font,
                     )
 
-                elif c_i == 1:
+                # --------------------------------------------
+                # TEAM
+                # --------------------------------------------
 
-                    max_team_w = (
-                        px[c_i]
+                elif (
+                    column_index == 1
+                ):
+
+                    max_team_width = (
+                        column_widths[
+                            column_index
+                        ]
                         - 24
                     )
 
-                    team_font = fit_font(
-                        draw,
-                        value,
-                        max_team_w,
-                        28,
-                        18,
-                        bold=False,
+                    team_font = (
+                        fit_font(
+                            draw,
+                            value,
+                            max_team_width,
+                            28,
+                            18,
+                            bold=False,
+                        )
                     )
 
                     text_y = (
                         current_y
                         + (
-                            row_h
+                            row_height
                             - team_font.size
                         )
                         / 2
@@ -1239,21 +1635,28 @@ def render_conference_poster(
                             text_y,
                         ),
                         value,
-                        fill=text,
+                        fill=text_color,
                         font=team_font,
                     )
 
+                # --------------------------------------------
+                # DIVISION / RECORD
+                # --------------------------------------------
+
                 else:
 
-                    tw = draw.textlength(
-                        value,
-                        font=stat_font,
+                    value_width = (
+                        draw.textlength(
+                            value,
+                            font=stat_font,
+                        )
                     )
 
                     text_y = (
                         current_y
                         + (
-                            row_h - 28
+                            row_height
+                            - 28
                         )
                         / 2
                         - 2
@@ -1262,21 +1665,28 @@ def render_conference_poster(
                     draw.text(
                         (
                             x
-                            + px[c_i]
+                            + column_widths[
+                                column_index
+                            ]
                             - 12
-                            - tw,
+                            - value_width,
                             text_y,
                         ),
                         value,
-                        fill=text,
+                        fill=text_color,
                         font=stat_font,
                     )
 
-                x += px[c_i]
+                x += column_widths[
+                    column_index
+                ]
 
                 if (
-                    c_i
-                    != len(values) - 1
+                    column_index
+                    != len(
+                        values
+                    )
+                    - 1
                 ):
 
                     draw.line(
@@ -1285,7 +1695,7 @@ def render_conference_poster(
                             current_y + 7,
                             x,
                             current_y
-                            + row_h
+                            + row_height
                             - 7,
                         ),
                         fill=grid,
@@ -1293,8 +1703,13 @@ def render_conference_poster(
                     )
 
             current_y += (
-                row_h + gap
+                row_height
+                + row_gap
             )
+
+    # ========================================================
+    # DRAW AFC
+    # ========================================================
 
     draw_section(
         y,
@@ -1305,9 +1720,13 @@ def render_conference_poster(
         ),
     )
 
+    # ========================================================
+    # DRAW NFC
+    # ========================================================
+
     draw_section(
         y
-        + section_h
+        + section_height
         + section_gap,
         "NFC",
         conferences.get(
@@ -1316,18 +1735,37 @@ def render_conference_poster(
         ),
     )
 
-    img.save(out_path)
+    # ========================================================
+    # SAVE
+    # ========================================================
 
+    image.save(
+        out_path
+    )
+
+
+# ============================================================
+# GENERATE POSTER
+# ============================================================
 
 def generate_standings_conference_png(
     season: int,
     out_path: str,
 ) -> str:
 
-    data = get_json(season)
+    print(
+        f"Generating standings "
+        f"for season {season}"
+    )
 
-    conferences = extract_conferences(
-        data
+    data = get_json(
+        season
+    )
+
+    conferences = (
+        extract_conferences(
+            data
+        )
     )
 
     afc_count = len(
@@ -1345,7 +1783,7 @@ def generate_standings_conference_png(
     )
 
     print(
-        f"Final standings counts: "
+        "Final standings counts: "
         f"AFC={afc_count}, "
         f"NFC={nfc_count}"
     )
@@ -1357,8 +1795,10 @@ def generate_standings_conference_png(
 
         raise RuntimeError(
             "ESPN Core API returned standings, "
-            "but the parser could not find both conferences "
-            f"(AFC={afc_count}, NFC={nfc_count})."
+            "but the parser could not find "
+            "both conferences "
+            f"(AFC={afc_count}, "
+            f"NFC={nfc_count})."
         )
 
     render_conference_poster(
@@ -1367,17 +1807,29 @@ def generate_standings_conference_png(
         out_path,
     )
 
+    print(
+        f"Standings poster saved: "
+        f"{out_path}"
+    )
+
     return out_path
 
+
+# ============================================================
+# EXISTING PUBLIC URL HELPER
+# ============================================================
 
 def generate_and_upload_standings_conference(
     season: int,
 ) -> str:
 
-    timestamp = datetime.now(
-        timezone.utc
-    ).strftime(
-        "%Y%m%dT%H%M%SZ"
+    timestamp = (
+        datetime.now(
+            timezone.utc
+        )
+        .strftime(
+            "%Y%m%dT%H%M%SZ"
+        )
     )
 
     return (
@@ -1387,9 +1839,15 @@ def generate_and_upload_standings_conference(
     )
 
 
+# ============================================================
+# CLI
+# ============================================================
+
 def main():
 
-    parser = argparse.ArgumentParser()
+    parser = (
+        argparse.ArgumentParser()
+    )
 
     parser.add_argument(
         "--season",
@@ -1400,10 +1858,14 @@ def main():
     parser.add_argument(
         "--out",
         type=str,
-        default="standings_conference.png",
+        default=(
+            "standings_conference.png"
+        ),
     )
 
-    args = parser.parse_args()
+    args = (
+        parser.parse_args()
+    )
 
     generate_standings_conference_png(
         args.season,
@@ -1411,25 +1873,35 @@ def main():
     )
 
     print(
-        f"✅ Saved: {args.out}"
+        f"✅ Saved: "
+        f"{args.out}"
     )
 
+
+# ============================================================
+# ENTRY POINT
+# ============================================================
 
 if __name__ == "__main__":
 
     try:
+
         main()
 
     except KeyboardInterrupt:
 
-        print("\nStopped.")
+        print(
+            "\nStopped."
+        )
 
-        sys.exit(130)
+        sys.exit(
+            130
+        )
 
-    except Exception as e:
+    except Exception as exc:
 
         print(
-            f"❌ Error: {e}"
+            f"❌ Error: {exc}"
         )
 
         raise
