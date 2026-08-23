@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import json
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -32,7 +33,7 @@ SUPABASE_PUBLIC_BASE = (
 
 
 # ============================================================
-# TEAM → DIVISION MAPPING
+# TEAM -> DIVISION
 # ============================================================
 
 TEAM_TO_DIV: Dict[str, str] = {
@@ -109,12 +110,12 @@ class TeamRow:
 
 
 # ============================================================
-# ESPN CORE API
+# ESPN CORE API REQUEST
 # ============================================================
 
 def core_get_json(url: str) -> dict:
     """
-    Fetch JSON from ESPN's Core API.
+    Fetch JSON from ESPN Core API.
     """
 
     if url.startswith("http://"):
@@ -132,6 +133,11 @@ def core_get_json(url: str) -> dict:
         timeout=25,
     )
 
+    print(
+        f"HTTP {response.status_code} "
+        f"for {response.url}"
+    )
+
     response.raise_for_status()
 
     return response.json()
@@ -139,18 +145,15 @@ def core_get_json(url: str) -> dict:
 
 def get_json(season: int) -> Dict[str, dict]:
     """
-    Fetch the actual overall AFC and NFC standings tables.
+    Fetch the documented conference standings endpoints.
 
-    ESPN group IDs:
+    AFC group = 8
+    NFC group = 7
 
-        AFC = 8
-        NFC = 7
+    IMPORTANT:
+    We intentionally stop at /standings here.
 
-    standings/0 is the overall standings table.
-
-    Example:
-
-        /seasons/2025/types/2/groups/8/standings/0
+    We are NOT using /standings/0.
     """
 
     conference_ids = {
@@ -167,18 +170,262 @@ def get_json(season: int) -> Dict[str, dict]:
             f"seasons/{season}/"
             f"types/2/"
             f"groups/{group_id}/"
-            f"standings/0"
+            f"standings"
         )
 
+        print()
+        print("=" * 80)
         print(
-            f"Fetching {conference}: {url}"
+            f"FETCHING {conference} STANDINGS"
         )
+        print("=" * 80)
 
-        data[conference] = core_get_json(
-            url
+        print(url)
+
+        payload = core_get_json(url)
+
+        data[conference] = payload
+
+        debug_payload_structure(
+            conference,
+            payload,
         )
 
     return data
+
+
+# ============================================================
+# DEBUGGING
+# ============================================================
+
+def debug_payload_structure(
+    conference: str,
+    payload: Any,
+) -> None:
+    """
+    Print enough of the real ESPN response structure to GitHub Actions
+    so we can build the parser against the actual JSON.
+
+    This avoids dumping an enormous JSON response while still showing:
+      - root type
+      - root keys
+      - list lengths
+      - item keys
+      - any $ref values
+      - shallow nested structure
+      - a truncated JSON preview
+    """
+
+    print()
+    print("#" * 80)
+    print(
+        f"{conference} RESPONSE STRUCTURE"
+    )
+    print("#" * 80)
+
+    print(
+        f"Root Python type: "
+        f"{type(payload).__name__}"
+    )
+
+    if isinstance(payload, dict):
+
+        print(
+            f"Root keys: "
+            f"{list(payload.keys())}"
+        )
+
+        for key, value in payload.items():
+
+            print()
+            print(
+                f"ROOT KEY: {key}"
+            )
+
+            print(
+                f"  type: "
+                f"{type(value).__name__}"
+            )
+
+            if isinstance(value, dict):
+
+                print(
+                    f"  keys: "
+                    f"{list(value.keys())}"
+                )
+
+                if "$ref" in value:
+                    print(
+                        f"  $ref: "
+                        f"{value.get('$ref')}"
+                    )
+
+            elif isinstance(value, list):
+
+                print(
+                    f"  list length: "
+                    f"{len(value)}"
+                )
+
+                for index, item in enumerate(
+                    value[:5]
+                ):
+
+                    print(
+                        f"  item[{index}] type: "
+                        f"{type(item).__name__}"
+                    )
+
+                    if isinstance(item, dict):
+
+                        print(
+                            f"  item[{index}] keys: "
+                            f"{list(item.keys())}"
+                        )
+
+                        if "$ref" in item:
+
+                            print(
+                                f"  item[{index}] $ref: "
+                                f"{item.get('$ref')}"
+                            )
+
+                        for item_key, item_value in item.items():
+
+                            if isinstance(
+                                item_value,
+                                dict,
+                            ):
+
+                                print(
+                                    f"    {item_key}: "
+                                    f"dict keys="
+                                    f"{list(item_value.keys())}"
+                                )
+
+                                if "$ref" in item_value:
+
+                                    print(
+                                        f"    {item_key}.$ref="
+                                        f"{item_value.get('$ref')}"
+                                    )
+
+                            elif isinstance(
+                                item_value,
+                                list,
+                            ):
+
+                                print(
+                                    f"    {item_key}: "
+                                    f"list length="
+                                    f"{len(item_value)}"
+                                )
+
+                            else:
+
+                                value_text = str(
+                                    item_value
+                                )
+
+                                if len(
+                                    value_text
+                                ) > 250:
+                                    value_text = (
+                                        value_text[:250]
+                                        + "..."
+                                    )
+
+                                print(
+                                    f"    {item_key}: "
+                                    f"{value_text}"
+                                )
+
+            else:
+
+                value_text = str(
+                    value
+                )
+
+                if len(
+                    value_text
+                ) > 500:
+                    value_text = (
+                        value_text[:500]
+                        + "..."
+                    )
+
+                print(
+                    f"  value: "
+                    f"{value_text}"
+                )
+
+    elif isinstance(
+        payload,
+        list,
+    ):
+
+        print(
+            f"Root list length: "
+            f"{len(payload)}"
+        )
+
+        for index, item in enumerate(
+            payload[:5]
+        ):
+
+            print(
+                f"item[{index}] type: "
+                f"{type(item).__name__}"
+            )
+
+            if isinstance(
+                item,
+                dict,
+            ):
+
+                print(
+                    f"item[{index}] keys: "
+                    f"{list(item.keys())}"
+                )
+
+    print()
+    print(
+        f"{conference} TRUNCATED JSON PREVIEW:"
+    )
+
+    try:
+
+        pretty = json.dumps(
+            payload,
+            indent=2,
+        )
+
+        # Keep GitHub logs readable.
+        max_chars = 12000
+
+        if len(pretty) > max_chars:
+
+            pretty = (
+                pretty[:max_chars]
+                + "\n... [TRUNCATED] ..."
+            )
+
+        print(pretty)
+
+    except Exception as exc:
+
+        print(
+            f"Could not serialize payload: "
+            f"{exc}"
+        )
+
+    print()
+    print(
+        f"END {conference} RESPONSE STRUCTURE"
+    )
+
+    print("#" * 80)
+    print()
 
 
 # ============================================================
@@ -196,36 +443,8 @@ def to_int(value: Any) -> int:
         return 0
 
 
-def normalize_division_name(
-    name: str,
-) -> str:
-
-    if not name:
-        return ""
-
-    normalized = (
-        name
-        .strip()
-        .lower()
-    )
-
-    if "east" in normalized:
-        return "East"
-
-    if "north" in normalized:
-        return "North"
-
-    if "south" in normalized:
-        return "South"
-
-    if "west" in normalized:
-        return "West"
-
-    return ""
-
-
 # ============================================================
-# STATS PARSING
+# STAT PARSING
 # ============================================================
 
 def extract_stats(
@@ -237,7 +456,7 @@ def extract_stats(
     ties = 0
 
     stats = (
-        entry.get("stats", [])
+        entry.get("stats")
         or []
     )
 
@@ -276,6 +495,7 @@ def extract_stats(
             or display_name == "wins"
             or abbreviation == "w"
         ):
+
             wins = to_int(
                 value
             )
@@ -285,6 +505,7 @@ def extract_stats(
             or display_name == "losses"
             or abbreviation == "l"
         ):
+
             losses = to_int(
                 value
             )
@@ -294,6 +515,7 @@ def extract_stats(
             or display_name == "ties"
             or abbreviation == "t"
         ):
+
             ties = to_int(
                 value
             )
@@ -310,7 +532,7 @@ def extract_espn_seed(
 ) -> Optional[int]:
 
     stats = (
-        entry.get("stats", [])
+        entry.get("stats")
         or []
     )
 
@@ -323,25 +545,36 @@ def extract_espn_seed(
             continue
 
         name = (
-            stat.get("name")
-            or ""
-        ).lower().replace(
-            "_",
-            "",
+            str(
+                stat.get("name")
+                or ""
+            )
+            .lower()
+            .replace(
+                "_",
+                "",
+            )
         )
 
         display_name = (
-            stat.get("displayName")
-            or ""
-        ).lower().replace(
-            " ",
-            "",
+            str(
+                stat.get("displayName")
+                or ""
+            )
+            .lower()
+            .replace(
+                " ",
+                "",
+            )
         )
 
         abbreviation = (
-            stat.get("abbreviation")
-            or ""
-        ).lower()
+            str(
+                stat.get("abbreviation")
+                or ""
+            )
+            .lower()
+        )
 
         if (
             name in (
@@ -377,15 +610,25 @@ def extract_espn_seed(
 
 
 # ============================================================
-# ENTRY DISCOVERY
+# GENERIC ENTRY DISCOVERY
 # ============================================================
 
-def _find_entries(
+def find_entries(
     obj: Any,
+    depth: int = 0,
 ) -> List[dict]:
     """
-    Recursively search ESPN's JSON for the standings entries list.
+    Generic recursive search.
+
+    For this diagnostic version we keep this parser,
+    but the debug output above is what we care about.
+
+    Once we see ESPN's real JSON layout, we can replace
+    this with an exact parser.
     """
+
+    if depth > 20:
+        return []
 
     if isinstance(
         obj,
@@ -396,27 +639,30 @@ def _find_entries(
             "entries"
         )
 
-        if (
-            isinstance(
-                entries,
-                list,
-            )
-            and entries
+        if isinstance(
+            entries,
+            list,
         ):
 
-            has_standing_rows = any(
-                isinstance(
-                    item,
-                    dict,
-                )
-                and (
-                    "team" in item
-                    or "stats" in item
-                )
-                for item in entries
-            )
+            if entries:
 
-            if has_standing_rows:
+                print(
+                    f"Parser found an 'entries' list "
+                    f"with {len(entries)} items "
+                    f"at recursion depth {depth}"
+                )
+
+                first = entries[0]
+
+                if isinstance(
+                    first,
+                    dict,
+                ):
+
+                    print(
+                        "First entry keys: "
+                        f"{list(first.keys())}"
+                    )
 
                 return [
                     item
@@ -427,10 +673,11 @@ def _find_entries(
                     )
                 ]
 
-        for value in obj.values():
+        for key, value in obj.items():
 
-            found = _find_entries(
-                value
+            found = find_entries(
+                value,
+                depth + 1,
             )
 
             if found:
@@ -443,8 +690,9 @@ def _find_entries(
 
         for item in obj:
 
-            found = _find_entries(
-                item
+            found = find_entries(
+                item,
+                depth + 1,
             )
 
             if found:
@@ -453,66 +701,45 @@ def _find_entries(
     return []
 
 
-def _overall_entries(
-    payload: dict,
-) -> List[dict]:
-    """
-    We directly request standings/0.
-
-    Therefore this payload should already represent the
-    overall standings table.
-
-    Simply search it for the team entries.
-    """
-
-    return _find_entries(
-        payload
-    )
-
-
 # ============================================================
 # TEAM RESOLUTION
 # ============================================================
 
-def _team_id_from_ref(
+def team_id_from_ref(
     ref: str,
 ) -> str:
 
     if not ref:
         return ""
 
-    clean_ref = ref.rstrip(
+    clean = ref.rstrip(
         "/"
     )
 
-    last_part = (
-        clean_ref
+    final_piece = (
+        clean
         .split("/")[-1]
     )
 
-    if last_part.isdigit():
-        return last_part
+    if final_piece.isdigit():
+        return final_piece
 
     return ""
 
 
-def _resolve_team(
+def resolve_team(
     team_obj: Any,
 ) -> Tuple[str, str]:
-    """
-    ESPN Core API may provide either:
-
-    1. A full team object
-    2. A $ref pointing to the team
-
-    Resolve either form.
-    """
 
     if not isinstance(
         team_obj,
         dict,
     ):
-        return "", ""
+
+        return (
+            "",
+            "",
+        )
 
     team_id = str(
         team_obj.get("id")
@@ -537,17 +764,24 @@ def _resolve_team(
         not team_id
         and ref
     ):
-        team_id = _team_id_from_ref(
+
+        team_id = team_id_from_ref(
             ref
         )
 
     if team_name:
+
         return (
             team_id,
             team_name,
         )
 
     if ref:
+
+        print(
+            f"Resolving team reference: "
+            f"{ref}"
+        )
 
         resolved = core_get_json(
             ref
@@ -578,7 +812,7 @@ def _resolve_team(
 
 
 # ============================================================
-# CONFERENCE EXTRACTION
+# CONFERENCE PARSER
 # ============================================================
 
 def extract_conferences(
@@ -598,6 +832,20 @@ def extract_conferences(
         "NFC",
     ):
 
+        print()
+        print(
+            "=" * 80
+        )
+
+        print(
+            f"ATTEMPTING TO PARSE "
+            f"{conference}"
+        )
+
+        print(
+            "=" * 80
+        )
+
         payload = (
             data.get(
                 conference
@@ -605,21 +853,29 @@ def extract_conferences(
             or {}
         )
 
-        entries = _overall_entries(
+        entries = find_entries(
             payload
         )
 
         print(
             f"{conference}: "
-            f"found {len(entries)} "
-            f"raw standings entries"
+            f"generic parser found "
+            f"{len(entries)} entries"
         )
 
         rows: List[
             TeamRow
         ] = []
 
-        for entry in entries:
+        for index, entry in enumerate(
+            entries
+        ):
+
+            print(
+                f"{conference} entry "
+                f"{index + 1} keys: "
+                f"{list(entry.keys())}"
+            )
 
             team_obj = (
                 entry.get("team")
@@ -627,12 +883,19 @@ def extract_conferences(
             )
 
             team_id, team_name = (
-                _resolve_team(
+                resolve_team(
                     team_obj
                 )
             )
 
             if not team_name:
+
+                print(
+                    f"Skipping entry "
+                    f"{index + 1}: "
+                    f"could not resolve team"
+                )
+
                 continue
 
             wins, losses, ties = (
@@ -645,26 +908,19 @@ def extract_conferences(
                 entry
             )
 
-            division = hardcoded_div(
-                team_name
-            )
-
             rows.append(
                 TeamRow(
                     team_id=team_id,
                     team_name=team_name,
-                    division=division,
+                    division=hardcoded_div(
+                        team_name
+                    ),
                     w=wins,
                     l=losses,
                     t=ties,
                     espn_seed=seed,
                 )
             )
-
-        # --------------------------------------------
-        # Remove duplicate teams while preserving
-        # original ESPN ordering.
-        # --------------------------------------------
 
         seen = set()
 
@@ -692,26 +948,17 @@ def extract_conferences(
                     row
                 )
 
-        # --------------------------------------------
-        # If ESPN provides conference seed/rank for
-        # most teams, use that ordering.
-        # --------------------------------------------
-
-        seeded_rows = [
+        seeded = [
             row
             for row in unique_rows
             if (
-                isinstance(
-                    row.espn_seed,
-                    int,
-                )
+                row.espn_seed
+                is not None
                 and row.espn_seed > 0
             )
         ]
 
-        if len(
-            unique_rows
-        ) > 0:
+        if unique_rows:
 
             threshold = max(
                 4,
@@ -724,9 +971,7 @@ def extract_conferences(
             )
 
             if (
-                len(
-                    seeded_rows
-                )
+                len(seeded)
                 >= threshold
             ):
 
@@ -734,10 +979,8 @@ def extract_conferences(
                     unique_rows,
                     key=lambda row: (
                         row.espn_seed
-                        if (
-                            row.espn_seed
-                            is not None
-                        )
+                        if row.espn_seed
+                        is not None
                         else 999
                     ),
                 )
@@ -756,40 +999,51 @@ def extract_conferences(
 
 
 # ============================================================
-# FONT HELPERS
+# FONTS
 # ============================================================
 
 def get_font(
     size: int,
-) -> ImageFont.FreeTypeFont:
+    bold: bool = False,
+):
 
-    candidates = [
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        "/System/Library/Fonts/Supplemental/Arial.ttf",
-        "/Library/Fonts/Arial.ttf",
-    ]
+    candidates = []
+
+    if bold:
+
+        candidates.extend(
+            [
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+                "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+                "/Library/Fonts/Arial Bold.ttf",
+            ]
+        )
+
+    candidates.extend(
+        [
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "/System/Library/Fonts/Supplemental/Arial.ttf",
+            "/Library/Fonts/Arial.ttf",
+        ]
+    )
 
     for path in candidates:
 
         try:
 
-            return (
-                ImageFont.truetype(
-                    path,
-                    size=size,
-                )
+            return ImageFont.truetype(
+                path,
+                size=size,
             )
 
         except Exception:
             pass
 
-    return (
-        ImageFont.load_default()
-    )
+    return ImageFont.load_default()
 
 
 # ============================================================
-# POSTER RENDERING
+# POSTER
 # ============================================================
 
 def render_conference_poster(
@@ -803,151 +1057,6 @@ def render_conference_poster(
 
     width = 1080
     height = 1920
-
-    def get_font_local(
-        size: int,
-        bold: bool = False,
-    ):
-
-        candidates = []
-
-        if bold:
-
-            candidates.extend(
-                [
-                    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-                    "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
-                    "/Library/Fonts/Arial Bold.ttf",
-                ]
-            )
-
-        candidates.extend(
-            [
-                "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-                "/System/Library/Fonts/Supplemental/Arial.ttf",
-                "/Library/Fonts/Arial.ttf",
-            ]
-        )
-
-        for path in candidates:
-
-            try:
-
-                return (
-                    ImageFont.truetype(
-                        path,
-                        size=size,
-                    )
-                )
-
-            except Exception:
-                pass
-
-        return (
-            ImageFont.load_default()
-        )
-
-    def fit_font(
-        draw: ImageDraw.ImageDraw,
-        text_value: str,
-        max_width: int,
-        start_size: int,
-        min_size: int = 18,
-        bold: bool = False,
-    ):
-
-        current_size = (
-            start_size
-        )
-
-        while (
-            current_size
-            >= min_size
-        ):
-
-            font = get_font_local(
-                current_size,
-                bold=bold,
-            )
-
-            text_width = (
-                draw.textlength(
-                    text_value,
-                    font=font,
-                )
-            )
-
-            if (
-                text_width
-                <= max_width
-            ):
-                return font
-
-            current_size -= 1
-
-        return get_font_local(
-            min_size,
-            bold=bold,
-        )
-
-    def draw_vertical_gradient(
-        draw: ImageDraw.ImageDraw,
-        canvas_width: int,
-        canvas_height: int,
-        top_color,
-        bottom_color,
-    ):
-
-        for yy in range(
-            canvas_height
-        ):
-
-            ratio = (
-                yy
-                / max(
-                    1,
-                    canvas_height - 1,
-                )
-            )
-
-            red = int(
-                top_color[0]
-                * (1 - ratio)
-                + bottom_color[0]
-                * ratio
-            )
-
-            green = int(
-                top_color[1]
-                * (1 - ratio)
-                + bottom_color[1]
-                * ratio
-            )
-
-            blue = int(
-                top_color[2]
-                * (1 - ratio)
-                + bottom_color[2]
-                * ratio
-            )
-
-            draw.line(
-                (
-                    0,
-                    yy,
-                    canvas_width,
-                    yy,
-                ),
-                fill=(
-                    red,
-                    green,
-                    blue,
-                ),
-            )
-
-    # ========================================================
-    # COLORS
-    # ========================================================
 
     bg_top = (
         6,
@@ -1039,10 +1148,6 @@ def render_conference_poster(
         90,
     )
 
-    # ========================================================
-    # CANVAS
-    # ========================================================
-
     image = Image.new(
         "RGB",
         (
@@ -1056,13 +1161,53 @@ def render_conference_poster(
         image
     )
 
-    draw_vertical_gradient(
-        draw,
-        width,
-        height,
-        bg_top,
-        bg_bottom,
-    )
+    # Gradient
+    for yy in range(
+        height
+    ):
+
+        ratio = (
+            yy
+            / max(
+                1,
+                height - 1,
+            )
+        )
+
+        red = int(
+            bg_top[0]
+            * (1 - ratio)
+            + bg_bottom[0]
+            * ratio
+        )
+
+        green = int(
+            bg_top[1]
+            * (1 - ratio)
+            + bg_bottom[1]
+            * ratio
+        )
+
+        blue = int(
+            bg_top[2]
+            * (1 - ratio)
+            + bg_bottom[2]
+            * ratio
+        )
+
+        draw.line(
+            (
+                0,
+                yy,
+                width,
+                yy,
+            ),
+            fill=(
+                red,
+                green,
+                blue,
+            ),
+        )
 
     draw.rounded_rectangle(
         (
@@ -1092,58 +1237,17 @@ def render_conference_poster(
         width=1,
     )
 
-    # ========================================================
-    # FONTS
-    # ========================================================
-
-    section_font = (
-        get_font_local(
-            36,
-            bold=True,
-        )
-    )
-
-    header_font = (
-        get_font_local(
-            22,
-            bold=True,
-        )
-    )
-
-    seed_font = (
-        get_font_local(
-            28,
-            bold=True,
-        )
-    )
-
-    stat_font = (
-        get_font_local(
-            28,
-            bold=False,
-        )
-    )
-
-    # ========================================================
-    # TOP HEADER
-    # ========================================================
-
     left = 38
-
-    right = (
-        width - 38
-    )
-
+    right = width - 38
     y = 38
-
-    top_h = 150
+    top_height = 150
 
     draw.rounded_rectangle(
         (
             left,
             y,
             right,
-            y + top_h,
+            y + top_height,
         ),
         radius=28,
         fill=panel,
@@ -1156,7 +1260,7 @@ def render_conference_poster(
             left + 10,
             y + 10,
             right - 10,
-            y + top_h - 10,
+            y + top_height - 10,
         ),
         radius=24,
         fill=panel_2,
@@ -1166,30 +1270,32 @@ def render_conference_poster(
         f"NFL STANDINGS {season}"
     )
 
-    max_title_width = (
-        right
-        - left
-        - 60
-    )
-
-    title_font = fit_font(
-        draw,
-        title,
-        max_title_width,
-        76,
-        52,
+    title_font = get_font(
+        68,
         bold=True,
     )
 
-    title_width = (
+    while (
         draw.textlength(
             title,
             font=title_font,
         )
-    )
+        > (
+            right
+            - left
+            - 60
+        )
+        and title_font.size > 48
+    ):
 
-    title_height = (
-        title_font.size
+        title_font = get_font(
+            title_font.size - 1,
+            bold=True,
+        )
+
+    title_width = draw.textlength(
+        title,
+        font=title_font,
     )
 
     draw.text(
@@ -1199,13 +1305,7 @@ def render_conference_poster(
                 - title_width
             )
             / 2,
-            y
-            + (
-                top_h
-                - title_height
-            )
-            / 2
-            - 8,
+            y + 37,
         ),
         title,
         fill=text_color,
@@ -1213,13 +1313,9 @@ def render_conference_poster(
     )
 
     y += (
-        top_h
+        top_height
         + 24
     )
-
-    # ========================================================
-    # CONFERENCE SECTIONS
-    # ========================================================
 
     section_gap = 24
 
@@ -1256,6 +1352,25 @@ def render_conference_poster(
         0.08,
         0.08,
     ]
+
+    section_font = get_font(
+        36,
+        bold=True,
+    )
+
+    header_font = get_font(
+        22,
+        bold=True,
+    )
+
+    seed_font = get_font(
+        28,
+        bold=True,
+    )
+
+    stat_font = get_font(
+        28,
+    )
 
     def draw_section(
         top_y: int,
@@ -1304,9 +1419,7 @@ def render_conference_poster(
                 right - bar_margin,
                 top_y
                 + bar_margin
-                + (
-                    bar_height // 2
-                ),
+                + bar_height // 2,
             ),
             radius=18,
             fill=title_bar_hi,
@@ -1334,10 +1447,6 @@ def render_conference_poster(
             fill=text_color,
             font=section_font,
         )
-
-        # ====================================================
-        # TABLE
-        # ====================================================
 
         table_left = (
             left + 16
@@ -1439,31 +1548,6 @@ def render_conference_poster(
                 index
             ]
 
-            if (
-                index
-                != len(
-                    headers
-                )
-                - 1
-            ):
-
-                draw.line(
-                    (
-                        x,
-                        header_y + 7,
-                        x,
-                        header_y
-                        + header_height
-                        - 7,
-                    ),
-                    fill=grid,
-                    width=1,
-                )
-
-        # ====================================================
-        # ROWS
-        # ====================================================
-
         rows_top = (
             header_y
             + header_height
@@ -1497,9 +1581,7 @@ def render_conference_poster(
             // number_of_rows,
         )
 
-        current_y = (
-            rows_top
-        )
+        current_y = rows_top
 
         for index, row in enumerate(
             rows
@@ -1507,9 +1589,7 @@ def render_conference_poster(
 
             fill_color = (
                 row_a
-                if (
-                    index % 2 == 0
-                )
+                if index % 2 == 0
                 else row_b
             )
 
@@ -1525,59 +1605,26 @@ def render_conference_poster(
                 fill=fill_color,
             )
 
-            seed = str(
-                index + 1
-            )
-
-            division = (
-                row.division
-                or hardcoded_div(
-                    row.team_name
-                )
-            )
-
             values = [
-                seed,
+                str(
+                    index + 1
+                ),
                 row.team_name,
-                division,
-                str(
-                    row.w
-                ),
-                str(
-                    row.l
-                ),
-                str(
-                    row.t
-                ),
+                row.division,
+                str(row.w),
+                str(row.l),
+                str(row.t),
             ]
 
-            x = (
-                table_left
-            )
+            x = table_left
 
             for column_index, value in enumerate(
                 values
             ):
 
-                # --------------------------------------------
-                # SEED
-                # --------------------------------------------
+                if column_index == 0:
 
-                if (
-                    column_index == 0
-                ):
-
-                    text_y = (
-                        current_y
-                        + (
-                            row_height
-                            - 28
-                        )
-                        / 2
-                        - 2
-                    )
-
-                    seed_color = (
+                    color = (
                         gold
                         if index < 7
                         else accent
@@ -1586,62 +1633,58 @@ def render_conference_poster(
                     draw.text(
                         (
                             x + 14,
-                            text_y,
+                            current_y
+                            + (
+                                row_height
+                                - 28
+                            )
+                            / 2
+                            - 2,
                         ),
                         value,
-                        fill=seed_color,
+                        fill=color,
                         font=seed_font,
                     )
 
-                # --------------------------------------------
-                # TEAM
-                # --------------------------------------------
+                elif column_index == 1:
 
-                elif (
-                    column_index == 1
-                ):
-
-                    max_team_width = (
-                        column_widths[
-                            column_index
-                        ]
-                        - 24
+                    team_font = get_font(
+                        28
                     )
 
-                    team_font = (
-                        fit_font(
-                            draw,
+                    while (
+                        draw.textlength(
                             value,
-                            max_team_width,
-                            28,
-                            18,
-                            bold=False,
+                            font=team_font,
                         )
-                    )
+                        > (
+                            column_widths[
+                                column_index
+                            ]
+                            - 24
+                        )
+                        and team_font.size > 18
+                    ):
 
-                    text_y = (
-                        current_y
-                        + (
-                            row_height
-                            - team_font.size
+                        team_font = get_font(
+                            team_font.size - 1
                         )
-                        / 2
-                        - 2
-                    )
 
                     draw.text(
                         (
                             x + 12,
-                            text_y,
+                            current_y
+                            + (
+                                row_height
+                                - team_font.size
+                            )
+                            / 2
+                            - 2,
                         ),
                         value,
                         fill=text_color,
                         font=team_font,
                     )
-
-                # --------------------------------------------
-                # DIVISION / RECORD
-                # --------------------------------------------
 
                 else:
 
@@ -1652,16 +1695,6 @@ def render_conference_poster(
                         )
                     )
 
-                    text_y = (
-                        current_y
-                        + (
-                            row_height
-                            - 28
-                        )
-                        / 2
-                        - 2
-                    )
-
                     draw.text(
                         (
                             x
@@ -1670,7 +1703,13 @@ def render_conference_poster(
                             ]
                             - 12
                             - value_width,
-                            text_y,
+                            current_y
+                            + (
+                                row_height
+                                - 28
+                            )
+                            / 2
+                            - 2,
                         ),
                         value,
                         fill=text_color,
@@ -1681,35 +1720,10 @@ def render_conference_poster(
                     column_index
                 ]
 
-                if (
-                    column_index
-                    != len(
-                        values
-                    )
-                    - 1
-                ):
-
-                    draw.line(
-                        (
-                            x,
-                            current_y + 7,
-                            x,
-                            current_y
-                            + row_height
-                            - 7,
-                        ),
-                        fill=grid,
-                        width=1,
-                    )
-
             current_y += (
                 row_height
                 + row_gap
             )
-
-    # ========================================================
-    # DRAW AFC
-    # ========================================================
 
     draw_section(
         y,
@@ -1719,10 +1733,6 @@ def render_conference_poster(
             [],
         ),
     )
-
-    # ========================================================
-    # DRAW NFC
-    # ========================================================
 
     draw_section(
         y
@@ -1735,17 +1745,13 @@ def render_conference_poster(
         ),
     )
 
-    # ========================================================
-    # SAVE
-    # ========================================================
-
     image.save(
         out_path
     )
 
 
 # ============================================================
-# GENERATE POSTER
+# MAIN GENERATION
 # ============================================================
 
 def generate_standings_conference_png(
@@ -1753,13 +1759,36 @@ def generate_standings_conference_png(
     out_path: str,
 ) -> str:
 
+    print()
     print(
-        f"Generating standings "
-        f"for season {season}"
+        "=" * 80
+    )
+
+    print(
+        f"GENERATING STANDINGS "
+        f"FOR SEASON {season}"
+    )
+
+    print(
+        "=" * 80
     )
 
     data = get_json(
         season
+    )
+
+    print()
+    print(
+        "=" * 80
+    )
+
+    print(
+        "API RESPONSES RECEIVED. "
+        "NOW ATTEMPTING GENERIC PARSER."
+    )
+
+    print(
+        "=" * 80
     )
 
     conferences = (
@@ -1782,10 +1811,25 @@ def generate_standings_conference_png(
         )
     )
 
+    print()
     print(
-        "Final standings counts: "
-        f"AFC={afc_count}, "
-        f"NFC={nfc_count}"
+        "=" * 80
+    )
+
+    print(
+        "FINAL STANDINGS COUNTS"
+    )
+
+    print(
+        f"AFC = {afc_count}"
+    )
+
+    print(
+        f"NFC = {nfc_count}"
+    )
+
+    print(
+        "=" * 80
     )
 
     if (
@@ -1794,11 +1838,12 @@ def generate_standings_conference_png(
     ):
 
         raise RuntimeError(
-            "ESPN Core API returned standings, "
-            "but the parser could not find "
-            "both conferences "
-            f"(AFC={afc_count}, "
-            f"NFC={nfc_count})."
+            "Diagnostic standings run completed, "
+            "but the current generic parser "
+            "did not find both conferences. "
+            "Use the JSON structure printed above "
+            "to build the exact parser. "
+            f"AFC={afc_count}, NFC={nfc_count}."
         )
 
     render_conference_poster(
@@ -1816,7 +1861,7 @@ def generate_standings_conference_png(
 
 
 # ============================================================
-# EXISTING PUBLIC URL HELPER
+# PUBLIC URL HELPER
 # ============================================================
 
 def generate_and_upload_standings_conference(
@@ -1900,6 +1945,7 @@ if __name__ == "__main__":
 
     except Exception as exc:
 
+        print()
         print(
             f"❌ Error: {exc}"
         )
