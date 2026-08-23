@@ -80,10 +80,18 @@ class TeamRow:
 
 
 def get_json(season: int) -> dict:
+    headers = {
+        "User-Agent": USER_AGENT,
+        "Accept": "application/json,text/plain,*/*",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Referer": "https://www.espn.com/",
+        "Origin": "https://www.espn.com",
+    }
+
     r = requests.get(
         SITE_API,
         params={"season": season, "type": 2},
-        headers={"User-Agent": USER_AGENT, "Accept-Language": "en-US,en;q=0.9"},
+        headers=headers,
         timeout=25,
     )
     r.raise_for_status()
