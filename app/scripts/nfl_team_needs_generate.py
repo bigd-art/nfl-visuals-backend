@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 
 import argparse
-import io
 import os
 import re
 import shutil
@@ -446,58 +445,1396 @@ def fetch_json(
     )
 
 
-def fetch_image(
-    url: str,
+# ============================================================
+# PIXEL ICON HELPERS
+# ============================================================
+
+def hex_to_rgb(
+    hex_color: str,
+) -> Tuple[
+    int,
+    int,
+    int,
+]:
+
+    hex_color = (
+        hex_color
+        .lstrip("#")
+    )
+
+    return tuple(
+        int(
+            hex_color[
+                i:i + 2
+            ],
+            16,
+        )
+        for i in (
+            0,
+            2,
+            4,
+        )
+    )
+
+
+def draw_star(
+    draw,
+    cx,
+    cy,
+    radius,
+    fill,
+):
+
+    points = [
+        (cx, cy - radius),
+        (cx + radius // 4, cy - radius // 4),
+        (cx + radius, cy - radius // 4),
+        (cx + radius // 3, cy + radius // 5),
+        (cx + radius // 2, cy + radius),
+        (cx, cy + radius // 2),
+        (cx - radius // 2, cy + radius),
+        (cx - radius // 3, cy + radius // 5),
+        (cx - radius, cy - radius // 4),
+        (cx - radius // 4, cy - radius // 4),
+    ]
+
+    draw.polygon(
+        points,
+        fill=fill,
+    )
+
+
+def draw_paw(
+    draw,
+    cx,
+    cy,
+    fill,
+):
+
+    draw.ellipse(
+        (
+            cx - 14,
+            cy - 2,
+            cx + 14,
+            cy + 22,
+        ),
+        fill=fill,
+    )
+
+    for dx, dy in [
+        (-20, -18),
+        (-7, -25),
+        (7, -25),
+        (20, -18),
+    ]:
+
+        draw.ellipse(
+            (
+                cx + dx - 5,
+                cy + dy - 7,
+                cx + dx + 5,
+                cy + dy + 7,
+            ),
+            fill=fill,
+        )
+
+
+def draw_football(
+    draw,
+    cx,
+    cy,
+    fill,
+    accent,
+):
+
+    draw.ellipse(
+        (
+            cx - 34,
+            cy - 17,
+            cx + 34,
+            cy + 17,
+        ),
+        fill=fill,
+    )
+
+    draw.line(
+        (
+            cx - 13,
+            cy,
+            cx + 13,
+            cy,
+        ),
+        fill=accent,
+        width=3,
+    )
+
+    for offset in (
+        -8,
+        0,
+        8,
+    ):
+
+        draw.line(
+            (
+                cx + offset,
+                cy - 5,
+                cx + offset,
+                cy + 5,
+            ),
+            fill=accent,
+            width=2,
+        )
+
+
+def draw_feather(
+    draw,
+    cx,
+    cy,
+    fill,
+    accent,
+):
+
+    draw.polygon(
+        [
+            (cx - 27, cy + 26),
+            (cx - 14, cy - 18),
+            (cx + 27, cy - 33),
+            (cx + 18, cy + 8),
+            (cx - 9, cy + 27),
+        ],
+        fill=fill,
+    )
+
+    draw.line(
+        (
+            cx - 24,
+            cy + 30,
+            cx + 18,
+            cy - 24,
+        ),
+        fill=accent,
+        width=3,
+    )
+
+
+def draw_claws(
+    draw,
+    cx,
+    cy,
+    fill,
+):
+
+    for offset in (
+        -19,
+        0,
+        19,
+    ):
+
+        draw.polygon(
+            [
+                (
+                    cx + offset - 5,
+                    cy + 27,
+                ),
+                (
+                    cx + offset + 3,
+                    cy - 30,
+                ),
+                (
+                    cx + offset + 10,
+                    cy - 34,
+                ),
+                (
+                    cx + offset + 3,
+                    cy + 27,
+                ),
+            ],
+            fill=fill,
+        )
+
+
+def draw_stripes(
+    draw,
+    cx,
+    cy,
+    fill,
+    accent,
+):
+
+    draw.rectangle(
+        (
+            cx - 31,
+            cy - 30,
+            cx + 31,
+            cy + 30,
+        ),
+        fill=fill,
+    )
+
+    for offset in (
+        -34,
+        -9,
+        16,
+    ):
+
+        draw.polygon(
+            [
+                (
+                    cx + offset,
+                    cy - 30,
+                ),
+                (
+                    cx + offset + 10,
+                    cy - 30,
+                ),
+                (
+                    cx + offset + 35,
+                    cy + 30,
+                ),
+                (
+                    cx + offset + 25,
+                    cy + 30,
+                ),
+            ],
+            fill=accent,
+        )
+
+
+def draw_mountain(
+    draw,
+    cx,
+    cy,
+    fill,
+    accent,
+):
+
+    draw.polygon(
+        [
+            (cx - 36, cy + 27),
+            (cx, cy - 31),
+            (cx + 36, cy + 27),
+        ],
+        fill=fill,
+    )
+
+    draw.polygon(
+        [
+            (cx - 9, cy - 17),
+            (cx, cy - 31),
+            (cx + 10, cy - 15),
+            (cx + 2, cy - 20),
+        ],
+        fill=accent,
+    )
+
+
+def draw_texas(
+    draw,
+    cx,
+    cy,
+    fill,
+    accent,
+):
+
+    draw.polygon(
+        [
+            (cx - 28, cy - 30),
+            (cx + 7, cy - 30),
+            (cx + 8, cy - 13),
+            (cx + 30, cy - 12),
+            (cx + 23, cy + 8),
+            (cx + 7, cy + 15),
+            (cx - 2, cy + 33),
+            (cx - 16, cy + 16),
+            (cx - 30, cy + 4),
+        ],
+        fill=fill,
+    )
+
+    draw_star(
+        draw,
+        cx,
+        cy,
+        8,
+        accent,
+    )
+
+
+def draw_arc(
+    draw,
+    cx,
+    cy,
+    fill,
+    accent,
+):
+
+    draw.arc(
+        (
+            cx - 31,
+            cy - 31,
+            cx + 31,
+            cy + 31,
+        ),
+        205,
+        335,
+        fill=fill,
+        width=9,
+    )
+
+    draw.arc(
+        (
+            cx - 20,
+            cy - 20,
+            cx + 20,
+            cy + 20,
+        ),
+        205,
+        335,
+        fill=accent,
+        width=4,
+    )
+
+
+def draw_pennant(
+    draw,
+    cx,
+    cy,
+    fill,
+    accent,
+):
+
+    draw.rectangle(
+        (
+            cx - 30,
+            cy - 32,
+            cx - 26,
+            cy + 30,
+        ),
+        fill=accent,
+    )
+
+    draw.polygon(
+        [
+            (cx - 26, cy - 27),
+            (cx + 33, cy - 4),
+            (cx - 26, cy + 17),
+        ],
+        fill=fill,
+    )
+
+
+def draw_lightning(
+    draw,
+    cx,
+    cy,
+    fill,
+):
+
+    draw.polygon(
+        [
+            (cx + 5, cy - 34),
+            (cx - 22, cy + 1),
+            (cx - 5, cy + 1),
+            (cx - 14, cy + 34),
+            (cx + 25, cy - 8),
+            (cx + 8, cy - 8),
+        ],
+        fill=fill,
+    )
+
+
+def draw_wave(
+    draw,
+    cx,
+    cy,
+    fill,
+    accent,
+):
+
+    draw.polygon(
+        [
+            (cx - 34, cy + 18),
+            (cx - 24, cy - 5),
+            (cx - 10, cy - 20),
+            (cx + 4, cy - 23),
+            (cx + 21, cy - 14),
+            (cx + 34, cy + 4),
+            (cx + 13, cy - 1),
+            (cx, cy + 8),
+            (cx - 7, cy + 20),
+        ],
+        fill=fill,
+    )
+
+    draw.line(
+        (
+            cx - 29,
+            cy + 22,
+            cx + 30,
+            cy + 22,
+        ),
+        fill=accent,
+        width=4,
+    )
+
+
+def draw_spiral(
+    draw,
+    cx,
+    cy,
+    fill,
+):
+
+    draw.arc(
+        (
+            cx - 28,
+            cy - 28,
+            cx + 28,
+            cy + 28,
+        ),
+        20,
+        340,
+        fill=fill,
+        width=8,
+    )
+
+    draw.arc(
+        (
+            cx - 15,
+            cy - 15,
+            cx + 15,
+            cy + 15,
+        ),
+        20,
+        300,
+        fill=fill,
+        width=6,
+    )
+
+
+def draw_ship(
+    draw,
+    cx,
+    cy,
+    fill,
+    accent,
+):
+
+    draw.polygon(
+        [
+            (cx - 34, cy + 17),
+            (cx + 34, cy + 17),
+            (cx + 22, cy + 29),
+            (cx - 22, cy + 29),
+        ],
+        fill=accent,
+    )
+
+    draw.rectangle(
+        (
+            cx - 2,
+            cy - 31,
+            cx + 2,
+            cy + 15,
+        ),
+        fill=accent,
+    )
+
+    draw.polygon(
+        [
+            (cx + 2, cy - 27),
+            (cx + 23, cy - 5),
+            (cx + 2, cy - 5),
+        ],
+        fill=fill,
+    )
+
+    draw.polygon(
+        [
+            (cx - 3, cy - 24),
+            (cx - 22, cy - 4),
+            (cx - 3, cy - 4),
+        ],
+        fill=fill,
+    )
+
+
+def draw_hat(
+    draw,
+    cx,
+    cy,
+    fill,
+    accent,
+):
+
+    draw.polygon(
+        [
+            (cx - 33, cy + 16),
+            (cx - 19, cy - 13),
+            (cx, cy - 25),
+            (cx + 19, cy - 13),
+            (cx + 33, cy + 16),
+            (cx + 10, cy + 9),
+            (cx, cy + 21),
+            (cx - 10, cy + 9),
+        ],
+        fill=fill,
+    )
+
+    draw_star(
+        draw,
+        cx,
+        cy,
+        8,
+        accent,
+    )
+
+
+def draw_trumpet(
+    draw,
+    cx,
+    cy,
+    fill,
+):
+
+    draw.rectangle(
+        (
+            cx - 23,
+            cy - 5,
+            cx + 10,
+            cy + 5,
+        ),
+        fill=fill,
+    )
+
+    draw.polygon(
+        [
+            (cx + 10, cy - 14),
+            (cx + 32, cy - 22),
+            (cx + 32, cy + 22),
+            (cx + 10, cy + 14),
+        ],
+        fill=fill,
+    )
+
+    draw.arc(
+        (
+            cx - 29,
+            cy - 1,
+            cx - 11,
+            cy + 24,
+        ),
+        10,
+        190,
+        fill=fill,
+        width=4,
+    )
+
+
+def draw_skyline(
+    draw,
+    cx,
+    cy,
+    fill,
+    accent,
+):
+
+    buildings = [
+        (-31, 11, -22, 29),
+        (-20, -3, -8, 29),
+        (-6, -29, 6, 29),
+        (8, -10, 21, 29),
+        (23, 3, 32, 29),
+    ]
+
+    for (
+        x1,
+        y1,
+        x2,
+        y2,
+    ) in buildings:
+
+        draw.rectangle(
+            (
+                cx + x1,
+                cy + y1,
+                cx + x2,
+                cy + y2,
+            ),
+            fill=fill,
+        )
+
+    draw.line(
+        (
+            cx - 35,
+            cy + 30,
+            cx + 35,
+            cy + 30,
+        ),
+        fill=accent,
+        width=4,
+    )
+
+
+def draw_jet(
+    draw,
+    cx,
+    cy,
+    fill,
+):
+
+    draw.polygon(
+        [
+            (cx - 35, cy + 6),
+            (cx - 7, cy - 4),
+            (cx + 18, cy - 28),
+            (cx + 25, cy - 23),
+            (cx + 12, cy - 3),
+            (cx + 34, cy + 7),
+            (cx + 10, cy + 10),
+            (cx + 3, cy + 27),
+            (cx - 5, cy + 27),
+            (cx - 6, cy + 11),
+        ],
+        fill=fill,
+    )
+
+
+def draw_diamonds(
+    draw,
+    cx,
+    cy,
+):
+
+    data = [
+        (
+            cx,
+            cy - 18,
+            "#F2C230",
+        ),
+        (
+            cx - 19,
+            cy + 13,
+            "#1E5FA8",
+        ),
+        (
+            cx + 19,
+            cy + 13,
+            "#D32E3E",
+        ),
+    ]
+
+    for (
+        x,
+        y,
+        color,
+    ) in data:
+
+        draw.polygon(
+            [
+                (x, y - 9),
+                (x + 9, y),
+                (x, y + 9),
+                (x - 9, y),
+            ],
+            fill=color,
+        )
+
+
+def draw_bridge(
+    draw,
+    cx,
+    cy,
+    fill,
+    accent,
+):
+
+    draw.rectangle(
+        (
+            cx - 26,
+            cy - 27,
+            cx - 21,
+            cy + 27,
+        ),
+        fill=fill,
+    )
+
+    draw.rectangle(
+        (
+            cx + 21,
+            cy - 27,
+            cx + 26,
+            cy + 27,
+        ),
+        fill=fill,
+    )
+
+    draw.line(
+        (
+            cx - 34,
+            cy + 18,
+            cx + 34,
+            cy + 18,
+        ),
+        fill=fill,
+        width=5,
+    )
+
+    draw.arc(
+        (
+            cx - 24,
+            cy - 22,
+            cx + 24,
+            cy + 31,
+        ),
+        180,
+        360,
+        fill=accent,
+        width=3,
+    )
+
+
+def draw_flag(
+    draw,
+    cx,
+    cy,
+    fill,
+    accent,
+):
+
+    draw.rectangle(
+        (
+            cx - 28,
+            cy - 32,
+            cx - 24,
+            cy + 30,
+        ),
+        fill=accent,
+    )
+
+    draw.polygon(
+        [
+            (cx - 24, cy - 26),
+            (cx + 29, cy - 21),
+            (cx + 20, cy + 3),
+            (cx - 24, cy + 8),
+        ],
+        fill=fill,
+    )
+
+
+def draw_sword(
+    draw,
+    cx,
+    cy,
+    fill,
+    accent,
+):
+
+    draw.polygon(
+        [
+            (cx - 4, cy - 33),
+            (cx + 5, cy - 33),
+            (cx + 6, cy + 13),
+            (cx - 6, cy + 13),
+        ],
+        fill=fill,
+    )
+
+    draw.polygon(
+        [
+            (cx - 4, cy - 33),
+            (cx, cy - 42),
+            (cx + 5, cy - 33),
+        ],
+        fill=accent,
+    )
+
+    draw.rectangle(
+        (
+            cx - 18,
+            cy + 11,
+            cx + 18,
+            cy + 16,
+        ),
+        fill=accent,
+    )
+
+    draw.rectangle(
+        (
+            cx - 4,
+            cy + 16,
+            cx + 5,
+            cy + 31,
+        ),
+        fill=accent,
+    )
+
+
+def draw_column(
+    draw,
+    cx,
+    cy,
+    fill,
+    accent,
+):
+
+    draw.rectangle(
+        (
+            cx - 27,
+            cy - 28,
+            cx + 27,
+            cy - 22,
+        ),
+        fill=accent,
+    )
+
+    draw.rectangle(
+        (
+            cx - 31,
+            cy + 23,
+            cx + 31,
+            cy + 29,
+        ),
+        fill=accent,
+    )
+
+    for x in (
+        -19,
+        -6,
+        6,
+        19,
+    ):
+
+        draw.rectangle(
+            (
+                cx + x - 3,
+                cy - 19,
+                cx + x + 3,
+                cy + 21,
+            ),
+            fill=fill,
+        )
+
+
+# ============================================================
+# TEAM-SPECIFIC PIXEL SYMBOL
+# ============================================================
+
+def draw_team_symbol(
+    draw,
+    team: str,
+    cx: int,
+    cy: int,
+    primary,
+    secondary,
+):
+
+    if team == "ARI":
+
+        draw.rectangle(
+            (
+                cx - 5,
+                cy - 29,
+                cx + 5,
+                cy + 27,
+            ),
+            fill=primary,
+        )
+
+        draw.rectangle(
+            (
+                cx - 21,
+                cy - 6,
+                cx - 4,
+                cy + 3,
+            ),
+            fill=primary,
+        )
+
+        draw.rectangle(
+            (
+                cx - 21,
+                cy - 18,
+                cx - 13,
+                cy + 3,
+            ),
+            fill=primary,
+        )
+
+        draw.rectangle(
+            (
+                cx + 4,
+                cy - 10,
+                cx + 20,
+                cy - 2,
+            ),
+            fill=primary,
+        )
+
+        draw.rectangle(
+            (
+                cx + 13,
+                cy - 21,
+                cx + 20,
+                cy - 2,
+            ),
+            fill=primary,
+        )
+
+    elif team in {
+        "ATL",
+        "BAL",
+        "PHI",
+    }:
+
+        draw_feather(
+            draw,
+            cx,
+            cy,
+            primary,
+            secondary,
+        )
+
+    elif team == "BUF":
+
+        draw.ellipse(
+            (
+                cx - 26,
+                cy - 26,
+                cx - 4,
+                cy + 5,
+            ),
+            fill=primary,
+        )
+
+        draw.ellipse(
+            (
+                cx + 4,
+                cy - 26,
+                cx + 26,
+                cy + 5,
+            ),
+            fill=primary,
+        )
+
+        draw.ellipse(
+            (
+                cx - 9,
+                cy + 9,
+                cx + 9,
+                cy + 26,
+            ),
+            fill=secondary,
+        )
+
+    elif team == "CAR":
+
+        draw_claws(
+            draw,
+            cx,
+            cy,
+            primary,
+        )
+
+    elif team in {
+        "CHI",
+        "DET",
+        "JAX",
+    }:
+
+        draw_paw(
+            draw,
+            cx,
+            cy,
+            primary,
+        )
+
+    elif team == "CIN":
+
+        draw_stripes(
+            draw,
+            cx,
+            cy,
+            primary,
+            secondary,
+        )
+
+    elif team in {
+        "CLE",
+        "GB",
+    }:
+
+        draw_football(
+            draw,
+            cx,
+            cy,
+            primary,
+            secondary,
+        )
+
+    elif team == "DAL":
+
+        draw_star(
+            draw,
+            cx,
+            cy,
+            30,
+            primary,
+        )
+
+    elif team == "DEN":
+
+        draw_mountain(
+            draw,
+            cx,
+            cy,
+            primary,
+            secondary,
+        )
+
+    elif team == "HOU":
+
+        draw_texas(
+            draw,
+            cx,
+            cy,
+            primary,
+            secondary,
+        )
+
+    elif team == "IND":
+
+        draw_arc(
+            draw,
+            cx,
+            cy,
+            primary,
+            secondary,
+        )
+
+    elif team == "KC":
+
+        draw_pennant(
+            draw,
+            cx,
+            cy,
+            primary,
+            secondary,
+        )
+
+    elif team == "LV":
+
+        draw_hat(
+            draw,
+            cx,
+            cy,
+            primary,
+            secondary,
+        )
+
+    elif team == "LAC":
+
+        draw_lightning(
+            draw,
+            cx,
+            cy,
+            secondary,
+        )
+
+    elif team == "LAR":
+
+        draw_spiral(
+            draw,
+            cx,
+            cy,
+            secondary,
+        )
+
+    elif team == "MIA":
+
+        draw_wave(
+            draw,
+            cx,
+            cy,
+            primary,
+            secondary,
+        )
+
+    elif team == "MIN":
+
+        draw_ship(
+            draw,
+            cx,
+            cy,
+            primary,
+            secondary,
+        )
+
+    elif team == "NE":
+
+        draw_hat(
+            draw,
+            cx,
+            cy,
+            primary,
+            secondary,
+        )
+
+    elif team == "NO":
+
+        draw_trumpet(
+            draw,
+            cx,
+            cy,
+            secondary,
+        )
+
+    elif team == "NYG":
+
+        draw_skyline(
+            draw,
+            cx,
+            cy,
+            primary,
+            secondary,
+        )
+
+    elif team == "NYJ":
+
+        draw_jet(
+            draw,
+            cx,
+            cy,
+            primary,
+        )
+
+    elif team == "PIT":
+
+        draw_diamonds(
+            draw,
+            cx,
+            cy,
+        )
+
+    elif team == "SF":
+
+        draw_bridge(
+            draw,
+            cx,
+            cy,
+            primary,
+            secondary,
+        )
+
+    elif team == "SEA":
+
+        draw_wave(
+            draw,
+            cx,
+            cy,
+            primary,
+            secondary,
+        )
+
+    elif team == "TB":
+
+        draw_flag(
+            draw,
+            cx,
+            cy,
+            primary,
+            secondary,
+        )
+
+    elif team == "TEN":
+
+        draw_sword(
+            draw,
+            cx,
+            cy,
+            primary,
+            secondary,
+        )
+
+    elif team == "WSH":
+
+        draw_column(
+            draw,
+            cx,
+            cy,
+            secondary,
+            primary,
+        )
+
+    else:
+
+        draw_football(
+            draw,
+            cx,
+            cy,
+            primary,
+            secondary,
+        )
+
+
+# ============================================================
+# CREATE ORIGINAL PIXEL TEAM ICON
+# ============================================================
+
+def create_team_icon(
+    team: str,
+    size: int = 215,
 ) -> Optional[
     Image.Image
 ]:
 
-    try:
-
-        response = requests.get(
-            url,
-            headers=HEADERS,
-            timeout=20,
+    team = (
+        str(
+            team
+            or ""
         )
+        .strip()
+        .upper()
+    )
 
-        response.raise_for_status()
+    team = ALIASES.get(
+        team,
+        team,
+    )
 
-        return (
-            Image.open(
-                io.BytesIO(
-                    response.content
-                )
-            )
-            .convert(
-                "RGBA"
-            )
-        )
-
-    except Exception:
+    if (
+        not team
+        or team not in TEAM_COLORS
+    ):
 
         return None
 
+    (
+        primary_hex,
+        secondary_hex,
+    ) = TEAM_COLORS[
+        team
+    ]
 
-# ============================================================
-# LOGO
-# ============================================================
-
-def get_logo(
-    team: str,
-) -> Optional[
-    Image.Image
-]:
-
-    _, slug, _ = (
-        TEAM_META[
-            team
-        ]
+    primary = hex_to_rgb(
+        primary_hex
     )
 
-    return fetch_image(
-        "https://a.espncdn.com/"
-        f"i/teamlogos/nfl/500/"
-        f"{slug}.png"
+    secondary = hex_to_rgb(
+        secondary_hex
+    )
+
+    base_width = 112
+    base_height = 130
+
+    icon = Image.new(
+        "RGBA",
+        (
+            base_width,
+            base_height,
+        ),
+        (
+            0,
+            0,
+            0,
+            0,
+        ),
+    )
+
+    draw = ImageDraw.Draw(
+        icon
+    )
+
+    draw_team_symbol(
+        draw,
+        team,
+        base_width // 2,
+        50,
+        primary,
+        secondary,
+    )
+
+    abbreviation_font = load_font(
+        20,
+        True,
+    )
+
+    bbox = draw.textbbox(
+        (
+            0,
+            0,
+        ),
+        team,
+        font=abbreviation_font,
+    )
+
+    text_width = (
+        bbox[2]
+        - bbox[0]
+    )
+
+    draw.rounded_rectangle(
+        (
+            17,
+            101,
+            base_width - 17,
+            127,
+        ),
+        radius=4,
+        fill=(
+            8,
+            12,
+            20,
+            225,
+        ),
+    )
+
+    text_fill = primary
+
+    if sum(
+        primary
+    ) < 140:
+
+        text_fill = (
+            230,
+            230,
+            230,
+        )
+
+    draw.text(
+        (
+            (
+                base_width
+                - text_width
+            )
+            // 2,
+            103,
+        ),
+        team,
+        font=abbreviation_font,
+        fill=text_fill,
+    )
+
+    ratio = (
+        size
+        / base_height
+    )
+
+    output_width = max(
+        1,
+        int(
+            base_width
+            * ratio
+        ),
+    )
+
+    return icon.resize(
+        (
+            output_width,
+            size,
+        ),
+        Image.Resampling.NEAREST,
     )
 
 
@@ -902,7 +2239,6 @@ def depth_position_from_position_data(
             )
 
     own_abbr = ""
-
     parent_abbr = ""
 
     if isinstance(
@@ -1617,34 +2953,6 @@ def draw_centered(
     )
 
 
-def hex_to_rgb(
-    hex_color: str,
-) -> Tuple[
-    int,
-    int,
-    int,
-]:
-
-    hex_color = (
-        hex_color
-        .lstrip("#")
-    )
-
-    return tuple(
-        int(
-            hex_color[
-                i:i + 2
-            ],
-            16,
-        )
-        for i in (
-            0,
-            2,
-            4,
-        )
-    )
-
-
 def make_gradient(
     width: int,
     height: int,
@@ -1937,19 +3245,16 @@ def poster(
 
     y = 65
 
-    logo = get_logo(
-        team
+    # --------------------------------------------------------
+    # ORIGINAL PIXEL TEAM ICON
+    # --------------------------------------------------------
+
+    logo = create_team_icon(
+        team,
+        size=215,
     )
 
     if logo:
-
-        logo.thumbnail(
-            (
-                215,
-                215,
-            ),
-            Image.LANCZOS,
-        )
 
         logo_x = (
             width
@@ -2170,7 +3475,6 @@ def generate_all_team_needs_posters(
     )
 
     outputs = {}
-
     failures = {}
 
     for team in TEAM_META:
