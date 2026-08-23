@@ -26,10 +26,6 @@ from PIL import Image, ImageDraw, ImageFont
 from app.services.storage_supabase import upload_file_return_url
 
 
-# ============================================================
-# CONFIG
-# ============================================================
-
 W = 1080
 H = 1350
 MARGIN = 54
@@ -54,26 +50,12 @@ CATEGORY_ORDER = [
 ]
 
 CATEGORY_LABELS = {
-    "success_rate_by_down_and_distance":
-        "Success Rate by Down and Distance",
-
-    "qb_masterclass":
-        "QB Masterclass",
-
-    "play_that_won_the_game":
-        "Play That Won the Game",
-
-    "better_than_expected":
-        "Better Than Expected",
-
-    "clutch_gene":
-        "Clutch Gene",
+    "success_rate_by_down_and_distance": "Success Rate by Down and Distance",
+    "qb_masterclass": "QB Masterclass",
+    "play_that_won_the_game": "Play That Won the Game",
+    "better_than_expected": "Better Than Expected",
+    "clutch_gene": "Clutch Gene",
 }
-
-
-# ============================================================
-# TEAM COLORS
-# ============================================================
 
 TEAM_COLORS = {
     "ARI": (151, 35, 63),
@@ -111,7 +93,6 @@ TEAM_COLORS = {
     "WSH": (90, 20, 20),
 }
 
-
 TEAM_SECONDARY_COLORS = {
     "ARI": (218, 143, 55),
     "ATL": (20, 20, 20),
@@ -148,7 +129,6 @@ TEAM_SECONDARY_COLORS = {
     "WSH": (255, 182, 18),
 }
 
-
 VALID_PLAY_TYPES = {
     "PASS",
     "RUSH",
@@ -157,12 +137,7 @@ VALID_PLAY_TYPES = {
     "PENALTY",
 }
 
-ROTATION_ANCHOR_DATE = date(
-    2026,
-    1,
-    1,
-)
-
+ROTATION_ANCHOR_DATE = date(2026, 1, 1)
 MIN_SEASON = 2018
 
 USER_AGENT = (
@@ -172,12 +147,7 @@ USER_AGENT = (
 )
 
 
-# ============================================================
-# FONT HELPERS
-# ============================================================
-
 def find_font_bold() -> str:
-
     candidates = [
         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
         "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
@@ -186,17 +156,13 @@ def find_font_bold() -> str:
     ]
 
     for path in candidates:
-
-        if os.path.exists(
-            path
-        ):
+        if os.path.exists(path):
             return path
 
     return ""
 
 
 def find_font_regular() -> str:
-
     candidates = [
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         "/System/Library/Fonts/Supplemental/Arial.ttf",
@@ -204,10 +170,7 @@ def find_font_regular() -> str:
     ]
 
     for path in candidates:
-
-        if os.path.exists(
-            path
-        ):
+        if os.path.exists(path):
             return path
 
     return ""
@@ -217,19 +180,10 @@ FONT_BOLD_PATH = find_font_bold()
 FONT_REG_PATH = find_font_regular()
 
 
-def font(
-    size: int,
-    bold: bool = False,
-):
-
-    path = (
-        FONT_BOLD_PATH
-        if bold
-        else FONT_REG_PATH
-    )
+def font(size: int, bold: bool = False):
+    path = FONT_BOLD_PATH if bold else FONT_REG_PATH
 
     if path:
-
         return ImageFont.truetype(
             path,
             size=size,
@@ -238,14 +192,7 @@ def font(
     return ImageFont.load_default()
 
 
-# ============================================================
-# GENERAL HELPERS
-# ============================================================
-
-def ensure_dir(
-    path: str,
-) -> None:
-
+def ensure_dir(path: str) -> None:
     os.makedirs(
         path,
         exist_ok=True,
@@ -260,7 +207,6 @@ def rounded_rect(
     outline=None,
     width=1,
 ):
-
     draw.rounded_rectangle(
         box,
         radius=radius,
@@ -274,54 +220,31 @@ def wrap_text(
     text: str,
     width: int,
 ) -> str:
-
     return "\n".join(
         textwrap.wrap(
-            str(
-                text
-            ),
+            str(text),
             width=width,
         )
     )
 
 
-def safe_text(
-    value,
-) -> str:
-
+def safe_text(value) -> str:
     if value is None:
         return ""
 
     try:
-
-        if pd.isna(
-            value
-        ):
+        if pd.isna(value):
             return ""
-
     except Exception:
-
         pass
 
-    return str(
-        value
-    )
+    return str(value)
 
 
-def ordinal(
-    n: int,
-) -> str:
-
-    if (
-        10
-        <= n % 100
-        <= 20
-    ):
-
+def ordinal(n: int) -> str:
+    if 10 <= n % 100 <= 20:
         suffix = "th"
-
     else:
-
         suffix = {
             1: "st",
             2: "nd",
@@ -331,21 +254,14 @@ def ordinal(
             "th",
         )
 
-    return (
-        f"{n}{suffix}"
-    )
+    return f"{n}{suffix}"
 
 
-def normalize_team(
-    team: str,
-) -> str:
-
+def normalize_team(team: str) -> str:
     if not team:
         return ""
 
-    team = str(
-        team
-    ).upper()
+    team = str(team).upper()
 
     if team == "WAS":
         return "WSH"
@@ -357,20 +273,13 @@ def clean_desc(
     text: str,
     max_len: int = None,
 ) -> str:
-
     text = (
-        safe_text(
-            text
-        )
-        .replace(
-            "\n",
-            " ",
-        )
+        safe_text(text)
+        .replace("\n", " ")
         .strip()
     )
 
     while "  " in text:
-
         text = text.replace(
             "  ",
             " ",
@@ -378,16 +287,10 @@ def clean_desc(
 
     if (
         max_len is not None
-        and len(
-            text
-        )
-        > max_len
+        and len(text) > max_len
     ):
-
         text = (
-            text[
-                :max_len - 1
-            ]
+            text[:max_len - 1]
             .rstrip()
             + "…"
         )
@@ -399,29 +302,21 @@ def yardline_bin(
     series: pd.Series,
     step: int = 5,
 ) -> pd.Series:
-
     values = pd.to_numeric(
         series,
         errors="coerce",
     )
 
     return (
-        np.floor(
-            values
-            / step
-        )
+        np.floor(values / step)
         * step
-        + step
-        / 2
-    ).astype(
-        "float"
-    )
+        + step / 2
+    ).astype("float")
 
 
 def distance_bucket(
     series: pd.Series,
 ) -> pd.Series:
-
     values = pd.to_numeric(
         series,
         errors="coerce",
@@ -433,30 +328,18 @@ def distance_bucket(
     )
 
     output[
-        (
-            values >= 1
-        )
-        & (
-            values <= 3
-        )
+        (values >= 1)
+        & (values <= 3)
     ] = "1-3 YDS"
 
     output[
-        (
-            values >= 4
-        )
-        & (
-            values <= 6
-        )
+        (values >= 4)
+        & (values <= 6)
     ] = "4-6 YDS"
 
     output[
-        (
-            values >= 7
-        )
-        & (
-            values <= 10
-        )
+        (values >= 7)
+        & (values <= 10)
     ] = "7-10 YDS"
 
     output[
@@ -470,20 +353,14 @@ def format_down_distance(
     down,
     ydstogo,
 ) -> str:
-
     try:
-
         d = int(
-            float(
-                down
-            )
+            float(down)
         )
 
         y = int(
             round(
-                float(
-                    ydstogo
-                )
+                float(ydstogo)
             )
         )
 
@@ -493,17 +370,13 @@ def format_down_distance(
         )
 
     except Exception:
-
-        return (
-            "High-leverage snap"
-        )
+        return "High-leverage snap"
 
 
 def weekly_context(
     season: int,
     week: int,
 ) -> str:
-
     return (
         f"{season} • "
         f"Week {week} • "
@@ -514,7 +387,6 @@ def weekly_context(
 def week_limit_for_year(
     season: int,
 ) -> int:
-
     return (
         18
         if season >= 2021
@@ -526,22 +398,17 @@ def validate_week(
     season: int,
     week: int,
 ) -> None:
-
-    max_week = (
-        week_limit_for_year(
-            season
-        )
+    max_week = week_limit_for_year(
+        season
     )
 
     if (
         week < 1
         or week > max_week
     ):
-
         raise ValueError(
-            f"Invalid week "
-            f"{week} for season "
-            f"{season}. "
+            f"Invalid week {week} "
+            f"for season {season}. "
             f"Use 1-{max_week}."
         )
 
@@ -556,15 +423,11 @@ def fit_multiline_text(
     bold: bool = False,
     line_spacing: int = 6,
 ):
-
-    text = (
-        safe_text(
-            text
-        ).strip()
-    )
+    text = safe_text(
+        text
+    ).strip()
 
     if not text:
-
         return (
             "",
             font(
@@ -579,7 +442,6 @@ def fit_multiline_text(
         min_size - 1,
         -1,
     ):
-
         current_font = font(
             size,
             bold=bold,
@@ -590,8 +452,7 @@ def fit_multiline_text(
             int(
                 max_width
                 / max(
-                    size
-                    * 0.55,
+                    size * 0.55,
                     1,
                 )
             ),
@@ -602,16 +463,11 @@ def fit_multiline_text(
             approx_chars,
         )
 
-        bbox = (
-            draw.multiline_textbbox(
-                (
-                    0,
-                    0,
-                ),
-                wrapped,
-                font=current_font,
-                spacing=line_spacing,
-            )
+        bbox = draw.multiline_textbbox(
+            (0, 0),
+            wrapped,
+            font=current_font,
+            spacing=line_spacing,
         )
 
         text_width = (
@@ -628,7 +484,6 @@ def fit_multiline_text(
             text_width <= max_width
             and text_height <= max_height
         ):
-
             return (
                 wrapped,
                 current_font,
@@ -645,8 +500,7 @@ def fit_multiline_text(
         int(
             max_width
             / max(
-                min_size
-                * 0.55,
+                min_size * 0.55,
                 1,
             )
         ),
@@ -665,7 +519,6 @@ def fit_multiline_text(
 
 
 def now_eastern_date() -> date:
-
     return datetime.now(
         ZoneInfo(
             "America/New_York"
@@ -676,22 +529,18 @@ def now_eastern_date() -> date:
 def rotation_index_for_day(
     day: date,
 ) -> int:
-
     return (
         (
             day
             - ROTATION_ANCHOR_DATE
         ).days
-        % len(
-            CATEGORY_ORDER
-        )
+        % len(CATEGORY_ORDER)
     )
 
 
 def category_for_day(
     day: date,
 ) -> str:
-
     return CATEGORY_ORDER[
         rotation_index_for_day(
             day
@@ -702,13 +551,10 @@ def category_for_day(
 def public_storage_url(
     storage_key: str,
 ) -> str:
-
     base = (
         os.environ[
             "SUPABASE_URL"
-        ].rstrip(
-            "/"
-        )
+        ].rstrip("/")
     )
 
     bucket = os.environ.get(
@@ -725,7 +571,7 @@ def public_storage_url(
 
 
 # ============================================================
-# ORIGINAL PIXEL TEAM ICON HELPERS
+# CUSTOM TEAM ICONS
 # ============================================================
 
 def draw_star(
@@ -735,48 +581,17 @@ def draw_star(
     radius,
     fill,
 ):
-
     points = [
-        (
-            cx,
-            cy - radius,
-        ),
-        (
-            cx + radius // 4,
-            cy - radius // 4,
-        ),
-        (
-            cx + radius,
-            cy - radius // 4,
-        ),
-        (
-            cx + radius // 3,
-            cy + radius // 5,
-        ),
-        (
-            cx + radius // 2,
-            cy + radius,
-        ),
-        (
-            cx,
-            cy + radius // 2,
-        ),
-        (
-            cx - radius // 2,
-            cy + radius,
-        ),
-        (
-            cx - radius // 3,
-            cy + radius // 5,
-        ),
-        (
-            cx - radius,
-            cy - radius // 4,
-        ),
-        (
-            cx - radius // 4,
-            cy - radius // 4,
-        ),
+        (cx, cy - radius),
+        (cx + radius // 4, cy - radius // 4),
+        (cx + radius, cy - radius // 4),
+        (cx + radius // 3, cy + radius // 5),
+        (cx + radius // 2, cy + radius),
+        (cx, cy + radius // 2),
+        (cx - radius // 2, cy + radius),
+        (cx - radius // 3, cy + radius // 5),
+        (cx - radius, cy - radius // 4),
+        (cx - radius // 4, cy - radius // 4),
     ]
 
     draw.polygon(
@@ -791,7 +606,6 @@ def draw_paw(
     cy,
     fill,
 ):
-
     draw.ellipse(
         (
             cx - 14,
@@ -808,7 +622,6 @@ def draw_paw(
         (7, -25),
         (20, -18),
     ]:
-
         draw.ellipse(
             (
                 cx + dx - 5,
@@ -827,7 +640,6 @@ def draw_football(
     fill,
     accent,
 ):
-
     draw.ellipse(
         (
             cx - 34,
@@ -854,7 +666,6 @@ def draw_football(
         0,
         8,
     ):
-
         draw.line(
             (
                 cx + offset,
@@ -874,29 +685,13 @@ def draw_feather(
     fill,
     accent,
 ):
-
     draw.polygon(
         [
-            (
-                cx - 27,
-                cy + 26,
-            ),
-            (
-                cx - 14,
-                cy - 18,
-            ),
-            (
-                cx + 27,
-                cy - 33,
-            ),
-            (
-                cx + 18,
-                cy + 8,
-            ),
-            (
-                cx - 9,
-                cy + 27,
-            ),
+            (cx - 27, cy + 26),
+            (cx - 14, cy - 18),
+            (cx + 27, cy - 33),
+            (cx + 18, cy + 8),
+            (cx - 9, cy + 27),
         ],
         fill=fill,
     )
@@ -919,37 +714,27 @@ def draw_claws(
     cy,
     fill,
 ):
-
     for offset in (
         -19,
         0,
         19,
     ):
-
         draw.polygon(
             [
                 (
-                    cx
-                    + offset
-                    - 5,
+                    cx + offset - 5,
                     cy + 27,
                 ),
                 (
-                    cx
-                    + offset
-                    + 3,
+                    cx + offset + 3,
                     cy - 30,
                 ),
                 (
-                    cx
-                    + offset
-                    + 10,
+                    cx + offset + 10,
                     cy - 34,
                 ),
                 (
-                    cx
-                    + offset
-                    + 3,
+                    cx + offset + 3,
                     cy + 27,
                 ),
             ],
@@ -964,7 +749,6 @@ def draw_stripes(
     fill,
     accent,
 ):
-
     draw.rectangle(
         (
             cx - 31,
@@ -980,7 +764,6 @@ def draw_stripes(
         -9,
         16,
     ):
-
         draw.polygon(
             [
                 (
@@ -1011,43 +794,21 @@ def draw_mountain(
     fill,
     accent,
 ):
-
     draw.polygon(
         [
-            (
-                cx - 36,
-                cy + 27,
-            ),
-            (
-                cx,
-                cy - 31,
-            ),
-            (
-                cx + 36,
-                cy + 27,
-            ),
+            (cx - 36, cy + 27),
+            (cx, cy - 31),
+            (cx + 36, cy + 27),
         ],
         fill=fill,
     )
 
     draw.polygon(
         [
-            (
-                cx - 9,
-                cy - 17,
-            ),
-            (
-                cx,
-                cy - 31,
-            ),
-            (
-                cx + 10,
-                cy - 15,
-            ),
-            (
-                cx + 2,
-                cy - 20,
-            ),
+            (cx - 9, cy - 17),
+            (cx, cy - 31),
+            (cx + 10, cy - 15),
+            (cx + 2, cy - 20),
         ],
         fill=accent,
     )
@@ -1060,45 +821,17 @@ def draw_texas(
     fill,
     accent,
 ):
-
     draw.polygon(
         [
-            (
-                cx - 28,
-                cy - 30,
-            ),
-            (
-                cx + 7,
-                cy - 30,
-            ),
-            (
-                cx + 8,
-                cy - 13,
-            ),
-            (
-                cx + 30,
-                cy - 12,
-            ),
-            (
-                cx + 23,
-                cy + 8,
-            ),
-            (
-                cx + 7,
-                cy + 15,
-            ),
-            (
-                cx - 2,
-                cy + 33,
-            ),
-            (
-                cx - 16,
-                cy + 16,
-            ),
-            (
-                cx - 30,
-                cy + 4,
-            ),
+            (cx - 28, cy - 30),
+            (cx + 7, cy - 30),
+            (cx + 8, cy - 13),
+            (cx + 30, cy - 12),
+            (cx + 23, cy + 8),
+            (cx + 7, cy + 15),
+            (cx - 2, cy + 33),
+            (cx - 16, cy + 16),
+            (cx - 30, cy + 4),
         ],
         fill=fill,
     )
@@ -1119,7 +852,6 @@ def draw_arc(
     fill,
     accent,
 ):
-
     draw.arc(
         (
             cx - 31,
@@ -1154,7 +886,6 @@ def draw_pennant(
     fill,
     accent,
 ):
-
     draw.rectangle(
         (
             cx - 30,
@@ -1167,18 +898,9 @@ def draw_pennant(
 
     draw.polygon(
         [
-            (
-                cx - 26,
-                cy - 27,
-            ),
-            (
-                cx + 33,
-                cy - 4,
-            ),
-            (
-                cx - 26,
-                cy + 17,
-            ),
+            (cx - 26, cy - 27),
+            (cx + 33, cy - 4),
+            (cx - 26, cy + 17),
         ],
         fill=fill,
     )
@@ -1190,33 +912,14 @@ def draw_lightning(
     cy,
     fill,
 ):
-
     draw.polygon(
         [
-            (
-                cx + 5,
-                cy - 34,
-            ),
-            (
-                cx - 22,
-                cy + 1,
-            ),
-            (
-                cx - 5,
-                cy + 1,
-            ),
-            (
-                cx - 14,
-                cy + 34,
-            ),
-            (
-                cx + 25,
-                cy - 8,
-            ),
-            (
-                cx + 8,
-                cy - 8,
-            ),
+            (cx + 5, cy - 34),
+            (cx - 22, cy + 1),
+            (cx - 5, cy + 1),
+            (cx - 14, cy + 34),
+            (cx + 25, cy - 8),
+            (cx + 8, cy - 8),
         ],
         fill=fill,
     )
@@ -1229,45 +932,17 @@ def draw_wave(
     fill,
     accent,
 ):
-
     draw.polygon(
         [
-            (
-                cx - 34,
-                cy + 18,
-            ),
-            (
-                cx - 24,
-                cy - 5,
-            ),
-            (
-                cx - 10,
-                cy - 20,
-            ),
-            (
-                cx + 4,
-                cy - 23,
-            ),
-            (
-                cx + 21,
-                cy - 14,
-            ),
-            (
-                cx + 34,
-                cy + 4,
-            ),
-            (
-                cx + 13,
-                cy - 1,
-            ),
-            (
-                cx,
-                cy + 8,
-            ),
-            (
-                cx - 7,
-                cy + 20,
-            ),
+            (cx - 34, cy + 18),
+            (cx - 24, cy - 5),
+            (cx - 10, cy - 20),
+            (cx + 4, cy - 23),
+            (cx + 21, cy - 14),
+            (cx + 34, cy + 4),
+            (cx + 13, cy - 1),
+            (cx, cy + 8),
+            (cx - 7, cy + 20),
         ],
         fill=fill,
     )
@@ -1290,7 +965,6 @@ def draw_spiral(
     cy,
     fill,
 ):
-
     draw.arc(
         (
             cx - 28,
@@ -1325,25 +999,12 @@ def draw_ship(
     fill,
     accent,
 ):
-
     draw.polygon(
         [
-            (
-                cx - 34,
-                cy + 17,
-            ),
-            (
-                cx + 34,
-                cy + 17,
-            ),
-            (
-                cx + 22,
-                cy + 29,
-            ),
-            (
-                cx - 22,
-                cy + 29,
-            ),
+            (cx - 34, cy + 17),
+            (cx + 34, cy + 17),
+            (cx + 22, cy + 29),
+            (cx - 22, cy + 29),
         ],
         fill=accent,
     )
@@ -1360,36 +1021,18 @@ def draw_ship(
 
     draw.polygon(
         [
-            (
-                cx + 2,
-                cy - 27,
-            ),
-            (
-                cx + 23,
-                cy - 5,
-            ),
-            (
-                cx + 2,
-                cy - 5,
-            ),
+            (cx + 2, cy - 27),
+            (cx + 23, cy - 5),
+            (cx + 2, cy - 5),
         ],
         fill=fill,
     )
 
     draw.polygon(
         [
-            (
-                cx - 3,
-                cy - 24,
-            ),
-            (
-                cx - 22,
-                cy - 4,
-            ),
-            (
-                cx - 3,
-                cy - 4,
-            ),
+            (cx - 3, cy - 24),
+            (cx - 22, cy - 4),
+            (cx - 3, cy - 4),
         ],
         fill=fill,
     )
@@ -1402,41 +1045,16 @@ def draw_hat(
     fill,
     accent,
 ):
-
     draw.polygon(
         [
-            (
-                cx - 33,
-                cy + 16,
-            ),
-            (
-                cx - 19,
-                cy - 13,
-            ),
-            (
-                cx,
-                cy - 25,
-            ),
-            (
-                cx + 19,
-                cy - 13,
-            ),
-            (
-                cx + 33,
-                cy + 16,
-            ),
-            (
-                cx + 10,
-                cy + 9,
-            ),
-            (
-                cx,
-                cy + 21,
-            ),
-            (
-                cx - 10,
-                cy + 9,
-            ),
+            (cx - 33, cy + 16),
+            (cx - 19, cy - 13),
+            (cx, cy - 25),
+            (cx + 19, cy - 13),
+            (cx + 33, cy + 16),
+            (cx + 10, cy + 9),
+            (cx, cy + 21),
+            (cx - 10, cy + 9),
         ],
         fill=fill,
     )
@@ -1456,7 +1074,6 @@ def draw_trumpet(
     cy,
     fill,
 ):
-
     draw.rectangle(
         (
             cx - 23,
@@ -1469,22 +1086,10 @@ def draw_trumpet(
 
     draw.polygon(
         [
-            (
-                cx + 10,
-                cy - 14,
-            ),
-            (
-                cx + 32,
-                cy - 22,
-            ),
-            (
-                cx + 32,
-                cy + 22,
-            ),
-            (
-                cx + 10,
-                cy + 14,
-            ),
+            (cx + 10, cy - 14),
+            (cx + 32, cy - 22),
+            (cx + 32, cy + 22),
+            (cx + 10, cy + 14),
         ],
         fill=fill,
     )
@@ -1510,47 +1115,15 @@ def draw_skyline(
     fill,
     accent,
 ):
-
     buildings = [
-        (
-            -31,
-            11,
-            -22,
-            29,
-        ),
-        (
-            -20,
-            -3,
-            -8,
-            29,
-        ),
-        (
-            -6,
-            -29,
-            6,
-            29,
-        ),
-        (
-            8,
-            -10,
-            21,
-            29,
-        ),
-        (
-            23,
-            3,
-            32,
-            29,
-        ),
+        (-31, 11, -22, 29),
+        (-20, -3, -8, 29),
+        (-6, -29, 6, 29),
+        (8, -10, 21, 29),
+        (23, 3, 32, 29),
     ]
 
-    for (
-        x1,
-        y1,
-        x2,
-        y2,
-    ) in buildings:
-
+    for x1, y1, x2, y2 in buildings:
         draw.rectangle(
             (
                 cx + x1,
@@ -1579,49 +1152,18 @@ def draw_jet(
     cy,
     fill,
 ):
-
     draw.polygon(
         [
-            (
-                cx - 35,
-                cy + 6,
-            ),
-            (
-                cx - 7,
-                cy - 4,
-            ),
-            (
-                cx + 18,
-                cy - 28,
-            ),
-            (
-                cx + 25,
-                cy - 23,
-            ),
-            (
-                cx + 12,
-                cy - 3,
-            ),
-            (
-                cx + 34,
-                cy + 7,
-            ),
-            (
-                cx + 10,
-                cy + 10,
-            ),
-            (
-                cx + 3,
-                cy + 27,
-            ),
-            (
-                cx - 5,
-                cy + 27,
-            ),
-            (
-                cx - 6,
-                cy + 11,
-            ),
+            (cx - 35, cy + 6),
+            (cx - 7, cy - 4),
+            (cx + 18, cy - 28),
+            (cx + 25, cy - 23),
+            (cx + 12, cy - 3),
+            (cx + 34, cy + 7),
+            (cx + 10, cy + 10),
+            (cx + 3, cy + 27),
+            (cx - 5, cy + 27),
+            (cx - 6, cy + 11),
         ],
         fill=fill,
     )
@@ -1632,7 +1174,6 @@ def draw_diamonds(
     cx,
     cy,
 ):
-
     data = [
         (
             cx,
@@ -1651,30 +1192,13 @@ def draw_diamonds(
         ),
     ]
 
-    for (
-        x,
-        y,
-        color,
-    ) in data:
-
+    for x, y, color in data:
         draw.polygon(
             [
-                (
-                    x,
-                    y - 9,
-                ),
-                (
-                    x + 9,
-                    y,
-                ),
-                (
-                    x,
-                    y + 9,
-                ),
-                (
-                    x - 9,
-                    y,
-                ),
+                (x, y - 9),
+                (x + 9, y),
+                (x, y + 9),
+                (x - 9, y),
             ],
             fill=color,
         )
@@ -1687,7 +1211,6 @@ def draw_bridge(
     fill,
     accent,
 ):
-
     draw.rectangle(
         (
             cx - 26,
@@ -1740,7 +1263,6 @@ def draw_flag(
     fill,
     accent,
 ):
-
     draw.rectangle(
         (
             cx - 28,
@@ -1753,22 +1275,10 @@ def draw_flag(
 
     draw.polygon(
         [
-            (
-                cx - 24,
-                cy - 26,
-            ),
-            (
-                cx + 29,
-                cy - 21,
-            ),
-            (
-                cx + 20,
-                cy + 3,
-            ),
-            (
-                cx - 24,
-                cy + 8,
-            ),
+            (cx - 24, cy - 26),
+            (cx + 29, cy - 21),
+            (cx + 20, cy + 3),
+            (cx - 24, cy + 8),
         ],
         fill=fill,
     )
@@ -1781,43 +1291,21 @@ def draw_sword(
     fill,
     accent,
 ):
-
     draw.polygon(
         [
-            (
-                cx - 4,
-                cy - 33,
-            ),
-            (
-                cx + 5,
-                cy - 33,
-            ),
-            (
-                cx + 6,
-                cy + 13,
-            ),
-            (
-                cx - 6,
-                cy + 13,
-            ),
+            (cx - 4, cy - 33),
+            (cx + 5, cy - 33),
+            (cx + 6, cy + 13),
+            (cx - 6, cy + 13),
         ],
         fill=fill,
     )
 
     draw.polygon(
         [
-            (
-                cx - 4,
-                cy - 33,
-            ),
-            (
-                cx,
-                cy - 42,
-            ),
-            (
-                cx + 5,
-                cy - 33,
-            ),
+            (cx - 4, cy - 33),
+            (cx, cy - 42),
+            (cx + 5, cy - 33),
         ],
         fill=accent,
     )
@@ -1850,7 +1338,6 @@ def draw_column(
     fill,
     accent,
 ):
-
     draw.rectangle(
         (
             cx - 27,
@@ -1877,7 +1364,6 @@ def draw_column(
         6,
         19,
     ):
-
         draw.rectangle(
             (
                 cx + x - 3,
@@ -1889,10 +1375,6 @@ def draw_column(
         )
 
 
-# ============================================================
-# TEAM-SPECIFIC PIXEL SYMBOL
-# ============================================================
-
 def draw_team_symbol(
     draw,
     team,
@@ -1901,10 +1383,7 @@ def draw_team_symbol(
     primary,
     secondary,
 ):
-
     if team == "ARI":
-
-        # Cactus
         draw.rectangle(
             (
                 cx - 5,
@@ -1960,7 +1439,6 @@ def draw_team_symbol(
         "BAL",
         "PHI",
     }:
-
         draw_feather(
             draw,
             cx,
@@ -1970,8 +1448,6 @@ def draw_team_symbol(
         )
 
     elif team == "BUF":
-
-        # Hoof / footprint
         draw.ellipse(
             (
                 cx - 26,
@@ -2003,7 +1479,6 @@ def draw_team_symbol(
         )
 
     elif team == "CAR":
-
         draw_claws(
             draw,
             cx,
@@ -2016,7 +1491,6 @@ def draw_team_symbol(
         "DET",
         "JAX",
     }:
-
         draw_paw(
             draw,
             cx,
@@ -2025,7 +1499,6 @@ def draw_team_symbol(
         )
 
     elif team == "CIN":
-
         draw_stripes(
             draw,
             cx,
@@ -2038,8 +1511,6 @@ def draw_team_symbol(
         "CLE",
         "GB",
     }:
-
-        # Generic football
         draw_football(
             draw,
             cx,
@@ -2049,7 +1520,6 @@ def draw_team_symbol(
         )
 
     elif team == "DAL":
-
         draw_star(
             draw,
             cx,
@@ -2059,7 +1529,6 @@ def draw_team_symbol(
         )
 
     elif team == "DEN":
-
         draw_mountain(
             draw,
             cx,
@@ -2069,7 +1538,6 @@ def draw_team_symbol(
         )
 
     elif team == "HOU":
-
         draw_texas(
             draw,
             cx,
@@ -2079,8 +1547,6 @@ def draw_team_symbol(
         )
 
     elif team == "IND":
-
-        # Speed/racing arc
         draw_arc(
             draw,
             cx,
@@ -2090,7 +1556,6 @@ def draw_team_symbol(
         )
 
     elif team == "KC":
-
         draw_pennant(
             draw,
             cx,
@@ -2100,7 +1565,6 @@ def draw_team_symbol(
         )
 
     elif team == "LV":
-
         draw_hat(
             draw,
             cx,
@@ -2110,7 +1574,6 @@ def draw_team_symbol(
         )
 
     elif team == "LAC":
-
         draw_lightning(
             draw,
             cx,
@@ -2119,7 +1582,6 @@ def draw_team_symbol(
         )
 
     elif team == "LAR":
-
         draw_spiral(
             draw,
             cx,
@@ -2128,7 +1590,6 @@ def draw_team_symbol(
         )
 
     elif team == "MIA":
-
         draw_wave(
             draw,
             cx,
@@ -2138,7 +1599,6 @@ def draw_team_symbol(
         )
 
     elif team == "MIN":
-
         draw_ship(
             draw,
             cx,
@@ -2148,7 +1608,6 @@ def draw_team_symbol(
         )
 
     elif team == "NE":
-
         draw_hat(
             draw,
             cx,
@@ -2158,8 +1617,6 @@ def draw_team_symbol(
         )
 
     elif team == "NO":
-
-        # Trumpet
         draw_trumpet(
             draw,
             cx,
@@ -2168,7 +1625,6 @@ def draw_team_symbol(
         )
 
     elif team == "NYG":
-
         draw_skyline(
             draw,
             cx,
@@ -2178,7 +1634,6 @@ def draw_team_symbol(
         )
 
     elif team == "NYJ":
-
         draw_jet(
             draw,
             cx,
@@ -2187,7 +1642,6 @@ def draw_team_symbol(
         )
 
     elif team == "PIT":
-
         draw_diamonds(
             draw,
             cx,
@@ -2195,7 +1649,6 @@ def draw_team_symbol(
         )
 
     elif team == "SF":
-
         draw_bridge(
             draw,
             cx,
@@ -2205,7 +1658,6 @@ def draw_team_symbol(
         )
 
     elif team == "SEA":
-
         draw_wave(
             draw,
             cx,
@@ -2215,7 +1667,6 @@ def draw_team_symbol(
         )
 
     elif team == "TB":
-
         draw_flag(
             draw,
             cx,
@@ -2225,7 +1676,6 @@ def draw_team_symbol(
         )
 
     elif team == "TEN":
-
         draw_sword(
             draw,
             cx,
@@ -2235,7 +1685,6 @@ def draw_team_symbol(
         )
 
     elif team == "WSH":
-
         draw_column(
             draw,
             cx,
@@ -2245,7 +1694,6 @@ def draw_team_symbol(
         )
 
     else:
-
         draw_football(
             draw,
             cx,
@@ -2255,17 +1703,10 @@ def draw_team_symbol(
         )
 
 
-# ============================================================
-# CREATE ORIGINAL TEAM ICON
-#
-# Team abbreviation is built into the icon.
-# ============================================================
-
 def create_team_icon(
     team: str,
     size: int = 155,
 ):
-
     if not team:
         return None
 
@@ -2280,15 +1721,13 @@ def create_team_icon(
         team
     ]
 
-    secondary = (
-        TEAM_SECONDARY_COLORS.get(
-            team,
-            (
-                220,
-                220,
-                220,
-            ),
-        )
+    secondary = TEAM_SECONDARY_COLORS.get(
+        team,
+        (
+            220,
+            220,
+            220,
+        ),
     )
 
     base_width = 112
@@ -2358,10 +1797,7 @@ def create_team_icon(
 
     text_fill = primary
 
-    if sum(
-        primary
-    ) < 140:
-
+    if sum(primary) < 140:
         text_fill = (
             235,
             235,
@@ -2411,13 +1847,11 @@ def create_team_icon(
 def load_csv_gz_url(
     url: str,
 ) -> pd.DataFrame:
-
     response = requests.get(
         url,
         timeout=180,
         headers={
-            "User-Agent":
-                USER_AGENT
+            "User-Agent": USER_AGENT
         },
     )
 
@@ -2430,7 +1864,6 @@ def load_csv_gz_url(
     with gzip.GzipFile(
         fileobj=bio
     ) as gz:
-
         return pd.read_csv(
             gz,
             low_memory=False,
@@ -2440,7 +1873,6 @@ def load_csv_gz_url(
 def load_pbp_one_season(
     season: int,
 ) -> pd.DataFrame:
-
     urls = [
         (
             "https://github.com/"
@@ -2459,25 +1891,20 @@ def load_pbp_one_season(
     last_error = None
 
     for url in urls:
-
         try:
-
             print(
                 f"trying {url}"
             )
 
-            return (
-                load_csv_gz_url(
-                    url
-                )
+            return load_csv_gz_url(
+                url
             )
 
         except Exception as exc:
-
             last_error = exc
 
     raise RuntimeError(
-        "Could not load "
+        f"Could not load "
         f"play-by-play for "
         f"{season}. "
         f"Last error: "
@@ -2488,7 +1915,6 @@ def load_pbp_one_season(
 def prep_df(
     df: pd.DataFrame,
 ) -> pd.DataFrame:
-
     df = df.copy()
 
     numeric_cols = [
@@ -2520,37 +1946,27 @@ def prep_df(
     ]
 
     for column in numeric_cols:
-
         if column in df.columns:
-
             df[
                 column
             ] = pd.to_numeric(
-                df[
-                    column
-                ],
+                df[column],
                 errors="coerce",
             )
 
-    if (
-        "play_type_nfl"
-        in df.columns
-    ):
-
+    if "play_type_nfl" in df.columns:
         df = df[
             df[
                 "play_type_nfl"
-            ].astype(
-                str
-            ).isin(
+            ]
+            .astype(str)
+            .isin(
                 VALID_PLAY_TYPES
             )
         ].copy()
 
     df = df[
-        df[
-            "ep"
-        ].notna()
+        df["ep"].notna()
     ].copy()
 
     df = df[
@@ -2563,33 +1979,22 @@ def prep_df(
         )
     ].copy()
 
-    if (
-        "success"
-        not in df.columns
-    ):
-
+    if "success" not in df.columns:
         df[
             "success"
         ] = (
             pd.to_numeric(
-                df[
-                    "epa"
-                ],
+                df["epa"],
                 errors="coerce",
             )
             > 0
-        ).astype(
-            float
-        )
+        ).astype(float)
 
     else:
-
         df[
             "success"
         ] = pd.to_numeric(
-            df[
-                "success"
-            ],
+            df["success"],
             errors="coerce",
         )
 
@@ -2599,9 +2004,7 @@ def prep_df(
         "home_team",
         "away_team",
     ]:
-
         if column in df.columns:
-
             df[
                 column
             ] = df[
@@ -2616,7 +2019,6 @@ def prep_df(
         and "play_description"
         in df.columns
     ):
-
         df[
             "desc"
         ] = df[
@@ -2627,7 +2029,6 @@ def prep_df(
         "score_differential"
         in df.columns
     ):
-
         df[
             "score_margin"
         ] = pd.to_numeric(
@@ -2643,7 +2044,6 @@ def prep_df(
         and "defteam_score"
         in df.columns
     ):
-
         df[
             "score_margin"
         ] = (
@@ -2662,7 +2062,6 @@ def prep_df(
         )
 
     else:
-
         df[
             "score_margin"
         ] = np.nan
@@ -2671,7 +2070,6 @@ def prep_df(
         "game_seconds_remaining"
         in df.columns
     ):
-
         df[
             "minutes_remaining"
         ] = (
@@ -2685,7 +2083,6 @@ def prep_df(
         )
 
     else:
-
         df[
             "minutes_remaining"
         ] = np.nan
@@ -2697,20 +2094,13 @@ def filter_regular_week(
     df: pd.DataFrame,
     week: int,
 ) -> pd.DataFrame:
-
     output = df.copy()
 
-    if (
-        "game_type"
-        in output.columns
-    ):
-
+    if "game_type" in output.columns:
         output = output[
             output[
                 "game_type"
-            ].astype(
-                str
-            )
+            ].astype(str)
             == "REG"
         ].copy()
 
@@ -2725,30 +2115,22 @@ def filter_regular_week(
 
 
 # ============================================================
-# STATLINE BUILDERS
+# STAT LINES
 # ============================================================
 
 def qb_week_statline(
     df_week: pd.DataFrame,
     player: str,
 ) -> str:
-
     data = df_week[
         df_week[
             "passer_player_name"
-        ].astype(
-            str
-        )
-        == str(
-            player
-        )
+        ].astype(str)
+        == str(player)
     ].copy()
 
     if data.empty:
-
-        return (
-            "Stat line unavailable"
-        )
+        return "Stat line unavailable"
 
     completions = int(
         data.get(
@@ -2757,9 +2139,7 @@ def qb_week_statline(
                 dtype=float
             ),
         )
-        .fillna(
-            0
-        )
+        .fillna(0)
         .sum()
     )
 
@@ -2770,9 +2150,7 @@ def qb_week_statline(
                 dtype=float
             ),
         )
-        .fillna(
-            0
-        )
+        .fillna(0)
         .sum()
     )
 
@@ -2783,9 +2161,7 @@ def qb_week_statline(
                 dtype=float
             ),
         )
-        .fillna(
-            0
-        )
+        .fillna(0)
         .sum()
     )
 
@@ -2802,9 +2178,7 @@ def qb_week_statline(
                 dtype=float
             ),
         )
-        .fillna(
-            0
-        )
+        .fillna(0)
         .sum()
     )
 
@@ -2815,9 +2189,7 @@ def qb_week_statline(
                 dtype=float
             ),
         )
-        .fillna(
-            0
-        )
+        .fillna(0)
         .sum()
     )
 
@@ -2827,9 +2199,7 @@ def qb_week_statline(
             pd.Series(
                 dtype=float
             ),
-        ).fillna(
-            0
-        )
+        ).fillna(0)
         == 1
     ]
 
@@ -2841,9 +2211,7 @@ def qb_week_statline(
                     dtype=float
                 ),
             )
-            .fillna(
-                0
-            )
+            .fillna(0)
             .sum()
         )
         if not rushes.empty
@@ -2858,9 +2226,7 @@ def qb_week_statline(
                     dtype=float
                 ),
             )
-            .fillna(
-                0
-            )
+            .fillna(0)
             .sum()
         )
         if not rushes.empty
@@ -2881,19 +2247,14 @@ def skill_week_statline(
     df_week: pd.DataFrame,
     player: str,
 ) -> str:
-
     recv = df_week[
         df_week.get(
             "receiver_player_name",
             pd.Series(
                 dtype=object
             ),
-        ).astype(
-            str
-        )
-        == str(
-            player
-        )
+        ).astype(str)
+        == str(player)
     ].copy()
 
     rush = df_week[
@@ -2902,12 +2263,8 @@ def skill_week_statline(
             pd.Series(
                 dtype=object
             ),
-        ).astype(
-            str
-        )
-        == str(
-            player
-        )
+        ).astype(str)
+        == str(player)
     ].copy()
 
     receptions = (
@@ -2918,9 +2275,7 @@ def skill_week_statline(
                     dtype=float
                 ),
             )
-            .fillna(
-                0
-            )
+            .fillna(0)
             .sum()
         )
         if not recv.empty
@@ -2935,9 +2290,7 @@ def skill_week_statline(
                     dtype=float
                 ),
             )
-            .fillna(
-                0
-            )
+            .fillna(0)
             .sum()
         )
         if not recv.empty
@@ -2952,9 +2305,7 @@ def skill_week_statline(
                     dtype=float
                 ),
             )
-            .fillna(
-                0
-            )
+            .fillna(0)
             .sum()
         )
         if not recv.empty
@@ -2962,9 +2313,7 @@ def skill_week_statline(
     )
 
     carries = (
-        len(
-            rush
-        )
+        len(rush)
         if not rush.empty
         else 0
     )
@@ -2977,9 +2326,7 @@ def skill_week_statline(
                     dtype=float
                 ),
             )
-            .fillna(
-                0
-            )
+            .fillna(0)
             .sum()
         )
         if not rush.empty
@@ -2994,9 +2341,7 @@ def skill_week_statline(
                     dtype=float
                 ),
             )
-            .fillna(
-                0
-            )
+            .fillna(0)
             .sum()
         )
         if not rush.empty
@@ -3007,7 +2352,6 @@ def skill_week_statline(
         receptions > 0
         and carries > 0
     ):
-
         return (
             f"{receptions} Rec, "
             f"{rec_yards} Rec Yds, "
@@ -3018,7 +2362,6 @@ def skill_week_statline(
         )
 
     if receptions > 0:
-
         return (
             f"{receptions} Rec, "
             f"{rec_yards} Rec Yds, "
@@ -3036,7 +2379,6 @@ def actor_statline(
     df_week: pd.DataFrame,
     player: str,
 ) -> str:
-
     if player in set(
         df_week.get(
             "passer_player_name",
@@ -3045,11 +2387,8 @@ def actor_statline(
             ),
         )
         .dropna()
-        .astype(
-            str
-        )
+        .astype(str)
     ):
-
         return qb_week_statline(
             df_week,
             player,
@@ -3062,7 +2401,7 @@ def actor_statline(
 
 
 # ============================================================
-# CHART POSTER
+# CHART
 # ============================================================
 
 def apply_chart_style(
@@ -3073,7 +2412,6 @@ def apply_chart_style(
     xlabel: str,
     ylabel: str,
 ) -> None:
-
     fig.patch.set_facecolor(
         "white"
     )
@@ -3088,10 +2426,7 @@ def apply_chart_style(
         linewidth=0.8,
     )
 
-    for spine in (
-        ax.spines.values()
-    ):
-
+    for spine in ax.spines.values():
         spine.set_alpha(
             0.45
         )
@@ -3134,7 +2469,6 @@ def save_chart(
     fig: plt.Figure,
     path: str,
 ) -> None:
-
     fig.savefig(
         path,
         dpi=200,
@@ -3156,7 +2490,6 @@ def plot_success_rate_by_down_and_distance(
     week: int,
     out_path: str,
 ) -> None:
-
     data = df_week.copy()
 
     data[
@@ -3229,9 +2562,7 @@ def plot_success_rate_by_down_and_distance(
             columns="down",
             values="success_rate",
         )
-        .reindex(
-            order
-        )
+        .reindex(order)
     )
 
     labels = {
@@ -3261,17 +2592,12 @@ def plot_success_rate_by_down_and_distance(
     )
 
     x = np.arange(
-        len(
-            order
-        )
+        len(order)
     )
 
     bar_width = 0.18
 
-    for (
-        index,
-        down,
-    ) in enumerate(
+    for index, down in enumerate(
         [
             1,
             2,
@@ -3279,16 +2605,14 @@ def plot_success_rate_by_down_and_distance(
             4,
         ]
     ):
-
         values = (
             pivot[
                 down
             ].values
-            if down in pivot.columns
+            if down
+            in pivot.columns
             else np.full(
-                len(
-                    order
-                ),
+                len(order),
                 np.nan,
             )
         )
@@ -3332,7 +2656,7 @@ def plot_success_rate_by_down_and_distance(
 
 
 # ============================================================
-# IMAGE POSTERS
+# PLAYER POSTERS
 # ============================================================
 
 @dataclass
@@ -3348,9 +2672,16 @@ class PosterItem:
     chip1: str
     chip2: str
     chip3: str
-    accent_rgb: Tuple[int, int, int]
+    accent_rgb: Tuple[
+        int,
+        int,
+        int,
+    ]
     visual_kind: str
-    visual_values: Dict[str, float]
+    visual_values: Dict[
+        str,
+        float,
+    ]
 
 
 def add_gradient_background(
@@ -3361,7 +2692,6 @@ def add_gradient_background(
         int,
     ],
 ) -> None:
-
     overlay = Image.new(
         "RGBA",
         img.size,
@@ -3375,17 +2705,12 @@ def add_gradient_background(
 
     pixels = overlay.load()
 
-    for y in range(
-        H
-    ):
-
+    for y in range(H):
         alpha = int(
             95
             * (
                 1
-                - (
-                    y / H
-                )
+                - y / H
             )
         )
 
@@ -3404,10 +2729,7 @@ def add_gradient_background(
             * 0.42
         )
 
-        for x in range(
-            W
-        ):
-
+        for x in range(W):
             pixels[
                 x,
                 y,
@@ -3423,9 +2745,2548 @@ def add_gradient_background(
     )
 
 
+def paste_logo(
+    base: Image.Image,
+    team: str,
+) -> None:
+    icon = create_team_icon(
+        team,
+        size=155,
+    )
+
+    if icon is None:
+        return
+
+    lx = (
+        W
+        - MARGIN
+        - icon.width
+    )
+
+    ly = 28
+
+    base.alpha_composite(
+        icon,
+        (
+            lx,
+            ly,
+        ),
+    )
+
+
+def draw_header(
+    draw,
+    item: PosterItem,
+):
+    draw.text(
+        (
+            MARGIN,
+            34,
+        ),
+        "STAT OF THE DAY",
+        font=font(
+            24,
+            bold=True,
+        ),
+        fill=MUTED,
+    )
+
+    draw.text(
+        (
+            MARGIN,
+            74,
+        ),
+        item.title,
+        font=font(
+            54,
+            bold=True,
+        ),
+        fill=TEXT,
+    )
+
+    draw.text(
+        (
+            MARGIN,
+            140,
+        ),
+        item.subtitle,
+        font=font(24),
+        fill=MUTED,
+    )
+
+
+def draw_player_row(
+    draw,
+    item: PosterItem,
+):
+    y = 184
+
+    rounded_rect(
+        draw,
+        (
+            MARGIN,
+            y,
+            W - MARGIN,
+            y + 108,
+        ),
+        24,
+        fill=CARD,
+        outline=LINE,
+        width=2,
+    )
+
+    max_width = (
+        W
+        - 2 * MARGIN
+        - 44
+    )
+
+    max_height = (
+        108 - 28
+    )
+
+    (
+        wrapped,
+        fitted_font,
+        spacing,
+    ) = fit_multiline_text(
+        draw=draw,
+        text=item.player,
+        max_width=max_width,
+        max_height=max_height,
+        start_size=46,
+        min_size=28,
+        bold=True,
+        line_spacing=4,
+    )
+
+    bbox = draw.multiline_textbbox(
+        (
+            0,
+            0,
+        ),
+        wrapped,
+        font=fitted_font,
+        spacing=spacing,
+    )
+
+    text_h = (
+        bbox[3]
+        - bbox[1]
+    )
+
+    text_y = (
+        y
+        + (
+            108
+            - text_h
+        )
+        // 2
+        - 2
+    )
+
+    draw.multiline_text(
+        (
+            MARGIN + 22,
+            text_y,
+        ),
+        wrapped,
+        font=fitted_font,
+        fill=TEXT,
+        spacing=spacing,
+    )
+
+
+def draw_big_stat(
+    draw,
+    item: PosterItem,
+):
+    y = 314
+
+    rounded_rect(
+        draw,
+        (
+            MARGIN,
+            y,
+            W - MARGIN,
+            y + 172,
+        ),
+        28,
+        fill=CARD2,
+        outline=item.accent_rgb,
+        width=3,
+    )
+
+    draw.text(
+        (
+            MARGIN + 24,
+            y + 18,
+        ),
+        item.big_label,
+        font=font(
+            26,
+            bold=True,
+        ),
+        fill=MUTED,
+    )
+
+    max_width = (
+        W
+        - 2 * MARGIN
+        - 48
+    )
+
+    (
+        wrapped,
+        fitted_font,
+        spacing,
+    ) = fit_multiline_text(
+        draw=draw,
+        text=item.big_value,
+        max_width=max_width,
+        max_height=96,
+        start_size=92,
+        min_size=60,
+        bold=True,
+        line_spacing=4,
+    )
+
+    draw.multiline_text(
+        (
+            MARGIN + 24,
+            y + 56,
+        ),
+        wrapped,
+        font=fitted_font,
+        fill=TEXT,
+        spacing=spacing,
+    )
+
+
+def draw_description(
+    draw,
+    item: PosterItem,
+):
+    y = 510
+
+    rounded_rect(
+        draw,
+        (
+            MARGIN,
+            y,
+            W - MARGIN,
+            y + 138,
+        ),
+        22,
+        fill=CARD,
+        outline=LINE,
+        width=2,
+    )
+
+    max_width = (
+        W
+        - 2 * MARGIN
+        - 36
+    )
+
+    max_height = (
+        138 - 28
+    )
+
+    (
+        wrapped,
+        fitted_font,
+        spacing,
+    ) = fit_multiline_text(
+        draw=draw,
+        text=item.description,
+        max_width=max_width,
+        max_height=max_height,
+        start_size=28,
+        min_size=18,
+        bold=False,
+        line_spacing=7,
+    )
+
+    bbox = draw.multiline_textbbox(
+        (
+            0,
+            0,
+        ),
+        wrapped,
+        font=fitted_font,
+        spacing=spacing,
+    )
+
+    text_h = (
+        bbox[3]
+        - bbox[1]
+    )
+
+    text_y = (
+        y
+        + (
+            138
+            - text_h
+        )
+        // 2
+        - 2
+    )
+
+    draw.multiline_text(
+        (
+            MARGIN + 18,
+            text_y,
+        ),
+        wrapped,
+        font=fitted_font,
+        fill=TEXT,
+        spacing=spacing,
+    )
+
+
+def draw_statline(
+    draw,
+    item: PosterItem,
+):
+    y = 664
+
+    rounded_rect(
+        draw,
+        (
+            MARGIN,
+            y,
+            W - MARGIN,
+            y + 126,
+        ),
+        22,
+        fill=CARD,
+        outline=LINE,
+        width=2,
+    )
+
+    draw.text(
+        (
+            MARGIN + 18,
+            y + 14,
+        ),
+        "STAT LINE",
+        font=font(
+            20,
+            bold=True,
+        ),
+        fill=MUTED,
+    )
+
+    max_width = (
+        W
+        - 2 * MARGIN
+        - 36
+    )
+
+    max_height = (
+        126 - 44
+    )
+
+    (
+        wrapped,
+        fitted_font,
+        spacing,
+    ) = fit_multiline_text(
+        draw=draw,
+        text=item.statline,
+        max_width=max_width,
+        max_height=max_height,
+        start_size=28,
+        min_size=17,
+        bold=False,
+        line_spacing=6,
+    )
+
+    draw.multiline_text(
+        (
+            MARGIN + 18,
+            y + 44,
+        ),
+        wrapped,
+        font=fitted_font,
+        fill=TEXT,
+        spacing=spacing,
+    )
+
+
+def draw_visual(
+    draw,
+    item: PosterItem,
+):
+    y = 814
+
+    rounded_rect(
+        draw,
+        (
+            MARGIN,
+            y,
+            W - MARGIN,
+            y + 252,
+        ),
+        28,
+        fill=CARD,
+        outline=LINE,
+        width=2,
+    )
+
+    draw.text(
+        (
+            MARGIN + 20,
+            y + 16,
+        ),
+        "VISUAL BREAKDOWN",
+        font=font(
+            22,
+            bold=True,
+        ),
+        fill=MUTED,
+    )
+
+    if (
+        item.visual_kind
+        == "before_after"
+    ):
+        left = (
+            MARGIN + 30
+        )
+
+        right = (
+            W
+            - MARGIN
+            - 30
+        )
+
+        before = max(
+            0.0,
+            min(
+                1.0,
+                item.visual_values.get(
+                    "before",
+                    0.0,
+                ),
+            ),
+        )
+
+        after = max(
+            0.0,
+            min(
+                1.0,
+                item.visual_values.get(
+                    "after",
+                    0.0,
+                ),
+            ),
+        )
+
+        draw.text(
+            (
+                left,
+                y + 56,
+            ),
+            (
+                f"Before: "
+                f"{before * 100:.0f}%"
+            ),
+            font=font(
+                24,
+                bold=True,
+            ),
+            fill=TEXT,
+        )
+
+        draw.text(
+            (
+                left + 470,
+                y + 56,
+            ),
+            (
+                f"After: "
+                f"{after * 100:.0f}%"
+            ),
+            font=font(
+                24,
+                bold=True,
+            ),
+            fill=TEXT,
+        )
+
+        bar_y1 = (
+            y + 104
+        )
+
+        bar_y2 = (
+            y + 140
+        )
+
+        rounded_rect(
+            draw,
+            (
+                left,
+                bar_y1,
+                right,
+                bar_y2,
+            ),
+            18,
+            fill=(
+                28,
+                34,
+                48,
+            ),
+        )
+
+        rounded_rect(
+            draw,
+            (
+                left,
+                bar_y1,
+                left
+                + int(
+                    (
+                        right
+                        - left
+                    )
+                    * before
+                ),
+                bar_y2,
+            ),
+            18,
+            fill=YELLOW,
+        )
+
+        bar2_y1 = (
+            y + 176
+        )
+
+        bar2_y2 = (
+            y + 212
+        )
+
+        rounded_rect(
+            draw,
+            (
+                left,
+                bar2_y1,
+                right,
+                bar2_y2,
+            ),
+            18,
+            fill=(
+                28,
+                34,
+                48,
+            ),
+        )
+
+        rounded_rect(
+            draw,
+            (
+                left,
+                bar2_y1,
+                left
+                + int(
+                    (
+                        right
+                        - left
+                    )
+                    * after
+                ),
+                bar2_y2,
+            ),
+            18,
+            fill=GREEN,
+        )
+
+    elif (
+        item.visual_kind
+        == "percentile"
+    ):
+        pct = max(
+            1,
+            min(
+                99,
+                int(
+                    item.visual_values.get(
+                        "percentile",
+                        50,
+                    )
+                ),
+            ),
+        )
+
+        left = (
+            MARGIN + 30
+        )
+
+        right = (
+            W
+            - MARGIN
+            - 30
+        )
+
+        draw.text(
+            (
+                left,
+                y + 54,
+            ),
+            f"{pct}th percentile",
+            font=font(
+                50,
+                bold=True,
+            ),
+            fill=TEXT,
+        )
+
+        draw.text(
+            (
+                left,
+                y + 112,
+            ),
+            (
+                "Compared to other "
+                "performances that week"
+            ),
+            font=font(20),
+            fill=MUTED,
+        )
+
+        bar_y1 = (
+            y + 172
+        )
+
+        bar_y2 = (
+            y + 210
+        )
+
+        rounded_rect(
+            draw,
+            (
+                left,
+                bar_y1,
+                right,
+                bar_y2,
+            ),
+            18,
+            fill=(
+                28,
+                34,
+                48,
+            ),
+        )
+
+        fill_x = (
+            left
+            + int(
+                (
+                    right
+                    - left
+                )
+                * (
+                    pct
+                    / 100.0
+                )
+            )
+        )
+
+        fill_color = (
+            GREEN
+            if pct >= 75
+            else YELLOW
+            if pct >= 50
+            else RED
+        )
+
+        rounded_rect(
+            draw,
+            (
+                left,
+                bar_y1,
+                fill_x,
+                bar_y2,
+            ),
+            18,
+            fill=fill_color,
+        )
+
+    elif (
+        item.visual_kind
+        == "expected_vs_actual"
+    ):
+        expected = max(
+            0.0,
+            float(
+                item.visual_values.get(
+                    "expected",
+                    0.0,
+                )
+            ),
+        )
+
+        actual = max(
+            0.0,
+            float(
+                item.visual_values.get(
+                    "actual",
+                    0.0,
+                )
+            ),
+        )
+
+        top = max(
+            expected,
+            actual,
+            1.0,
+        )
+
+        chart_left = (
+            MARGIN + 150
+        )
+
+        chart_right = (
+            W
+            - MARGIN
+            - 150
+        )
+
+        base_y = (
+            y + 208
+        )
+
+        max_h = 120
+        bar_w = 150
+
+        expected_h = int(
+            max_h
+            * (
+                expected
+                / top
+            )
+        )
+
+        actual_h = int(
+            max_h
+            * (
+                actual
+                / top
+            )
+        )
+
+        draw.line(
+            (
+                chart_left - 60,
+                base_y,
+                chart_right + 60,
+                base_y,
+            ),
+            fill=LINE,
+            width=3,
+        )
+
+        lx1 = (
+            chart_left
+        )
+
+        lx2 = (
+            chart_left
+            + bar_w
+        )
+
+        rx1 = (
+            chart_right
+            - bar_w
+        )
+
+        rx2 = (
+            chart_right
+        )
+
+        rounded_rect(
+            draw,
+            (
+                lx1,
+                base_y
+                - expected_h,
+                lx2,
+                base_y,
+            ),
+            18,
+            fill=YELLOW,
+        )
+
+        rounded_rect(
+            draw,
+            (
+                rx1,
+                base_y
+                - actual_h,
+                rx2,
+                base_y,
+            ),
+            18,
+            fill=GREEN,
+        )
+
+        draw.text(
+            (
+                lx1 + 28,
+                base_y
+                - expected_h
+                - 34,
+            ),
+            f"{expected:.0f}",
+            font=font(
+                28,
+                bold=True,
+            ),
+            fill=TEXT,
+        )
+
+        draw.text(
+            (
+                rx1 + 28,
+                base_y
+                - actual_h
+                - 34,
+            ),
+            f"{actual:.0f}",
+            font=font(
+                28,
+                bold=True,
+            ),
+            fill=TEXT,
+        )
+
+        draw.text(
+            (
+                lx1 + 12,
+                base_y + 12,
+            ),
+            "Expected",
+            font=font(
+                22,
+                bold=True,
+            ),
+            fill=TEXT,
+        )
+
+        draw.text(
+            (
+                rx1 + 28,
+                base_y + 12,
+            ),
+            "Actual",
+            font=font(
+                22,
+                bold=True,
+            ),
+            fill=TEXT,
+        )
+
+
+def draw_chips(
+    draw,
+    item: PosterItem,
+):
+    y = 1092
+
+    gap = 16
+
+    chip_w = (
+        (
+            W
+            - 2 * MARGIN
+            - 2 * gap
+        )
+        // 3
+    )
+
+    chips = [
+        item.chip1,
+        item.chip2,
+        item.chip3,
+    ]
+
+    for index, text in enumerate(
+        chips
+    ):
+        x1 = (
+            MARGIN
+            + index
+            * (
+                chip_w
+                + gap
+            )
+        )
+
+        x2 = (
+            x1
+            + chip_w
+        )
+
+        rounded_rect(
+            draw,
+            (
+                x1,
+                y,
+                x2,
+                y + 88,
+            ),
+            22,
+            fill=CARD2,
+            outline=LINE,
+            width=2,
+        )
+
+        draw.multiline_text(
+            (
+                x1 + 14,
+                y + 14,
+            ),
+            wrap_text(
+                text,
+                18,
+            ),
+            font=font(
+                20,
+                bold=True,
+            ),
+            fill=TEXT,
+            spacing=4,
+        )
+
+
+def draw_footer(
+    draw,
+    season: int,
+    week: int,
+):
+    draw.text(
+        (
+            MARGIN,
+            H - 36,
+        ),
+        (
+            f"{season} "
+            f"Week {week} • "
+            "Regular Season"
+        ),
+        font=font(18),
+        fill=MUTED,
+    )
+
+
+def render_player_poster(
+    item: PosterItem,
+    season: int,
+    week: int,
+    out_path: str,
+) -> None:
+    base = Image.new(
+        "RGBA",
+        (
+            W,
+            H,
+        ),
+        BG + (255,),
+    )
+
+    add_gradient_background(
+        base,
+        item.accent_rgb,
+    )
+
+    draw = ImageDraw.Draw(
+        base
+    )
+
+    draw_header(
+        draw,
+        item,
+    )
+
+    draw_player_row(
+        draw,
+        item,
+    )
+
+    draw_big_stat(
+        draw,
+        item,
+    )
+
+    draw_description(
+        draw,
+        item,
+    )
+
+    draw_statline(
+        draw,
+        item,
+    )
+
+    draw_visual(
+        draw,
+        item,
+    )
+
+    draw_chips(
+        draw,
+        item,
+    )
+
+    draw_footer(
+        draw,
+        season,
+        week,
+    )
+
+    paste_logo(
+        base,
+        item.team,
+    )
+
+    base.convert(
+        "RGB"
+    ).save(
+        out_path,
+        quality=95,
+    )
+
+    print(
+        f"saved: {out_path}"
+    )
+
+
 # ============================================================
-# ORIGINAL TEAM ICON PLACEMENT
+# CATEGORY BUILDERS
 # ============================================================
 
-def paste_logo(
-    base: Image.Image
+def choose_actor(
+    row: pd.Series,
+) -> str:
+    for key in [
+        "receiver_player_name",
+        "rusher_player_name",
+        "passer_player_name",
+    ]:
+        value = safe_text(
+            row.get(key)
+        )
+
+        if value:
+            return value
+
+    return "Impact Player"
+
+
+def percentile_from_series(
+    series: pd.Series,
+    value: float,
+) -> int:
+    values = pd.to_numeric(
+        series,
+        errors="coerce",
+    ).dropna()
+
+    if values.empty:
+        return 50
+
+    pct = (
+        values <= value
+    ).mean()
+
+    return max(
+        1,
+        min(
+            99,
+            int(
+                round(
+                    pct * 100
+                )
+            ),
+        ),
+    )
+
+
+def build_qb_masterclass(
+    df_week: pd.DataFrame,
+    season: int,
+    week: int,
+) -> PosterItem:
+    candidates = df_week.copy()
+
+    candidates = candidates[
+        candidates[
+            "passer_player_name"
+        ].notna()
+    ].copy()
+
+    candidates = candidates[
+        candidates[
+            "epa"
+        ].notna()
+    ].copy()
+
+    if (
+        "qb_dropback"
+        in candidates.columns
+    ):
+        candidates = candidates[
+            (
+                candidates[
+                    "pass"
+                ]
+                == 1
+            )
+            |
+            (
+                candidates[
+                    "qb_dropback"
+                ]
+                == 1
+            )
+        ].copy()
+
+    else:
+        candidates = candidates[
+            candidates[
+                "pass"
+            ]
+            == 1
+        ].copy()
+
+    grouped = (
+        candidates.groupby(
+            [
+                "posteam",
+                "passer_player_name",
+            ],
+            dropna=False,
+        )
+        .agg(
+            attempts=(
+                "epa",
+                "size",
+            ),
+            epa_per_play=(
+                "epa",
+                "mean",
+            ),
+            total_epa=(
+                "epa",
+                "sum",
+            ),
+            cpoe=(
+                "cpoe",
+                "mean",
+            ),
+            success_rate=(
+                "success",
+                "mean",
+            ),
+        )
+        .reset_index()
+    )
+
+    grouped = grouped[
+        grouped[
+            "attempts"
+        ]
+        >= 15
+    ].copy()
+
+    grouped = grouped.sort_values(
+        [
+            "epa_per_play",
+            "total_epa",
+        ],
+        ascending=[
+            False,
+            False,
+        ],
+    )
+
+    if grouped.empty:
+        raise RuntimeError(
+            "No QB Masterclass "
+            "candidate found for "
+            "that week."
+        )
+
+    row = grouped.iloc[
+        0
+    ]
+
+    player = safe_text(
+        row[
+            "passer_player_name"
+        ]
+    )
+
+    team = normalize_team(
+        safe_text(
+            row[
+                "posteam"
+            ]
+        )
+    )
+
+    statline = qb_week_statline(
+        df_week,
+        player,
+    )
+
+    pct = percentile_from_series(
+        grouped[
+            "epa_per_play"
+        ],
+        float(
+            row[
+                "epa_per_play"
+            ]
+        ),
+    )
+
+    return PosterItem(
+        title="QB MASTERCLASS",
+        subtitle=weekly_context(
+            season,
+            week,
+        ),
+        player=player,
+        team=team,
+        big_value=(
+            f"{float(row['epa_per_play']):+.2f}"
+        ),
+        big_label="IMPACT PER PLAY",
+        description=(
+            f"{player} created "
+            "efficient offense all "
+            "game long, not just "
+            "empty passing volume."
+        ),
+        statline=statline,
+        chip1=(
+            f"{int(row['attempts'])} "
+            "dropbacks"
+        ),
+        chip2=(
+            f"{float(row['cpoe']):+.1f}% "
+            "accuracy vs expected"
+            if pd.notna(
+                row[
+                    "cpoe"
+                ]
+            )
+            else
+            "Accuracy data unavailable"
+        ),
+        chip3=(
+            f"{float(row['success_rate']):.0%} "
+            "positive plays"
+        ),
+        accent_rgb=TEAM_COLORS.get(
+            team,
+            BLUE,
+        ),
+        visual_kind="percentile",
+        visual_values={
+            "percentile": pct
+        },
+    )
+
+
+def build_play_that_won_game(
+    df_week: pd.DataFrame,
+    season: int,
+    week: int,
+) -> PosterItem:
+    candidates = df_week.copy()
+
+    candidates = candidates[
+        candidates[
+            "wpa"
+        ].notna()
+    ].copy()
+
+    candidates[
+        "abs_wpa"
+    ] = candidates[
+        "wpa"
+    ].abs()
+
+    candidates = candidates[
+        candidates[
+            "abs_wpa"
+        ]
+        > 0.05
+    ].copy()
+
+    candidates = candidates[
+        candidates[
+            "desc"
+        ].notna()
+    ].copy()
+
+    candidates = candidates.sort_values(
+        [
+            "abs_wpa",
+            "epa",
+        ],
+        ascending=[
+            False,
+            False,
+        ],
+    )
+
+    if candidates.empty:
+        raise RuntimeError(
+            "No Play That Won "
+            "the Game candidate "
+            "found for that week."
+        )
+
+    row = candidates.iloc[
+        0
+    ]
+
+    player = choose_actor(
+        row
+    )
+
+    team = normalize_team(
+        safe_text(
+            row.get(
+                "posteam"
+            )
+        )
+    )
+
+    wp_before = (
+        float(
+            row.get(
+                "wp"
+            )
+        )
+        if pd.notna(
+            row.get(
+                "wp"
+            )
+        )
+        else 0.0
+    )
+
+    wpa = (
+        float(
+            row.get(
+                "wpa"
+            )
+        )
+        if pd.notna(
+            row.get(
+                "wpa"
+            )
+        )
+        else 0.0
+    )
+
+    wp_after = max(
+        0.0,
+        min(
+            1.0,
+            wp_before + wpa,
+        ),
+    )
+
+    teams_line = ""
+
+    away = safe_text(
+        row.get(
+            "away_team"
+        )
+    )
+
+    home = safe_text(
+        row.get(
+            "home_team"
+        )
+    )
+
+    if (
+        away
+        and home
+    ):
+        teams_line = (
+            f"{away} at {home}"
+        )
+
+    statline = actor_statline(
+        df_week,
+        player,
+    )
+
+    return PosterItem(
+        title=(
+            "PLAY THAT WON THE GAME"
+        ),
+        subtitle=(
+            f"{weekly_context(season, week)} "
+            f"• {teams_line}"
+            if teams_line
+            else weekly_context(
+                season,
+                week,
+            )
+        ),
+        player=player,
+        team=team,
+        big_value=(
+            f"{wpa * 100:+.1f}%"
+        ),
+        big_label=(
+            "WIN CHANCE SWING"
+        ),
+        description=clean_desc(
+            row.get(
+                "desc"
+            ),
+            max_len=None,
+        ),
+        statline=statline,
+        chip1=(
+            f"Impact "
+            f"{float(row['epa']):+.2f}"
+            if pd.notna(
+                row.get(
+                    "epa"
+                )
+            )
+            else
+            "Impact unavailable"
+        ),
+        chip2=(
+            f"Q{int(row['qtr'])}"
+            if pd.notna(
+                row.get(
+                    "qtr"
+                )
+            )
+            else
+            "Quarter unavailable"
+        ),
+        chip3=format_down_distance(
+            row.get(
+                "down"
+            ),
+            row.get(
+                "ydstogo"
+            ),
+        ),
+        accent_rgb=TEAM_COLORS.get(
+            team,
+            BLUE,
+        ),
+        visual_kind="before_after",
+        visual_values={
+            "before": wp_before,
+            "after": wp_after,
+        },
+    )
+
+
+def build_better_than_expected(
+    df_week: pd.DataFrame,
+    season: int,
+    week: int,
+) -> PosterItem:
+    candidates = df_week.copy()
+
+    candidates = candidates[
+        candidates[
+            "yards_gained"
+        ].notna()
+    ].copy()
+
+    candidates = candidates[
+        (
+            candidates[
+                "rush"
+            ]
+            == 1
+        )
+        |
+        (
+            candidates[
+                "receiver_player_name"
+            ].notna()
+        )
+    ].copy()
+
+    candidates[
+        "ydstogo_bucket"
+    ] = distance_bucket(
+        candidates[
+            "ydstogo"
+        ]
+    )
+
+    candidates[
+        "yard_bin"
+    ] = yardline_bin(
+        candidates[
+            "yardline_100"
+        ],
+        step=20,
+    )
+
+    candidates[
+        "down_bucket"
+    ] = (
+        candidates[
+            "down"
+        ]
+        .fillna(0)
+        .astype(int)
+    )
+
+    baseline = (
+        candidates.groupby(
+            [
+                "down_bucket",
+                "ydstogo_bucket",
+                "yard_bin",
+            ],
+            dropna=False,
+        )
+        .agg(
+            expected_yards=(
+                "yards_gained",
+                "mean",
+            ),
+            sample=(
+                "yards_gained",
+                "size",
+            ),
+        )
+        .reset_index()
+    )
+
+    baseline = baseline[
+        baseline[
+            "sample"
+        ]
+        >= 3
+    ].copy()
+
+    candidates = candidates.merge(
+        baseline[
+            [
+                "down_bucket",
+                "ydstogo_bucket",
+                "yard_bin",
+                "expected_yards",
+            ]
+        ],
+        on=[
+            "down_bucket",
+            "ydstogo_bucket",
+            "yard_bin",
+        ],
+        how="left",
+    )
+
+    candidates[
+        "expected_yards"
+    ] = candidates[
+        "expected_yards"
+    ].fillna(
+        candidates[
+            "yards_gained"
+        ].median()
+    )
+
+    candidates[
+        "yards_over_expected"
+    ] = (
+        candidates[
+            "yards_gained"
+        ]
+        - candidates[
+            "expected_yards"
+        ]
+    )
+
+    candidates[
+        "player_name"
+    ] = candidates[
+        "receiver_player_name"
+    ].fillna(
+        candidates[
+            "rusher_player_name"
+        ]
+    )
+
+    candidates = candidates[
+        candidates[
+            "player_name"
+        ].notna()
+    ].copy()
+
+    grouped = (
+        candidates.groupby(
+            [
+                "posteam",
+                "player_name",
+            ],
+            dropna=False,
+        )
+        .agg(
+            total_yoe=(
+                "yards_over_expected",
+                "sum",
+            ),
+            total_actual=(
+                "yards_gained",
+                "sum",
+            ),
+            total_expected=(
+                "expected_yards",
+                "sum",
+            ),
+            plays=(
+                "yards_over_expected",
+                "size",
+            ),
+        )
+        .reset_index()
+    )
+
+    grouped = grouped[
+        grouped[
+            "plays"
+        ]
+        >= 4
+    ].copy()
+
+    grouped = grouped.sort_values(
+        [
+            "total_yoe",
+            "total_actual",
+        ],
+        ascending=[
+            False,
+            False,
+        ],
+    )
+
+    if grouped.empty:
+        raise RuntimeError(
+            "No Better Than Expected "
+            "candidate found for "
+            "that week."
+        )
+
+    row = grouped.iloc[
+        0
+    ]
+
+    player = safe_text(
+        row[
+            "player_name"
+        ]
+    )
+
+    team = normalize_team(
+        safe_text(
+            row[
+                "posteam"
+            ]
+        )
+    )
+
+    statline = skill_week_statline(
+        df_week,
+        player,
+    )
+
+    return PosterItem(
+        title=(
+            "BETTER THAN EXPECTED"
+        ),
+        subtitle=weekly_context(
+            season,
+            week,
+        ),
+        player=player,
+        team=team,
+        big_value=(
+            f"{float(row['total_yoe']):+.1f}"
+        ),
+        big_label=(
+            "YARDS ABOVE EXPECTATION"
+        ),
+        description=(
+            f"{player} got much "
+            "more out of his touches "
+            "than an average player "
+            "would in the same "
+            "situations."
+        ),
+        statline=statline,
+        chip1=(
+            f"Actual "
+            f"{float(row['total_actual']):.0f} "
+            "yds"
+        ),
+        chip2=(
+            f"Expected "
+            f"{float(row['total_expected']):.0f} "
+            "yds"
+        ),
+        chip3=(
+            f"{int(row['plays'])} plays"
+        ),
+        accent_rgb=TEAM_COLORS.get(
+            team,
+            BLUE,
+        ),
+        visual_kind=(
+            "expected_vs_actual"
+        ),
+        visual_values={
+            "expected": float(
+                row[
+                    "total_expected"
+                ]
+            ),
+            "actual": float(
+                row[
+                    "total_actual"
+                ]
+            ),
+        },
+    )
+
+
+def build_clutch_gene(
+    df_week: pd.DataFrame,
+    season: int,
+    week: int,
+) -> PosterItem:
+    candidates = df_week.copy()
+
+    candidates = candidates[
+        candidates[
+            "epa"
+        ].notna()
+    ].copy()
+
+    candidates[
+        "actor"
+    ] = candidates.apply(
+        choose_actor,
+        axis=1,
+    )
+
+    candidates = candidates[
+        candidates[
+            "actor"
+        ]
+        != "Impact Player"
+    ].copy()
+
+    candidates = candidates[
+        candidates[
+            "qtr"
+        ]
+        .fillna(0)
+        >= 4
+    ].copy()
+
+    candidates = candidates[
+        candidates[
+            "wp"
+        ].between(
+            0.20,
+            0.80,
+            inclusive="both",
+        )
+    ].copy()
+
+    grouped = (
+        candidates.groupby(
+            [
+                "posteam",
+                "actor",
+            ],
+            dropna=False,
+        )
+        .agg(
+            clutch_epa=(
+                "epa",
+                "sum",
+            ),
+            plays=(
+                "epa",
+                "size",
+            ),
+            avg_epa=(
+                "epa",
+                "mean",
+            ),
+        )
+        .reset_index()
+    )
+
+    grouped = grouped[
+        grouped[
+            "plays"
+        ]
+        >= 3
+    ].copy()
+
+    grouped = grouped.sort_values(
+        [
+            "clutch_epa",
+            "avg_epa",
+        ],
+        ascending=[
+            False,
+            False,
+        ],
+    )
+
+    if grouped.empty:
+        raise RuntimeError(
+            "No Clutch Gene "
+            "candidate found for "
+            "that week."
+        )
+
+    row = grouped.iloc[
+        0
+    ]
+
+    player = safe_text(
+        row[
+            "actor"
+        ]
+    )
+
+    team = normalize_team(
+        safe_text(
+            row[
+                "posteam"
+            ]
+        )
+    )
+
+    statline = actor_statline(
+        df_week,
+        player,
+    )
+
+    pct = percentile_from_series(
+        grouped[
+            "clutch_epa"
+        ],
+        float(
+            row[
+                "clutch_epa"
+            ]
+        ),
+    )
+
+    return PosterItem(
+        title="CLUTCH GENE",
+        subtitle=weekly_context(
+            season,
+            week,
+        ),
+        player=player,
+        team=team,
+        big_value=(
+            f"{float(row['clutch_epa']):+.2f}"
+        ),
+        big_label=(
+            "CLUTCH IMPACT"
+        ),
+        description=(
+            f"{player} delivered "
+            "late when the game "
+            "still felt up for grabs."
+        ),
+        statline=statline,
+        chip1=(
+            f"{int(row['plays'])} "
+            "clutch plays"
+        ),
+        chip2=(
+            f"{float(row['avg_epa']):+.2f} "
+            "per play"
+        ),
+        chip3=(
+            "4th quarter, live game state"
+        ),
+        accent_rgb=TEAM_COLORS.get(
+            team,
+            BLUE,
+        ),
+        visual_kind="percentile",
+        visual_values={
+            "percentile": pct
+        },
+    )
+
+
+# ============================================================
+# SEASON / WEEK PICKING
+# ============================================================
+
+def load_prepped_regular_week(
+    season: int,
+    week: int,
+) -> pd.DataFrame:
+    validate_week(
+        season,
+        week,
+    )
+
+    df = load_pbp_one_season(
+        season
+    )
+
+    df = prep_df(
+        df
+    )
+
+    df_week = filter_regular_week(
+        df,
+        week,
+    )
+
+    if df_week.empty:
+        raise RuntimeError(
+            f"No regular-season plays "
+            f"found for {season} "
+            f"week {week}."
+        )
+
+    return df_week
+
+
+def category_candidate_works(
+    category_key: str,
+    df_week: pd.DataFrame,
+    season: int,
+    week: int,
+) -> bool:
+    try:
+        if (
+            category_key
+            == "success_rate_by_down_and_distance"
+        ):
+            data = df_week.copy()
+
+            data[
+                "dist_bucket"
+            ] = distance_bucket(
+                data[
+                    "ydstogo"
+                ]
+            )
+
+            data = data[
+                data[
+                    "dist_bucket"
+                ].notna()
+            ].copy()
+
+            data = data[
+                data[
+                    "success"
+                ].notna()
+            ].copy()
+
+            data = data[
+                data[
+                    "down"
+                ].between(
+                    1,
+                    4,
+                    inclusive="both",
+                )
+            ].copy()
+
+            grouped = (
+                data.groupby(
+                    [
+                        "down",
+                        "dist_bucket",
+                    ],
+                    as_index=False,
+                )
+                .agg(
+                    success_rate=(
+                        "success",
+                        "mean",
+                    ),
+                    plays=(
+                        "success",
+                        "size",
+                    ),
+                )
+            )
+
+            grouped = grouped[
+                grouped[
+                    "plays"
+                ]
+                >= 6
+            ].copy()
+
+            return (
+                not grouped.empty
+            )
+
+        if (
+            category_key
+            == "qb_masterclass"
+        ):
+            build_qb_masterclass(
+                df_week,
+                season,
+                week,
+            )
+
+            return True
+
+        if (
+            category_key
+            == "play_that_won_the_game"
+        ):
+            build_play_that_won_game(
+                df_week,
+                season,
+                week,
+            )
+
+            return True
+
+        if (
+            category_key
+            == "better_than_expected"
+        ):
+            build_better_than_expected(
+                df_week,
+                season,
+                week,
+            )
+
+            return True
+
+        if (
+            category_key
+            == "clutch_gene"
+        ):
+            build_clutch_gene(
+                df_week,
+                season,
+                week,
+            )
+
+            return True
+
+        return False
+
+    except Exception:
+        return False
+
+
+def choose_random_valid_season_week(
+    category_key: str,
+    start_season: int = MIN_SEASON,
+    end_season: int = None,
+    max_tries: int = 60,
+) -> Tuple[
+    int,
+    int,
+    pd.DataFrame,
+]:
+    if end_season is None:
+        end_season = (
+            now_eastern_date()
+            .year
+        )
+
+    candidates = []
+
+    for season in range(
+        start_season,
+        end_season + 1,
+    ):
+        max_week = (
+            week_limit_for_year(
+                season
+            )
+        )
+
+        for week in range(
+            1,
+            max_week + 1,
+        ):
+            candidates.append(
+                (
+                    season,
+                    week,
+                )
+            )
+
+    random.shuffle(
+        candidates
+    )
+
+    last_error = None
+
+    for (
+        season,
+        week,
+    ) in candidates[
+        :max_tries
+    ]:
+        try:
+            print(
+                f"trying candidate "
+                f"season={season} "
+                f"week={week} "
+                f"for category="
+                f"{category_key}"
+            )
+
+            df_week = (
+                load_prepped_regular_week(
+                    season,
+                    week,
+                )
+            )
+
+            if category_candidate_works(
+                category_key,
+                df_week,
+                season,
+                week,
+            ):
+                return (
+                    season,
+                    week,
+                    df_week,
+                )
+
+        except Exception as exc:
+            last_error = exc
+
+    raise RuntimeError(
+        f"Could not find valid "
+        f"season/week for "
+        f"category={category_key}. "
+        f"Last error: "
+        f"{last_error}"
+    )
+
+
+# ============================================================
+# GENERATION
+# ============================================================
+
+def generate_single_category(
+    category_key: str,
+    season: int,
+    week: int,
+    df_week: pd.DataFrame,
+    out_path: str,
+) -> Dict[
+    str,
+    str,
+]:
+    if (
+        category_key
+        == "success_rate_by_down_and_distance"
+    ):
+        plot_success_rate_by_down_and_distance(
+            df_week,
+            season,
+            week,
+            out_path,
+        )
+
+        return {
+            "title": CATEGORY_LABELS[
+                category_key
+            ],
+            "team": "",
+            "player": "",
+        }
+
+    if (
+        category_key
+        == "qb_masterclass"
+    ):
+        item = build_qb_masterclass(
+            df_week,
+            season,
+            week,
+        )
+
+        render_player_poster(
+            item,
+            season,
+            week,
+            out_path,
+        )
+
+        return {
+            "title": item.title,
+            "team": item.team,
+            "player": item.player,
+        }
+
+    if (
+        category_key
+        == "play_that_won_the_game"
+    ):
+        item = (
+            build_play_that_won_game(
+                df_week,
+                season,
+                week,
+            )
+        )
+
+        render_player_poster(
+            item,
+            season,
+            week,
+            out_path,
+        )
+
+        return {
+            "title": item.title,
+            "team": item.team,
+            "player": item.player,
+        }
+
+    if (
+        category_key
+        == "better_than_expected"
+    ):
+        item = (
+            build_better_than_expected(
+                df_week,
+                season,
+                week,
+            )
+        )
+
+        render_player_poster(
+            item,
+            season,
+            week,
+            out_path,
+        )
+
+        return {
+            "title": item.title,
+            "team": item.team,
+            "player": item.player,
+        }
+
+    if (
+        category_key
+        == "clutch_gene"
+    ):
+        item = build_clutch_gene(
+            df_week,
+            season,
+            week,
+        )
+
+        render_player_poster(
+            item,
+            season,
+            week,
+            out_path,
+        )
+
+        return {
+            "title": item.title,
+            "team": item.team,
+            "player": item.player,
+        }
+
+    raise ValueError(
+        f"Unknown category: "
+        f"{category_key}"
+    )
+
+
+def publish_stat_of_the_day(
+    run_day: date = None,
+    keep_versioned: bool = False,
+) -> Dict[
+    str,
+    str,
+]:
+    if run_day is None:
+        run_day = (
+            now_eastern_date()
+        )
+
+    category_key = (
+        category_for_day(
+            run_day
+        )
+    )
+
+    random.seed(
+        f"stat-of-day::"
+        f"{run_day.isoformat()}::"
+        f"{category_key}"
+    )
+
+    (
+        season,
+        week,
+        df_week,
+    ) = (
+        choose_random_valid_season_week(
+            category_key=category_key
+        )
+    )
+
+    local_png = (
+        f"/tmp/"
+        f"stat_of_the_day_"
+        f"{run_day.isoformat()}.png"
+    )
+
+    info = generate_single_category(
+        category_key,
+        season,
+        week,
+        df_week,
+        local_png,
+    )
+
+    current_storage_key = (
+        "stat_of_the_day/current.png"
+    )
+
+    current_url = (
+        upload_file_return_url(
+            local_png,
+            current_storage_key,
+        )
+    )
+
+    metadata = {
+        "date": (
+            run_day.isoformat()
+        ),
+        "category_key": (
+            category_key
+        ),
+        "category_label": (
+            CATEGORY_LABELS[
+                category_key
+            ]
+        ),
+        "season": season,
+        "week": week,
+        "image_url": current_url,
+        "title": info.get(
+            "title",
+            "",
+        ),
+        "team": info.get(
+            "team",
+            "",
+        ),
+        "player": info.get(
+            "player",
+            "",
+        ),
+        "storage_key": (
+            current_storage_key
+        ),
+    }
+
+    local_json = (
+        f"/tmp/"
+        f"stat_of_the_day_"
+        f"{run_day.isoformat()}.json"
+    )
+
+    with open(
+        local_json,
+        "w",
+        encoding="utf-8",
+    ) as file:
+        json.dump(
+            metadata,
+            file,
+            indent=2,
+        )
+
+    current_meta_key = (
+        "stat_of_the_day/current.json"
+    )
+
+    metadata_url = (
+        upload_file_return_url(
+            local_json,
+            current_meta_key,
+        )
+    )
+
+    versioned_image_url = ""
+    versioned_meta_url = ""
+
+    if keep_versioned:
+        versioned_prefix = (
+            "stat_of_the_day/"
+            "history/"
+            f"{run_day.isoformat()}"
+        )
+
+        versioned_image_key = (
+            f"{versioned_prefix}/"
+            "poster.png"
+        )
+
+        versioned_meta_key = (
+            f"{versioned_prefix}/"
+            "metadata.json"
+        )
+
+        versioned_image_url = (
+            upload_file_return_url(
+                local_png,
+                versioned_image_key,
+            )
+        )
+
+        versioned_meta_url = (
+            upload_file_return_url(
+                local_json,
+                versioned_meta_key,
+            )
+        )
+
+    metadata[
+        "metadata_url"
+    ] = metadata_url
+
+    if versioned_image_url:
+        metadata[
+            "versioned_image_url"
+        ] = versioned_image_url
+
+    if versioned_meta_url:
+        metadata[
+            "versioned_metadata_url"
+        ] = versioned_meta_url
+
+    return metadata
+
+
+def get_current_stat_of_the_day_payload() -> Dict[
+    str,
+    str,
+]:
+    return {
+        "image_url": (
+            public_storage_url(
+                "stat_of_the_day/"
+                "current.png"
+            )
+        ),
+        "metadata_url": (
+            public_storage_url(
+                "stat_of_the_day/"
+                "current.json"
+            )
+        ),
+    }
+
+
+# ============================================================
+# CLI
+# ============================================================
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description=(
+            "Publish the nightly "
+            "stat of the day poster."
+        )
+    )
+
+    parser.add_argument(
+        "--date",
+        type=str,
+        default="",
+        help=(
+            "Optional YYYY-MM-DD "
+            "in America/New_York "
+            "rotation logic"
+        ),
+    )
+
+    parser.add_argument(
+        "--keep_versioned",
+        action="store_true",
+        help=(
+            "Also upload "
+            "date-stamped "
+            "history copy"
+        ),
+    )
+
+    return parser.parse_args()
+
+
+def main():
+    args = parse_args()
+
+    run_day = (
+        date.fromisoformat(
+            args.date
+        )
+        if args.date
+        else None
+    )
+
+    result = (
+        publish_stat_of_the_day(
+            run_day=run_day,
+            keep_versioned=(
+                args.keep_versioned
+            ),
+        )
+    )
+
+    print(
+        json.dumps(
+            result,
+            indent=2,
+        )
+    )
+
+
+if __name__ == "__main__":
+    main()
