@@ -1,18 +1,48 @@
 #!/usr/bin/env python3
+
 import argparse
 import io
 import os
 import re
 import shutil
-from typing import Dict, List, Tuple, Optional
+from typing import Any, Dict, List, Tuple, Optional
 
 import requests
 from PIL import Image, ImageDraw, ImageFont
 
+
+# ============================================================
+# CONFIG
+# ============================================================
+
+DEFAULT_YEAR = int(
+    os.getenv(
+        "FOOTBALL_SEASON",
+        "2025",
+    )
+)
+
+CORE_API_BASE = (
+    "https://sports.core.api.espn.com/v2/"
+    "sports/football/leagues/nfl"
+)
+
 HEADERS = {
-    "User-Agent": "Mozilla/5.0",
+    "User-Agent": (
+        "Mozilla/5.0 "
+        "(Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 "
+        "(KHTML, like Gecko) "
+        "Chrome/138.0.0.0 Safari/537.36"
+    ),
     "Accept": "application/json,text/plain,*/*",
+    "Accept-Language": "en-US,en;q=0.9",
 }
+
+
+# ============================================================
+# TEAM NEEDS
+# ============================================================
 
 TEAM_NEEDS = {
     "ARI": ["QB", "RB", "G", "T"],
@@ -49,6 +79,11 @@ TEAM_NEEDS = {
     "WSH": ["TE", "G", "ED", "LB", "DB"],
 }
 
+
+# ============================================================
+# TEAM META
+# ============================================================
+
 TEAM_META = {
     "ARI": ("22", "ari", "Arizona Cardinals"),
     "ATL": ("1", "atl", "Atlanta Falcons"),
@@ -84,6 +119,11 @@ TEAM_META = {
     "WSH": ("28", "wsh", "Washington Commanders"),
 }
 
+
+# ============================================================
+# POSITION MAP
+# ============================================================
+
 POSITION_MAP = {
     "QB": ["QB"],
     "RB": ["RB", "HB", "FB"],
@@ -100,6 +140,11 @@ POSITION_MAP = {
     "S": ["S", "FS", "SS"],
     "DB": ["CB", "S", "FS", "SS", "DB"],
 }
+
+
+# ============================================================
+# TEAM COLORS
+# ============================================================
 
 TEAM_COLORS = {
     "ARI": ("#97233F", "#000000"),
@@ -136,115 +181,114 @@ TEAM_COLORS = {
     "WSH": ("#5A1414", "#FFB612"),
 }
 
+
 ALIASES = {
     "WAS": "WSH",
 }
 
 
-def load_font(size: int, bold: bool = False):
+# ============================================================
+# BASIC HELPERS
+# ============================================================
+
+def load_font(
+    size: int,
+    bold: bool = False,
+):
+
     paths = [
         (
             "/System/Library/Fonts/Supplemental/Arial Bold.ttf"
             if bold
-            else "/System/Library/Fonts/Supplemental/Arial.ttf"
+            else
+            "/System/Library/Fonts/Supplemental/Arial.ttf"
         ),
         (
             "/Library/Fonts/Arial Bold.ttf"
             if bold
-            else "/Library/Fonts/Arial.ttf"
+            else
+            "/Library/Fonts/Arial.ttf"
         ),
         (
             "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
             if bold
-            else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+            else
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
         ),
     ]
 
     for path in paths:
+
         try:
-            return ImageFont.truetype(path, size)
+            return ImageFont.truetype(
+                path,
+                size,
+            )
+
         except Exception:
             continue
 
     return ImageFont.load_default()
 
 
-def clean_text(value) -> str:
+def clean_text(
+    value,
+) -> str:
+
     if value is None:
         return ""
 
     return re.sub(
         r"\s+",
         " ",
-        str(value).replace("\xa0", " ").strip(),
-    )
-
-
-def normalize_name(name: str) -> str:
-    name = clean_text(name).lower()
-    name = re.sub(r"[^a-z0-9 ]", "", name)
-    return re.sub(r"\s+", " ", name).strip()
-
-
-def fetch_json(url: str) -> Dict:
-    last_error = None
-
-    for attempt in range(3):
-        try:
-            resp = requests.get(
-                url,
-                headers=HEADERS,
-                timeout=30,
-            )
-
-            if resp.status_code != 200:
-                raise RuntimeError(
-                    f"Bad status code: {resp.status_code}"
-                )
-
-            return resp.json()
-
-        except Exception as e:
-            last_error = e
-            print(f"Retry {attempt + 1}/3 failed for {url}")
-
-    raise RuntimeError(
-        f"Failed API request: {url}\n{last_error}"
-    )
-
-
-def fetch_image(url: str) -> Optional[Image.Image]:
-    try:
-        resp = requests.get(
-            url,
-            headers=HEADERS,
-            timeout=20,
+        str(value)
+        .replace(
+            "\xa0",
+            " ",
         )
-        resp.raise_for_status()
-
-        return Image.open(
-            io.BytesIO(resp.content)
-        ).convert("RGBA")
-
-    except Exception:
-        return None
-
-
-def get_logo(team: str) -> Optional[Image.Image]:
-    _, slug, _ = TEAM_META[team]
-
-    return fetch_image(
-        f"https://a.espncdn.com/i/teamlogos/nfl/500/{slug}.png"
+        .strip(),
     )
 
 
-def normalize_position(pos: str) -> str:
-    p = clean_text(pos).upper()
+def normalize_name(
+    name: str,
+) -> str:
+
+    name = (
+        clean_text(
+            name
+        ).lower()
+    )
+
+    name = re.sub(
+        r"[^a-z0-9 ]",
+        "",
+        name,
+    )
+
+    return re.sub(
+        r"\s+",
+        " ",
+        name,
+    ).strip()
+
+
+def normalize_position(
+    pos: str,
+) -> str:
+
+    p = clean_text(
+        pos
+    ).upper()
 
     if p == "QB":
         return "QB"
 
-    if p in {"RB", "HB", "FB"}:
+    if p in {
+        "RB",
+        "HB",
+        "FB",
+    }:
         return "RB"
 
     if p == "WR":
@@ -253,19 +297,40 @@ def normalize_position(pos: str) -> str:
     if p == "TE":
         return "TE"
 
-    if p in {"G", "OG", "LG", "RG"}:
+    if p in {
+        "G",
+        "OG",
+        "LG",
+        "RG",
+    }:
         return "G"
 
-    if p in {"T", "OT", "LT", "RT"}:
+    if p in {
+        "T",
+        "OT",
+        "LT",
+        "RT",
+    }:
         return "T"
 
     if p == "C":
         return "C"
 
-    if p in {"DE", "EDGE", "LDE", "RDE"}:
+    if p in {
+        "DE",
+        "EDGE",
+        "LDE",
+        "RDE",
+    }:
         return "DE"
 
-    if p in {"DT", "NT", "DL", "LDT", "RDT"}:
+    if p in {
+        "DT",
+        "NT",
+        "DL",
+        "LDT",
+        "RDT",
+    }:
         return "DT"
 
     if p in {
@@ -278,174 +343,918 @@ def normalize_position(pos: str) -> str:
     }:
         return "LB"
 
-    if p in {"CB", "LCB", "RCB", "NB", "DB"}:
+    if p in {
+        "CB",
+        "LCB",
+        "RCB",
+        "NB",
+        "DB",
+    }:
         return "CB"
 
-    if p in {"S", "FS", "SS"}:
+    if p in {
+        "S",
+        "FS",
+        "SS",
+    }:
         return "S"
 
     return p
 
 
-def fetch_roster_json(team: str) -> Dict:
-    team_id, _, _ = TEAM_META[team]
+# ============================================================
+# HTTP
+# ============================================================
 
-    return fetch_json(
-        "https://site.web.api.espn.com/apis/common/v3/"
-        f"sports/football/nfl/teams/{team_id}/roster"
+def normalize_ref(
+    url: str,
+) -> str:
+
+    url = clean_text(
+        url
+    )
+
+    if url.startswith(
+        "http://"
+    ):
+
+        return (
+            "https://"
+            + url[len("http://"):]
+        )
+
+    return url
+
+
+def fetch_json(
+    url: str,
+) -> Dict:
+
+    url = normalize_ref(
+        url
+    )
+
+    last_error = None
+
+    for attempt in range(
+        3
+    ):
+
+        try:
+
+            response = requests.get(
+                url,
+                headers=HEADERS,
+                timeout=30,
+            )
+
+            print(
+                f"HTTP "
+                f"{response.status_code}: "
+                f"{response.url}"
+            )
+
+            if (
+                response.status_code
+                != 200
+            ):
+
+                raise RuntimeError(
+                    "Bad status code: "
+                    f"{response.status_code}"
+                )
+
+            return (
+                response.json()
+            )
+
+        except Exception as exc:
+
+            last_error = exc
+
+            print(
+                f"Retry "
+                f"{attempt + 1}/3 "
+                f"failed for "
+                f"{url}"
+            )
+
+    raise RuntimeError(
+        "Failed API request: "
+        f"{url}\n"
+        f"{last_error}"
     )
 
 
-def fetch_depthchart_json(team: str) -> Dict:
-    team_id, _, _ = TEAM_META[team]
+def fetch_image(
+    url: str,
+) -> Optional[
+    Image.Image
+]:
 
-    return fetch_json(
-        "https://site.api.espn.com/apis/site/v2/"
-        f"sports/football/nfl/teams/{team_id}/depthcharts"
+    try:
+
+        response = requests.get(
+            url,
+            headers=HEADERS,
+            timeout=20,
+        )
+
+        response.raise_for_status()
+
+        return (
+            Image.open(
+                io.BytesIO(
+                    response.content
+                )
+            )
+            .convert(
+                "RGBA"
+            )
+        )
+
+    except Exception:
+
+        return None
+
+
+# ============================================================
+# LOGO
+# ============================================================
+
+def get_logo(
+    team: str,
+) -> Optional[
+    Image.Image
+]:
+
+    _, slug, _ = (
+        TEAM_META[
+            team
+        ]
+    )
+
+    return fetch_image(
+        "https://a.espncdn.com/"
+        f"i/teamlogos/nfl/500/"
+        f"{slug}.png"
     )
 
 
-def parse_player(raw: Dict) -> Optional[Dict]:
+# ============================================================
+# ROSTER
+# ============================================================
+
+def fetch_roster_json(
+    team: str,
+) -> Dict:
+
+    team_id, _, _ = (
+        TEAM_META[
+            team
+        ]
+    )
+
+    url = (
+        "https://site.web.api.espn.com/"
+        "apis/common/v3/"
+        "sports/football/nfl/"
+        f"teams/{team_id}/roster"
+    )
+
+    return fetch_json(
+        url
+    )
+
+
+# ============================================================
+# CORE DEPTH CHART
+# ============================================================
+
+def fetch_depthchart_json(
+    team: str,
+    year: int,
+) -> Dict:
+
+    team_id, _, _ = (
+        TEAM_META[
+            team
+        ]
+    )
+
+    url = (
+        f"{CORE_API_BASE}/"
+        f"seasons/{year}/"
+        f"teams/{team_id}/"
+        "depthcharts"
+    )
+
+    return fetch_json(
+        url
+    )
+
+
+def resolve_ref_object(
+    obj: Any,
+) -> Any:
+
+    if not isinstance(
+        obj,
+        dict,
+    ):
+
+        return obj
+
+    ref = clean_text(
+        obj.get(
+            "$ref"
+        )
+    )
+
+    if not ref:
+        return obj
+
+    useful_keys = {
+        "displayName",
+        "name",
+        "positions",
+        "athletes",
+        "position",
+    }
+
+    if any(
+        key in obj
+        for key in useful_keys
+    ):
+
+        return obj
+
+    try:
+
+        return fetch_json(
+            ref
+        )
+
+    except Exception as exc:
+
+        print(
+            "WARNING: Failed to "
+            f"resolve Core ref "
+            f"{ref}: {exc}"
+        )
+
+        return obj
+
+
+def get_depthchart_groups(
+    data: Any,
+) -> List[Dict]:
+
+    groups: List[
+        Dict
+    ] = []
+
+    if not isinstance(
+        data,
+        dict,
+    ):
+
+        return groups
+
+    old_depthchart = (
+        data.get(
+            "depthchart"
+        )
+        or []
+    )
+
+    if isinstance(
+        old_depthchart,
+        list,
+    ):
+
+        for item in old_depthchart:
+
+            if isinstance(
+                item,
+                dict,
+            ):
+
+                resolved = (
+                    resolve_ref_object(
+                        item
+                    )
+                )
+
+                if isinstance(
+                    resolved,
+                    dict,
+                ):
+
+                    groups.append(
+                        resolved
+                    )
+
+    items = (
+        data.get(
+            "items"
+        )
+        or []
+    )
+
+    if isinstance(
+        items,
+        list,
+    ):
+
+        for item in items:
+
+            if not isinstance(
+                item,
+                dict,
+            ):
+                continue
+
+            resolved = (
+                resolve_ref_object(
+                    item
+                )
+            )
+
+            if isinstance(
+                resolved,
+                dict,
+            ):
+
+                groups.append(
+                    resolved
+                )
+
+    if (
+        "positions"
+        in data
+    ):
+
+        groups.append(
+            data
+        )
+
+    return groups
+
+
+# ============================================================
+# PLAYER PARSING
+# ============================================================
+
+def parse_player(
+    raw: Dict,
+) -> Optional[
+    Dict
+]:
+
     name = clean_text(
-        raw.get("displayName")
-        or raw.get("fullName")
-        or raw.get("shortName")
-        or raw.get("name")
+        raw.get(
+            "displayName"
+        )
+        or raw.get(
+            "fullName"
+        )
+        or raw.get(
+            "shortName"
+        )
+        or raw.get(
+            "name"
+        )
         or ""
     )
 
-    pos_obj = raw.get("position") or {}
+    pos_obj = (
+        raw.get(
+            "position"
+        )
+        or {}
+    )
 
-    if isinstance(pos_obj, dict):
+    if isinstance(
+        pos_obj,
+        dict,
+    ):
+
         pos = clean_text(
-            pos_obj.get("abbreviation")
-            or pos_obj.get("name")
+            pos_obj.get(
+                "abbreviation"
+            )
+            or pos_obj.get(
+                "name"
+            )
             or ""
         )
+
     else:
-        pos = clean_text(pos_obj)
 
-    pos = normalize_position(pos)
+        pos = clean_text(
+            pos_obj
+        )
 
-    if not name or not pos:
+    pos = normalize_position(
+        pos
+    )
+
+    if (
+        not name
+        or not pos
+    ):
+
         return None
 
     return {
         "name": name,
-        "name_key": normalize_name(name),
+        "name_key": normalize_name(
+            name
+        ),
         "position": pos,
     }
 
 
-def depth_position_from_position_data(
-    position_data: Dict,
-) -> str:
-    position_obj = position_data.get("position", {}) or {}
-    parent_obj = position_obj.get("parent", {}) or {}
+def parse_roster_players(
+    team: str,
+) -> List[
+    Dict
+]:
 
-    own_abbr = clean_text(
-        position_obj.get("abbreviation", "")
+    data = fetch_roster_json(
+        team
     )
 
-    parent_abbr = clean_text(
-        parent_obj.get("abbreviation", "")
-    )
+    players: List[
+        Dict
+    ] = []
 
-    if own_abbr:
-        normalized_own = normalize_position(own_abbr)
-
-        if normalized_own not in {"OFF", "DEF", "ST"}:
-            return normalized_own
-
-    if parent_abbr:
-        normalized_parent = normalize_position(parent_abbr)
-
-        if normalized_parent not in {"OFF", "DEF", "ST"}:
-            return normalized_parent
-
-    return normalize_position(
-        own_abbr or parent_abbr
-    )
-
-
-def parse_roster_players(team: str) -> List[Dict]:
-    data = fetch_roster_json(team)
-    players: List[Dict] = []
     seen = set()
 
-    for group in data.get("positionGroups", []):
-        for raw in group.get("athletes", []) or []:
-            parsed = parse_player(raw)
+    for group in (
+        data.get(
+            "positionGroups"
+        )
+        or []
+    ):
+
+        for raw in (
+            group.get(
+                "athletes"
+            )
+            or []
+        ):
+
+            parsed = (
+                parse_player(
+                    raw
+                )
+            )
 
             if not parsed:
                 continue
 
-            key = parsed["name_key"]
+            key = (
+                parsed[
+                    "name_key"
+                ]
+            )
 
             if key in seen:
                 continue
 
-            seen.add(key)
-            players.append(parsed)
+            seen.add(
+                key
+            )
+
+            players.append(
+                parsed
+            )
 
     if not players:
+
         raise RuntimeError(
-            f"No roster players parsed for {team}."
+            "No roster players "
+            f"parsed for {team}."
         )
+
+    print(
+        f"{team}: parsed "
+        f"{len(players)} "
+        f"roster players."
+    )
 
     return players
 
 
-def parse_depthchart_order(team: str) -> List[Dict]:
-    data = fetch_depthchart_json(team)
-    depthchart = data.get("depthchart", []) or []
+# ============================================================
+# DEPTH CHART POSITION HELPERS
+# ============================================================
 
-    ordered_players: List[Dict] = []
-    seen = set()
+def depth_position_from_position_data(
+    position_data: Dict,
+) -> str:
 
-    for group in depthchart:
-        positions = group.get("positions", {})
+    position_obj = (
+        position_data.get(
+            "position",
+            {},
+        )
+        or {}
+    )
 
-        if not isinstance(positions, dict):
-            continue
+    if isinstance(
+        position_obj,
+        dict,
+    ):
 
-        for position_key, position_data in positions.items():
-            if not isinstance(position_data, dict):
-                continue
+        position_obj = (
+            resolve_ref_object(
+                position_obj
+            )
+        )
 
-            display_pos = depth_position_from_position_data(
-                position_data
+    parent_obj = {}
+
+    if isinstance(
+        position_obj,
+        dict,
+    ):
+
+        parent_obj = (
+            position_obj.get(
+                "parent",
+                {},
+            )
+            or {}
+        )
+
+        if isinstance(
+            parent_obj,
+            dict,
+        ):
+
+            parent_obj = (
+                resolve_ref_object(
+                    parent_obj
+                )
             )
 
-            athletes = position_data.get("athletes", [])
+    own_abbr = ""
 
-            if not isinstance(athletes, list):
+    parent_abbr = ""
+
+    if isinstance(
+        position_obj,
+        dict,
+    ):
+
+        own_abbr = clean_text(
+            position_obj.get(
+                "abbreviation"
+            )
+            or position_obj.get(
+                "name"
+            )
+            or ""
+        )
+
+    if isinstance(
+        parent_obj,
+        dict,
+    ):
+
+        parent_abbr = clean_text(
+            parent_obj.get(
+                "abbreviation"
+            )
+            or parent_obj.get(
+                "name"
+            )
+            or ""
+        )
+
+    if own_abbr:
+
+        normalized_own = (
+            normalize_position(
+                own_abbr
+            )
+        )
+
+        if normalized_own not in {
+            "OFF",
+            "DEF",
+            "ST",
+        }:
+
+            return normalized_own
+
+    if parent_abbr:
+
+        normalized_parent = (
+            normalize_position(
+                parent_abbr
+            )
+        )
+
+        if normalized_parent not in {
+            "OFF",
+            "DEF",
+            "ST",
+        }:
+
+            return (
+                normalized_parent
+            )
+
+    return normalize_position(
+        own_abbr
+        or parent_abbr
+    )
+
+
+def resolve_depth_athlete(
+    athlete: Dict,
+) -> Dict:
+
+    if not isinstance(
+        athlete,
+        dict,
+    ):
+
+        return {}
+
+    if (
+        athlete.get(
+            "displayName"
+        )
+        or athlete.get(
+            "fullName"
+        )
+        or athlete.get(
+            "name"
+        )
+    ):
+
+        return athlete
+
+    nested = (
+        athlete.get(
+            "athlete"
+        )
+    )
+
+    if isinstance(
+        nested,
+        dict,
+    ):
+
+        resolved_nested = (
+            resolve_ref_object(
+                nested
+            )
+        )
+
+        if isinstance(
+            resolved_nested,
+            dict,
+        ):
+
+            merged = dict(
+                athlete
+            )
+
+            merged.update(
+                resolved_nested
+            )
+
+            return merged
+
+    resolved = (
+        resolve_ref_object(
+            athlete
+        )
+    )
+
+    if isinstance(
+        resolved,
+        dict,
+    ):
+
+        return resolved
+
+    return athlete
+
+
+def iter_positions(
+    group: Dict,
+):
+
+    positions = (
+        group.get(
+            "positions"
+        )
+        or {}
+    )
+
+    if isinstance(
+        positions,
+        dict,
+    ):
+
+        for (
+            position_key,
+            position_data,
+        ) in positions.items():
+
+            if not isinstance(
+                position_data,
+                dict,
+            ):
                 continue
 
-            for depth_rank, athlete in enumerate(
+            yield (
+                position_key,
+                resolve_ref_object(
+                    position_data
+                ),
+            )
+
+    elif isinstance(
+        positions,
+        list,
+    ):
+
+        for index, position_data in enumerate(
+            positions
+        ):
+
+            if not isinstance(
+                position_data,
+                dict,
+            ):
+                continue
+
+            resolved = (
+                resolve_ref_object(
+                    position_data
+                )
+            )
+
+            if not isinstance(
+                resolved,
+                dict,
+            ):
+                continue
+
+            position_key = clean_text(
+                resolved.get(
+                    "abbreviation"
+                )
+                or resolved.get(
+                    "name"
+                )
+                or resolved.get(
+                    "displayName"
+                )
+                or index
+            )
+
+            yield (
+                position_key,
+                resolved,
+            )
+
+
+# ============================================================
+# DEPTH CHART PARSER
+# ============================================================
+
+def parse_depthchart_order(
+    team: str,
+    year: int,
+) -> List[
+    Dict
+]:
+
+    data = fetch_depthchart_json(
+        team,
+        year,
+    )
+
+    groups = (
+        get_depthchart_groups(
+            data
+        )
+    )
+
+    print(
+        f"{team}: Core depth "
+        f"chart groups="
+        f"{len(groups)}"
+    )
+
+    ordered_players: List[
+        Dict
+    ] = []
+
+    seen = set()
+
+    for group in groups:
+
+        if not isinstance(
+            group,
+            dict,
+        ):
+            continue
+
+        for (
+            position_key,
+            position_data,
+        ) in iter_positions(
+            group
+        ):
+
+            if not isinstance(
+                position_data,
+                dict,
+            ):
+                continue
+
+            display_pos = (
+                depth_position_from_position_data(
+                    position_data
+                )
+            )
+
+            athletes = (
+                position_data.get(
+                    "athletes"
+                )
+                or position_data.get(
+                    "entries"
+                )
+                or []
+            )
+
+            if not isinstance(
+                athletes,
+                list,
+            ):
+
+                continue
+
+            for depth_rank, raw_athlete in enumerate(
                 athletes,
                 start=1,
             ):
-                if not isinstance(athlete, dict):
+
+                if not isinstance(
+                    raw_athlete,
+                    dict,
+                ):
+
                     continue
 
+                athlete = (
+                    resolve_depth_athlete(
+                        raw_athlete
+                    )
+                )
+
                 name = clean_text(
-                    athlete.get("displayName")
-                    or athlete.get("fullName")
-                    or athlete.get("shortName")
-                    or athlete.get("name")
+                    athlete.get(
+                        "displayName"
+                    )
+                    or athlete.get(
+                        "fullName"
+                    )
+                    or athlete.get(
+                        "shortName"
+                    )
+                    or athlete.get(
+                        "name"
+                    )
                     or ""
                 )
 
                 if not name:
                     continue
 
-                name_key = normalize_name(name)
+                name_key = (
+                    normalize_name(
+                        name
+                    )
+                )
 
                 if name_key in seen:
                     continue
 
-                seen.add(name_key)
+                seen.add(
+                    name_key
+                )
 
                 ordered_players.append(
                     {
@@ -459,131 +1268,277 @@ def parse_depthchart_order(team: str) -> List[Dict]:
                     }
                 )
 
-    return ordered_players
+    print(
+        f"{team}: parsed "
+        f"{len(ordered_players)} "
+        f"Core depth-chart players."
+    )
 
+    return (
+        ordered_players
+    )
+
+
+# ============================================================
+# ORDER ROSTER
+# ============================================================
 
 def order_roster_by_depthchart(
     roster_players: List[Dict],
     depth_players: List[Dict],
 ) -> List[Dict]:
+
     roster_by_name = {
-        player["name_key"]: player
-        for player in roster_players
+        player[
+            "name_key"
+        ]: player
+        for player
+        in roster_players
     }
 
-    ordered: List[Dict] = []
+    ordered: List[
+        Dict
+    ] = []
+
     used = set()
 
     for depth_player in depth_players:
-        name_key = depth_player["name_key"]
 
-        if name_key not in roster_by_name:
+        name_key = (
+            depth_player[
+                "name_key"
+            ]
+        )
+
+        if (
+            name_key
+            not in roster_by_name
+        ):
             continue
 
-        player = roster_by_name[name_key].copy()
+        player = (
+            roster_by_name[
+                name_key
+            ].copy()
+        )
 
-        depth_position = depth_player.get("position")
+        depth_position = (
+            depth_player.get(
+                "position"
+            )
+        )
 
         if depth_position:
-            player["position"] = depth_position
 
-        player["depth_position_key"] = (
-            depth_player.get("depth_position_key", "")
+            player[
+                "position"
+            ] = depth_position
+
+        player[
+            "depth_position_key"
+        ] = (
+            depth_player.get(
+                "depth_position_key",
+                "",
+            )
         )
 
-        player["depth_rank"] = depth_player.get(
-            "depth_rank",
-            "",
+        player[
+            "depth_rank"
+        ] = (
+            depth_player.get(
+                "depth_rank",
+                "",
+            )
         )
 
-        ordered.append(player)
-        used.add(name_key)
+        ordered.append(
+            player
+        )
+
+        used.add(
+            name_key
+        )
 
     for player in roster_players:
-        if player["name_key"] not in used:
-            ordered.append(player)
+
+        if (
+            player[
+                "name_key"
+            ]
+            not in used
+        ):
+
+            ordered.append(
+                player
+            )
 
     return ordered
 
 
-def get_players(team: str) -> List[Dict]:
-    roster_players = parse_roster_players(team)
+def get_players(
+    team: str,
+    year: int,
+) -> List[
+    Dict
+]:
+
+    roster_players = (
+        parse_roster_players(
+            team
+        )
+    )
 
     try:
-        depth_players = parse_depthchart_order(team)
+
+        depth_players = (
+            parse_depthchart_order(
+                team,
+                year,
+            )
+        )
 
         if depth_players:
-            ordered_players = order_roster_by_depthchart(
-                roster_players,
-                depth_players,
+
+            ordered_players = (
+                order_roster_by_depthchart(
+                    roster_players,
+                    depth_players,
+                )
             )
 
             print(
-                f"{team}: Using ESPN depth chart ordering "
-                f"for {len(depth_players)} players."
+                f"{team}: Using "
+                f"Core depth chart "
+                f"ordering for "
+                f"{len(depth_players)} "
+                f"players."
             )
 
-            return ordered_players
+            return (
+                ordered_players
+            )
 
         print(
-            f"WARNING: No depth chart rows found for {team}. "
-            "Using roster API order."
+            f"WARNING: No Core "
+            f"depth-chart rows "
+            f"found for {team}."
         )
 
-    except Exception as e:
         print(
-            f"WARNING: Depth chart request failed for {team}: {e}"
+            "Using roster "
+            "API order."
         )
-        print("Using roster API order.")
+
+    except Exception as exc:
+
+        print(
+            f"WARNING: Core depth "
+            f"chart request failed "
+            f"for {team}: {exc}"
+        )
+
+        print(
+            "Using roster "
+            "API order."
+        )
 
     return roster_players
 
+
+# ============================================================
+# POSITION MATCHING
+# ============================================================
 
 def players_for_position(
     pos: str,
     roster: List[Dict],
     max_players: int = 8,
 ) -> List[str]:
+
     allowed_positions = {
-        normalize_position(mapped_pos)
-        for mapped_pos in POSITION_MAP.get(pos, [pos])
+        normalize_position(
+            mapped_pos
+        )
+        for mapped_pos
+        in POSITION_MAP.get(
+            pos,
+            [pos],
+        )
     }
 
-    result: List[str] = []
+    result: List[
+        str
+    ] = []
 
     for player in roster:
-        player_position = normalize_position(
-            player.get("position", "")
+
+        player_position = (
+            normalize_position(
+                player.get(
+                    "position",
+                    "",
+                )
+            )
         )
 
-        if player_position not in allowed_positions:
+        if (
+            player_position
+            not in allowed_positions
+        ):
+
             continue
 
-        name = player.get("name", "")
+        name = player.get(
+            "name",
+            "",
+        )
 
-        if name and name not in result:
-            result.append(name)
+        if (
+            name
+            and name not in result
+        ):
 
-        if len(result) >= max_players:
+            result.append(
+                name
+            )
+
+        if len(
+            result
+        ) >= max_players:
+
             break
 
     return result
 
 
+# ============================================================
+# DRAWING HELPERS
+# ============================================================
+
 def text_size(
     draw: ImageDraw.ImageDraw,
     text: str,
     font,
-) -> Tuple[int, int]:
+) -> Tuple[
+    int,
+    int,
+]:
+
     bbox = draw.textbbox(
-        (0, 0),
+        (
+            0,
+            0,
+        ),
         text,
         font=font,
     )
 
     return (
-        bbox[2] - bbox[0],
-        bbox[3] - bbox[1],
+        bbox[2]
+        - bbox[0],
+        bbox[3]
+        - bbox[1],
     )
 
 
@@ -593,9 +1548,19 @@ def fit_text(
     font,
     max_width: int,
 ) -> str:
-    text = str(text)
 
-    if draw.textlength(text, font=font) <= max_width:
+    text = str(
+        text
+    )
+
+    if (
+        draw.textlength(
+            text,
+            font=font,
+        )
+        <= max_width
+    ):
+
         return text
 
     while (
@@ -603,11 +1568,16 @@ def fit_text(
         and draw.textlength(
             text + "…",
             font=font,
-        ) > max_width
+        )
+        > max_width
     ):
+
         text = text[:-1]
 
-    return text.rstrip() + "…"
+    return (
+        text.rstrip()
+        + "…"
+    )
 
 
 def draw_centered(
@@ -618,69 +1588,130 @@ def draw_centered(
     fill,
     canvas_width: int,
 ) -> int:
-    width, height = text_size(
-        draw,
-        text,
-        font,
+
+    width, height = (
+        text_size(
+            draw,
+            text,
+            font,
+        )
     )
 
-    x = (canvas_width - width) // 2
+    x = (
+        canvas_width
+        - width
+    ) // 2
 
     draw.text(
-        (x, y),
+        (
+            x,
+            y,
+        ),
         text,
         fill=fill,
         font=font,
     )
 
-    return y + height
+    return (
+        y + height
+    )
 
 
 def hex_to_rgb(
     hex_color: str,
-) -> Tuple[int, int, int]:
-    hex_color = hex_color.lstrip("#")
+) -> Tuple[
+    int,
+    int,
+    int,
+]:
+
+    hex_color = (
+        hex_color
+        .lstrip("#")
+    )
 
     return tuple(
-        int(hex_color[i:i + 2], 16)
-        for i in (0, 2, 4)
+        int(
+            hex_color[
+                i:i + 2
+            ],
+            16,
+        )
+        for i in (
+            0,
+            2,
+            4,
+        )
     )
 
 
 def make_gradient(
     width: int,
     height: int,
-    top_color: Tuple[int, int, int],
-    bottom_color: Tuple[int, int, int],
+    top_color: Tuple[
+        int,
+        int,
+        int,
+    ],
+    bottom_color: Tuple[
+        int,
+        int,
+        int,
+    ],
 ) -> Image.Image:
+
     img = Image.new(
         "RGB",
-        (width, height),
+        (
+            width,
+            height,
+        ),
         top_color,
     )
 
     pixels = img.load()
 
-    for y in range(height):
-        ratio = y / max(1, height - 1)
+    for y in range(
+        height
+    ):
+
+        ratio = (
+            y
+            / max(
+                1,
+                height - 1,
+            )
+        )
 
         red = int(
-            top_color[0] * (1 - ratio)
-            + bottom_color[0] * ratio
+            top_color[0]
+            * (1 - ratio)
+            + bottom_color[0]
+            * ratio
         )
 
         green = int(
-            top_color[1] * (1 - ratio)
-            + bottom_color[1] * ratio
+            top_color[1]
+            * (1 - ratio)
+            + bottom_color[1]
+            * ratio
         )
 
         blue = int(
-            top_color[2] * (1 - ratio)
-            + bottom_color[2] * ratio
+            top_color[2]
+            * (1 - ratio)
+            + bottom_color[2]
+            * ratio
         )
 
-        for x in range(width):
-            pixels[x, y] = (
+        for x in range(
+            width
+        ):
+
+            pixels[
+                x,
+                y,
+            ] = (
                 red,
                 green,
                 blue,
@@ -701,24 +1732,34 @@ def draw_need_block(
     player_font,
     small_font,
 ) -> int:
+
     draw.text(
-        (x, y),
+        (
+            x,
+            y,
+        ),
         pos,
         fill=accent,
         font=pos_font,
     )
 
-    label = "POSITION GROUP NEED"
+    label = (
+        "POSITION GROUP NEED"
+    )
 
-    label_width, _ = text_size(
-        draw,
-        label,
-        small_font,
+    label_width, _ = (
+        text_size(
+            draw,
+            label,
+            small_font,
+        )
     )
 
     draw.text(
         (
-            x + width - label_width,
+            x
+            + width
+            - label_width,
             y + 8,
         ),
         label,
@@ -729,17 +1770,30 @@ def draw_need_block(
     y += 52
 
     if not players:
+
         draw.text(
-            (x + 18, y),
+            (
+                x + 18,
+                y,
+            ),
             "1 - No players found",
             fill="black",
             font=player_font,
         )
 
-        return y + 42
+        return (
+            y + 42
+        )
 
-    for index, player in enumerate(players, 1):
-        line = f"{index} - {player}"
+    for index, player in enumerate(
+        players,
+        1,
+    ):
+
+        line = (
+            f"{index} - "
+            f"{player}"
+        )
 
         line = fit_text(
             draw,
@@ -749,7 +1803,10 @@ def draw_need_block(
         )
 
         draw.text(
-            (x + 18, y),
+            (
+                x + 18,
+                y,
+            ),
             line,
             fill="black",
             font=player_font,
@@ -760,80 +1817,193 @@ def draw_need_block(
     return y
 
 
+# ============================================================
+# POSTER
+# ============================================================
+
 def poster(
     team: str,
-    out_file: Optional[str] = None,
+    year: int = DEFAULT_YEAR,
+    out_file: Optional[
+        str
+    ] = None,
 ):
-    team = ALIASES.get(team, team)
 
-    if team not in TEAM_META:
-        raise ValueError(f"Invalid team: {team}")
+    team = ALIASES.get(
+        team,
+        team,
+    )
 
-    roster = get_players(team)
+    if (
+        team
+        not in TEAM_META
+    ):
 
-    _, _, name = TEAM_META[team]
-    primary_hex, accent_hex = TEAM_COLORS[team]
+        raise ValueError(
+            f"Invalid team: "
+            f"{team}"
+        )
+
+    print()
+
+    print(
+        "=" * 80
+    )
+
+    print(
+        f"GENERATING TEAM NEEDS: "
+        f"{team} | "
+        f"SEASON {year}"
+    )
+
+    print(
+        "=" * 80
+    )
+
+    roster = get_players(
+        team,
+        year,
+    )
+
+    _, _, name = (
+        TEAM_META[
+            team
+        ]
+    )
+
+    (
+        primary_hex,
+        accent_hex,
+    ) = (
+        TEAM_COLORS[
+            team
+        ]
+    )
 
     width = 1600
     height = 2000
 
-    img = make_gradient(
-        width,
-        height,
-        hex_to_rgb(primary_hex),
-        (10, 10, 10),
-    ).convert("RGBA")
+    img = (
+        make_gradient(
+            width,
+            height,
+            hex_to_rgb(
+                primary_hex
+            ),
+            (
+                10,
+                10,
+                10,
+            ),
+        )
+        .convert(
+            "RGBA"
+        )
+    )
 
-    draw = ImageDraw.Draw(img)
+    draw = ImageDraw.Draw(
+        img
+    )
 
-    title_font = load_font(82, True)
-    team_font = load_font(56, True)
-    pos_font = load_font(38, True)
-    player_font = load_font(27, False)
-    small_font = load_font(19, True)
-    footer_font = load_font(22, False)
+    title_font = load_font(
+        82,
+        True,
+    )
+
+    team_font = load_font(
+        56,
+        True,
+    )
+
+    pos_font = load_font(
+        38,
+        True,
+    )
+
+    player_font = load_font(
+        27,
+        False,
+    )
+
+    small_font = load_font(
+        19,
+        True,
+    )
+
+    footer_font = load_font(
+        22,
+        False,
+    )
 
     y = 65
 
-    logo = get_logo(team)
+    logo = get_logo(
+        team
+    )
 
     if logo:
+
         logo.thumbnail(
-            (215, 215),
+            (
+                215,
+                215,
+            ),
             Image.LANCZOS,
         )
 
-        logo_x = (width - logo.width) // 2
+        logo_x = (
+            width
+            - logo.width
+        ) // 2
 
         img.alpha_composite(
             logo,
-            (logo_x, y),
+            (
+                logo_x,
+                y,
+            ),
         )
 
-        y += logo.height + 28
+        y += (
+            logo.height
+            + 28
+        )
 
-    y = draw_centered(
-        draw,
-        name.upper(),
-        y,
-        team_font,
-        "white",
-        width,
-    ) + 18
+    y = (
+        draw_centered(
+            draw,
+            name.upper(),
+            y,
+            team_font,
+            "white",
+            width,
+        )
+        + 18
+    )
 
-    y = draw_centered(
-        draw,
-        "TEAM NEEDS BOARD",
-        y,
-        title_font,
-        "white",
-        width,
-    ) + 40
+    y = (
+        draw_centered(
+            draw,
+            "TEAM NEEDS BOARD",
+            y,
+            title_font,
+            "white",
+            width,
+        )
+        + 40
+    )
 
     panel_x1 = 105
+
     panel_y1 = y
-    panel_x2 = width - 105
-    panel_y2 = height - 120
+
+    panel_x2 = (
+        width - 105
+    )
+
+    panel_y2 = (
+        height - 120
+    )
 
     draw.rounded_rectangle(
         (
@@ -843,23 +2013,54 @@ def poster(
             panel_y2,
         ),
         radius=34,
-        fill=(245, 245, 245, 238),
-        outline=(255, 255, 255, 85),
+        fill=(
+            245,
+            245,
+            245,
+            238,
+        ),
+        outline=(
+            255,
+            255,
+            255,
+            85,
+        ),
         width=3,
     )
 
-    y = panel_y1 + 38
-    left = panel_x1 + 45
-    right = panel_x2 - 45
-    block_width = right - left
+    y = (
+        panel_y1 + 38
+    )
 
-    needs = TEAM_NEEDS[team]
+    left = (
+        panel_x1 + 45
+    )
 
-    for index, pos in enumerate(needs, 1):
-        players = players_for_position(
-            pos,
-            roster,
-            max_players=8,
+    right = (
+        panel_x2 - 45
+    )
+
+    block_width = (
+        right - left
+    )
+
+    needs = (
+        TEAM_NEEDS[
+            team
+        ]
+    )
+
+    for index, pos in enumerate(
+        needs,
+        1,
+    ):
+
+        players = (
+            players_for_position(
+                pos,
+                roster,
+                max_players=8,
+            )
         )
 
         y = draw_need_block(
@@ -877,16 +2078,34 @@ def poster(
 
         y += 18
 
-        if index != len(needs):
+        if (
+            index
+            != len(needs)
+        ):
+
             draw.line(
-                (left, y, right, y),
-                fill=(190, 190, 190),
+                (
+                    left,
+                    y,
+                    right,
+                    y,
+                ),
+                fill=(
+                    190,
+                    190,
+                    190,
+                ),
                 width=2,
             )
 
             y += 26
 
-        if y > panel_y2 - 120:
+        if (
+            y
+            > panel_y2
+            - 120
+        ):
+
             break
 
     draw_centered(
@@ -900,27 +2119,50 @@ def poster(
 
     out_file = (
         out_file
-        or f"{team.lower()}_team_needs.png"
+        or (
+            f"{team.lower()}_"
+            "team_needs.png"
+        )
     )
 
     os.makedirs(
-        os.path.dirname(out_file) or ".",
+        os.path.dirname(
+            out_file
+        )
+        or ".",
         exist_ok=True,
     )
 
-    img.convert("RGB").save(
+    img.convert(
+        "RGB"
+    ).save(
         out_file,
         quality=95,
+    )
+
+    print(
+        f"Saved: {out_file}"
     )
 
     return out_file
 
 
+# ============================================================
+# ALL TEAMS
+# ============================================================
+
 def generate_all_team_needs_posters(
     outdir: str,
+    year: int = DEFAULT_YEAR,
 ):
-    if os.path.exists(outdir):
-        shutil.rmtree(outdir)
+
+    if os.path.exists(
+        outdir
+    ):
+
+        shutil.rmtree(
+            outdir
+        )
 
     os.makedirs(
         outdir,
@@ -928,74 +2170,147 @@ def generate_all_team_needs_posters(
     )
 
     outputs = {}
+
     failures = {}
 
     for team in TEAM_META:
+
         try:
-            out_file = os.path.join(
-                outdir,
-                f"{team.lower()}_team_needs.png",
+
+            out_file = (
+                os.path.join(
+                    outdir,
+                    f"{team.lower()}_"
+                    "team_needs.png",
+                )
             )
 
             poster(
                 team,
+                year=year,
                 out_file=out_file,
             )
 
-            outputs[team] = out_file
+            outputs[
+                team
+            ] = out_file
 
-        except Exception as e:
-            failures[team] = str(e)
+        except Exception as exc:
 
-    return outputs, failures
+            failures[
+                team
+            ] = str(
+                exc
+            )
 
+            print(
+                f"ERROR {team}: "
+                f"{exc}"
+            )
+
+    return (
+        outputs,
+        failures,
+    )
+
+
+# ============================================================
+# MAIN
+# ============================================================
 
 def main():
-    parser = argparse.ArgumentParser()
+
+    parser = (
+        argparse.ArgumentParser()
+    )
 
     parser.add_argument(
         "team",
         nargs="?",
-        help="Example: BUF, DAL, WSH",
+        help=(
+            "Example: "
+            "BUF, DAL, WSH"
+        ),
     )
 
     parser.add_argument(
         "--all",
         action="store_true",
-        help="Generate all 32 teams",
+        help=(
+            "Generate all "
+            "32 teams"
+        ),
+    )
+
+    parser.add_argument(
+        "--year",
+        type=int,
+        default=DEFAULT_YEAR,
+        help=(
+            "Season year. "
+            "Defaults to 2025."
+        ),
     )
 
     parser.add_argument(
         "--outdir",
-        default="team_needs_numbered_posters",
-        help="Output directory",
+        default=(
+            "team_needs_"
+            "numbered_posters"
+        ),
+        help=(
+            "Output directory"
+        ),
     )
 
-    args = parser.parse_args()
+    args = (
+        parser.parse_args()
+    )
 
     if args.all:
-        outputs, failures = (
+
+        (
+            outputs,
+            failures,
+        ) = (
             generate_all_team_needs_posters(
-                args.outdir
+                args.outdir,
+                year=args.year,
             )
         )
 
+        print()
+
         print(
-            f"Generated {len(outputs)} posters "
-            f"in {args.outdir}"
+            f"Generated "
+            f"{len(outputs)} "
+            f"posters in "
+            f"{args.outdir}"
         )
 
         if failures:
-            print("Failures:")
 
-            for team, error in failures.items():
-                print(f"{team}: {error}")
+            print(
+                "Failures:"
+            )
+
+            for (
+                team,
+                error,
+            ) in failures.items():
+
+                print(
+                    f"{team}: "
+                    f"{error}"
+                )
 
         return
 
     if not args.team:
+
         raise SystemExit(
-            "Provide a team abbreviation like BUF, "
+            "Provide a team "
+            "abbreviation like BUF, "
             "or use --all"
         )
 
@@ -1009,17 +2324,23 @@ def main():
         exist_ok=True,
     )
 
-    out_file = os.path.join(
-        args.outdir,
-        f"{team.lower()}_team_needs.png",
+    out_file = (
+        os.path.join(
+            args.outdir,
+            f"{team.lower()}_"
+            "team_needs.png",
+        )
     )
 
     saved = poster(
         team,
+        year=args.year,
         out_file=out_file,
     )
 
-    print(f"Saved {saved}")
+    print(
+        f"Saved {saved}"
+    )
 
 
 if __name__ == "__main__":
