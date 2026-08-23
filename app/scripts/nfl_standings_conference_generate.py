@@ -678,8 +678,6 @@ def parse_conference(
             )
         )
 
-    # Remove duplicates safely.
-
     seen = set()
 
     unique_rows: List[
@@ -705,10 +703,6 @@ def parse_conference(
             unique_rows.append(
                 row
             )
-
-    # ESPN's standings array is already ordered,
-    # but if all/most teams have playoff seeds,
-    # sort explicitly by seed.
 
     seeded_rows = [
         row
@@ -1092,7 +1086,7 @@ def render_conference_poster(
     )
 
     title = (
-        f"NFL STANDINGS {season}"
+        f"STANDINGS {season}"
     )
 
     title_font = fit_font(
@@ -1484,10 +1478,6 @@ def render_conference_poster(
                 values
             ):
 
-                # --------------------------------------------
-                # RANK
-                # --------------------------------------------
-
                 if (
                     column_index == 0
                 ):
@@ -1516,10 +1506,6 @@ def render_conference_poster(
                         fill=rank_color,
                         font=seed_font,
                     )
-
-                # --------------------------------------------
-                # TEAM
-                # --------------------------------------------
 
                 elif (
                     column_index == 1
@@ -1555,10 +1541,6 @@ def render_conference_poster(
                         fill=text_color,
                         font=team_font,
                     )
-
-                # --------------------------------------------
-                # OTHER COLUMNS
-                # --------------------------------------------
 
                 else:
 
