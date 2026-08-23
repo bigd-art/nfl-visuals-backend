@@ -62,7 +62,7 @@ def upload_stat_leaders(tmpdir: str, season: int, seasontype: int, phase: str) -
 
 
 def publish_posters(keep_versioned: bool = False) -> dict:
-    season = resolve_first_valid(candidate_regular_seasons(), standings_has_data)
+    season = 2025
 
     with tempfile.TemporaryDirectory() as tmpdir:
         payload = {
