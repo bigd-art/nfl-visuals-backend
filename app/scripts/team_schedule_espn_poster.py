@@ -33,25 +33,17 @@ HEADERS = {
     "Accept-Language": "en-US,en;q=0.9",
 }
 
-
-# ============================================================
-# ESPN CORE API
-# ============================================================
-
 CORE_API_BASE = (
     "https://sports.core.api.espn.com/v2/"
     "sports/football/leagues/nfl"
 )
 
 
-# ------------------------------------------------------------
-# IMPORTANT:
-#
-# These constants are deliberately kept because
-# nightly_publish_team_schedules.py imports them.
-#
-# They now point to ESPN CORE instead of site.api.
-# ------------------------------------------------------------
+# ============================================================
+# COMPATIBILITY CONSTANTS
+# ============================================================
+
+# Kept because nightly_publish_team_schedules.py imports them.
 
 TEAMS_URL = (
     CORE_API_BASE
@@ -61,6 +53,11 @@ TEAMS_URL = (
 SCHEDULE_URL = (
     CORE_API_BASE
     + "/seasons/{year}/teams/{team_id}/events?limit=100"
+)
+
+WEEK_EVENTS_URL = (
+    CORE_API_BASE
+    + "/seasons/{year}/types/2/weeks/{week}/events?limit=100"
 )
 
 
@@ -105,42 +102,20 @@ TEAM_COLORS = {
 
 
 # ============================================================
-# BASIC HTTP
+# HTTP
 # ============================================================
 
 def normalize_ref(url: str) -> str:
-    """
-    ESPN Core often returns http:// references.
-    Force them to HTTPS.
-    """
+    url = str(url or "").strip()
 
-    url = str(
-        url or ""
-    ).strip()
-
-    if url.startswith(
-        "http://"
-    ):
-
-        return (
-            "https://"
-            + url[len("http://"):]
-        )
+    if url.startswith("http://"):
+        return "https://" + url[len("http://"):]
 
     return url
 
 
 def get_json(url: str) -> dict:
-    """
-    General JSON request helper.
-
-    Kept under the original function name because
-    nightly_publish_team_schedules.py may import/use it.
-    """
-
-    url = normalize_ref(
-        url
-    )
+    url = normalize_ref(url)
 
     response = requests.get(
         url,
@@ -159,49 +134,12 @@ def get_json(url: str) -> dict:
 
 
 # ============================================================
-# SAFE GET
-# ============================================================
-
-def safe_get(
-    data: dict,
-    *keys,
-    default="",
-):
-
-    current = data
-
-    for key in keys:
-
-        if not isinstance(
-            current,
-            dict,
-        ):
-
-            return default
-
-        current = current.get(
-            key
-        )
-
-        if current is None:
-
-            return default
-
-    return current
-
-
-# ============================================================
 # TEAM HELPERS
 # ============================================================
 
-def get_team_abbreviation(
-    team: dict,
-) -> str:
-
+def get_team_abbreviation(team: dict) -> str:
     return str(
-        team.get(
-            "abbreviation"
-        )
+        team.get("abbreviation")
         or ""
     ).strip().upper()
 
@@ -210,32 +148,17 @@ def get_team_name(
     team: dict,
     fallback: str = "",
 ) -> str:
-
     return str(
-        team.get(
-            "displayName"
-        )
-        or team.get(
-            "name"
-        )
-        or team.get(
-            "shortDisplayName"
-        )
+        team.get("displayName")
+        or team.get("name")
+        or team.get("shortDisplayName")
         or fallback
     ).strip()
 
 
-def get_team_logo(
-    team: dict,
-) -> str:
-    """
-    Get ESPN logo URL if present.
-    """
-
+def get_team_logo(team: dict) -> str:
     logos = (
-        team.get(
-            "logos"
-        )
+        team.get("logos")
         or []
     )
 
@@ -243,41 +166,30 @@ def get_team_logo(
         logos,
         list,
     ):
-
         for logo in logos:
 
             if not isinstance(
                 logo,
                 dict,
             ):
-
                 continue
 
             href = str(
-                logo.get(
-                    "href"
-                )
+                logo.get("href")
                 or ""
             ).strip()
 
             if href:
                 return href
 
-    logo = (
-        team.get(
-            "logo"
-        )
-    )
+    logo = team.get("logo")
 
     if isinstance(
         logo,
         dict,
     ):
-
         return str(
-            logo.get(
-                "href"
-            )
+            logo.get("href")
             or ""
         ).strip()
 
@@ -291,16 +203,6 @@ def get_team_logo(
 def build_team_map(
     year: int = DEFAULT_YEAR,
 ) -> Dict[str, dict]:
-    """
-    Build abbreviation -> team info.
-
-    IMPORTANT:
-    year defaults to 2025 so the old nightly code can still call:
-
-        build_team_map()
-
-    without passing anything.
-    """
 
     url = TEAMS_URL.format(
         year=year
@@ -308,34 +210,24 @@ def build_team_map(
 
     print()
     print("=" * 80)
-
     print(
-        f"FETCHING TEAM MAP "
-        f"FOR {year}"
+        f"FETCHING TEAM MAP FOR {year}"
     )
-
     print("=" * 80)
 
-    data = get_json(
+    payload = get_json(
         url
     )
 
     items = (
-        data.get(
-            "items"
-        )
+        payload.get("items")
         or []
     )
 
-    output: Dict[
+    team_map: Dict[
         str,
         dict,
     ] = {}
-
-    print(
-        f"Team endpoint returned "
-        f"{len(items)} items"
-    )
 
     for index, item in enumerate(
         items,
@@ -346,32 +238,24 @@ def build_team_map(
             item,
             dict,
         ):
-
             continue
 
         try:
 
             ref = str(
-                item.get(
-                    "$ref"
-                )
+                item.get("$ref")
                 or ""
             ).strip()
 
             if ref:
-
                 team = get_json(
                     ref
                 )
-
             else:
-
                 team = item
 
             team_id = str(
-                team.get(
-                    "id"
-                )
+                team.get("id")
                 or ""
             ).strip()
 
@@ -385,72 +269,50 @@ def build_team_map(
                 not team_id
                 or not abbreviation
             ):
-
-                print(
-                    f"Skipping team item "
-                    f"{index}: missing "
-                    f"id/abbreviation"
-                )
-
                 continue
 
-            display_name = (
-                get_team_name(
-                    team,
-                    abbreviation,
-                )
-            )
-
-            logo_url = (
-                get_team_logo(
-                    team
-                )
-            )
-
-            output[
+            team_map[
                 abbreviation
             ] = {
                 "id": team_id,
-                "display_name": display_name,
-                "logo": logo_url,
+                "display_name": (
+                    get_team_name(
+                        team,
+                        abbreviation,
+                    )
+                ),
+                "logo": (
+                    get_team_logo(
+                        team
+                    )
+                ),
             }
-
-            print(
-                f"{abbreviation}: "
-                f"id={team_id} | "
-                f"{display_name}"
-            )
 
         except Exception as exc:
 
             print(
-                f"WARNING: Failed "
-                f"team item {index}: "
+                f"WARNING: "
+                f"team map item "
+                f"{index} failed: "
                 f"{exc}"
             )
 
-    print()
-
     print(
-        f"TEAM MAP COUNT = "
-        f"{len(output)}"
+        f"Team map count: "
+        f"{len(team_map)}"
     )
 
-    if len(
-        output
-    ) < 32:
-
+    if len(team_map) < 32:
         raise RuntimeError(
             "Expected 32 teams, "
-            f"but only parsed "
-            f"{len(output)}."
+            f"parsed {len(team_map)}."
         )
 
-    return output
+    return team_map
 
 
 # ============================================================
-# RESOLVE CORE REFERENCES
+# CORE REF HELPERS
 # ============================================================
 
 def resolve_ref_object(
@@ -461,18 +323,14 @@ def resolve_ref_object(
         obj,
         dict,
     ):
-
         return obj
 
     ref = str(
-        obj.get(
-            "$ref"
-        )
+        obj.get("$ref")
         or ""
     ).strip()
 
     if not ref:
-
         return obj
 
     try:
@@ -484,97 +342,52 @@ def resolve_ref_object(
     except Exception as exc:
 
         print(
-            "WARNING: Could not "
-            f"resolve reference: "
-            f"{ref}"
-        )
-
-        print(
-            exc
+            f"WARNING: failed "
+            f"reference {ref}: "
+            f"{exc}"
         )
 
         return obj
 
 
 # ============================================================
-# SCHEDULE COLLECTION -> EVENTS
+# WEEK EVENTS
 # ============================================================
 
-def resolve_schedule_events(
-    data: Any,
+def get_week_events(
+    year: int,
+    week: int,
 ) -> List[dict]:
     """
-    Accept either:
-
-    1. Core events collection:
-       {"items": [{"$ref": ...}, ...]}
-
-    2. Already resolved event list
-
-    3. Legacy-style:
-       {"events": [...]}
-
-    This compatibility is important because the nightly
-    publisher may still call:
-
-        data = get_json(SCHEDULE_URL...)
-        build_full_18_week_schedule(team, data, team_map)
+    Fetch all regular-season events for one week.
     """
 
-    if isinstance(
-        data,
-        list,
-    ):
+    url = WEEK_EVENTS_URL.format(
+        year=year,
+        week=week,
+    )
 
-        raw_items = data
+    print()
+    print(
+        f"Fetching Week {week}: "
+        f"{url}"
+    )
 
-    elif isinstance(
-        data,
-        dict,
-    ):
+    payload = get_json(
+        url
+    )
 
-        if isinstance(
-            data.get(
-                "events"
-            ),
-            list,
-        ):
-
-            raw_items = (
-                data.get(
-                    "events"
-                )
-                or []
-            )
-
-        elif isinstance(
-            data.get(
-                "items"
-            ),
-            list,
-        ):
-
-            raw_items = (
-                data.get(
-                    "items"
-                )
-                or []
-            )
-
-        else:
-
-            raw_items = []
-
-    else:
-
-        raw_items = []
+    items = (
+        payload.get("items")
+        or []
+    )
 
     events: List[
         dict
     ] = []
 
     for index, item in enumerate(
-        raw_items,
+        items,
         start=1,
     ):
 
@@ -582,33 +395,26 @@ def resolve_schedule_events(
             item,
             dict,
         ):
-
             continue
 
         try:
 
             ref = str(
-                item.get(
-                    "$ref"
-                )
+                item.get("$ref")
                 or ""
             ).strip()
 
             if ref:
-
                 event = get_json(
                     ref
                 )
-
             else:
-
                 event = item
 
             if isinstance(
                 event,
                 dict,
             ):
-
                 events.append(
                     event
                 )
@@ -616,13 +422,14 @@ def resolve_schedule_events(
         except Exception as exc:
 
             print(
-                f"WARNING: Failed to "
-                f"resolve schedule item "
-                f"{index}: {exc}"
+                f"WARNING: Week "
+                f"{week} event "
+                f"{index} failed: "
+                f"{exc}"
             )
 
     print(
-        f"Resolved "
+        f"Week {week}: "
         f"{len(events)} events"
     )
 
@@ -630,18 +437,35 @@ def resolve_schedule_events(
 
 
 # ============================================================
-# COMPETITION RESOLUTION
+# COMPETITION
 # ============================================================
 
-def resolve_competition(
-    competition: Any,
+def extract_competition(
+    event: dict,
 ) -> Optional[dict]:
+
+    competitions = (
+        event.get("competitions")
+        or []
+    )
+
+    if not isinstance(
+        competitions,
+        list,
+    ):
+        return None
+
+    if not competitions:
+        return None
+
+    competition = (
+        competitions[0]
+    )
 
     if not isinstance(
         competition,
         dict,
     ):
-
         return None
 
     if isinstance(
@@ -650,13 +474,10 @@ def resolve_competition(
         ),
         list,
     ):
-
         return competition
 
     ref = str(
-        competition.get(
-            "$ref"
-        )
+        competition.get("$ref")
         or ""
     ).strip()
 
@@ -672,66 +493,29 @@ def resolve_competition(
                 resolved,
                 dict,
             ):
-
                 return resolved
 
         except Exception as exc:
 
             print(
-                "WARNING: Failed "
-                f"competition ref: "
+                "WARNING: competition "
+                f"resolution failed: "
                 f"{exc}"
             )
 
     return competition
 
 
-def extract_competition(
-    event: dict,
-) -> Optional[dict]:
-
-    competitions = (
-        event.get(
-            "competitions"
-        )
-        or []
-    )
-
-    if not isinstance(
-        competitions,
-        list,
-    ):
-
-        return None
-
-    if not competitions:
-
-        return None
-
-    return resolve_competition(
-        competitions[0]
-    )
-
-
 # ============================================================
-# COMPETITOR TEAM RESOLUTION
+# COMPETITOR HELPERS
 # ============================================================
 
-def resolve_competitor_team(
+def resolve_team_from_competitor(
     competitor: dict,
 ) -> dict:
 
-    if not isinstance(
-        competitor,
-        dict,
-    ):
-
-        return {}
-
     team = (
-        competitor.get(
-            "team"
-        )
+        competitor.get("team")
         or {}
     )
 
@@ -739,19 +523,15 @@ def resolve_competitor_team(
         team,
         dict,
     ):
-
         return {}
 
     if team.get(
         "abbreviation"
     ):
-
         return team
 
     ref = str(
-        team.get(
-            "$ref"
-        )
+        team.get("$ref")
         or ""
     ).strip()
 
@@ -767,20 +547,19 @@ def resolve_competitor_team(
                 resolved,
                 dict,
             ):
-
                 return resolved
 
         except Exception as exc:
 
             print(
-                "WARNING: Failed "
-                f"team ref: {exc}"
+                f"WARNING: team ref "
+                f"failed: {exc}"
             )
 
     return team
 
 
-def extract_team_entry(
+def find_team_competitor(
     competition: dict,
     team_abbr: str,
 ) -> Optional[dict]:
@@ -798,11 +577,10 @@ def extract_team_entry(
             competitor,
             dict,
         ):
-
             continue
 
         team = (
-            resolve_competitor_team(
+            resolve_team_from_competitor(
                 competitor
             )
         )
@@ -822,16 +600,14 @@ def extract_team_entry(
                 competitor
             )
 
-            result[
-                "team"
-            ] = team
+            result["team"] = team
 
             return result
 
     return None
 
 
-def extract_opponent_entry(
+def find_opponent_competitor(
     competition: dict,
     team_abbr: str,
 ) -> Optional[dict]:
@@ -849,11 +625,10 @@ def extract_opponent_entry(
             competitor,
             dict,
         ):
-
             continue
 
         team = (
-            resolve_competitor_team(
+            resolve_team_from_competitor(
                 competitor
             )
         )
@@ -874,9 +649,7 @@ def extract_opponent_entry(
                 competitor
             )
 
-            result[
-                "team"
-            ] = team
+            result["team"] = team
 
             return result
 
@@ -884,408 +657,134 @@ def extract_opponent_entry(
 
 
 # ============================================================
-# WEEK RESOLUTION
+# FIND TEAM GAME FOR WEEK
 # ============================================================
 
-def resolve_week(
-    week_obj: Any,
-) -> Any:
-
-    if not isinstance(
-        week_obj,
-        dict,
-    ):
-
-        return week_obj
-
-    if (
-        "number"
-        in week_obj
-    ):
-
-        return week_obj
-
-    ref = str(
-        week_obj.get(
-            "$ref"
-        )
-        or ""
-    ).strip()
-
-    if ref:
-
-        try:
-
-            return get_json(
-                ref
-            )
-
-        except Exception:
-
-            return week_obj
-
-    return week_obj
-
-
-def extract_week_number(
-    event: dict,
-    competition: dict,
-) -> Optional[int]:
-
-    candidates = [
-        event.get(
-            "week"
-        ),
-        competition.get(
-            "week"
-        ),
-    ]
-
-    for week_obj in candidates:
-
-        week_obj = (
-            resolve_week(
-                week_obj
-            )
-        )
-
-        if isinstance(
-            week_obj,
-            dict,
-        ):
-
-            value = (
-                week_obj.get(
-                    "number"
-                )
-                or week_obj.get(
-                    "value"
-                )
-                or week_obj.get(
-                    "id"
-                )
-            )
-
-        else:
-
-            value = (
-                week_obj
-            )
-
-        try:
-
-            number = int(
-                value
-            )
-
-            if (
-                1
-                <= number
-                <= 18
-            ):
-
-                return number
-
-        except Exception:
-
-            continue
-
-    return None
-
-
-# ============================================================
-# SEASON TYPE
-# ============================================================
-
-def extract_season_type(
-    event: dict,
-    competition: dict,
-) -> Optional[int]:
-
-    candidates = [
-        safe_get(
-            event,
-            "season",
-            "type",
-            default=None,
-        ),
-        safe_get(
-            event,
-            "seasonType",
-            "id",
-            default=None,
-        ),
-        safe_get(
-            event,
-            "seasonType",
-            "type",
-            default=None,
-        ),
-        safe_get(
-            competition,
-            "season",
-            "type",
-            default=None,
-        ),
-        safe_get(
-            competition,
-            "type",
-            "id",
-            default=None,
-        ),
-    ]
-
-    for candidate in candidates:
-
-        if candidate is None:
-
-            continue
-
-        try:
-
-            return int(
-                candidate
-            )
-
-        except Exception:
-
-            continue
-
-    return None
-
-
-# ============================================================
-# SCHEDULE PARSER
-# ============================================================
-
-def parse_games_only(
+def find_team_game_for_week(
     team_abbr: str,
-    data: Any,
+    year: int,
+    week: int,
     team_map: Dict[str, dict],
-) -> Dict[int, dict]:
-    """
-    Parse Core schedule collection.
+) -> Optional[dict]:
 
-    Compatible with the original function signature.
-    """
-
-    events = (
-        resolve_schedule_events(
-            data
-        )
+    events = get_week_events(
+        year,
+        week,
     )
 
-    if not events:
+    for event in events:
 
-        raise RuntimeError(
-            "No schedule events "
-            "were returned/resolved."
+        competition = (
+            extract_competition(
+                event
+            )
         )
 
-    by_week: Dict[
-        int,
-        dict,
-    ] = {}
+        if not competition:
+            continue
 
-    for index, event in enumerate(
-        events,
-        start=1,
-    ):
+        team_entry = (
+            find_team_competitor(
+                competition,
+                team_abbr,
+            )
+        )
 
-        try:
+        if not team_entry:
+            continue
 
-            competition = (
-                extract_competition(
-                    event
+        opponent_entry = (
+            find_opponent_competitor(
+                competition,
+                team_abbr,
+            )
+        )
+
+        if not opponent_entry:
+            continue
+
+        opponent_team = (
+            opponent_entry.get(
+                "team"
+            )
+            or {}
+        )
+
+        opponent_abbr = (
+            get_team_abbreviation(
+                opponent_team
+            )
+        )
+
+        if not opponent_abbr:
+            continue
+
+        home_away = str(
+            team_entry.get(
+                "homeAway"
+            )
+            or ""
+        ).strip().lower()
+
+        if (
+            home_away
+            == "away"
+        ):
+            matchup = (
+                f"@ {opponent_abbr}"
+            )
+        else:
+            matchup = (
+                f"vs {opponent_abbr}"
+            )
+
+        date_iso = str(
+            event.get("date")
+            or competition.get(
+                "date"
+            )
+            or ""
+        ).strip()
+
+        logo_url = (
+            get_team_logo(
+                opponent_team
+            )
+        )
+
+        if (
+            not logo_url
+            and opponent_abbr
+            in team_map
+        ):
+
+            logo_url = str(
+                team_map[
+                    opponent_abbr
+                ].get(
+                    "logo",
+                    "",
                 )
             )
 
-            if not competition:
+        print(
+            f"Week {week}: "
+            f"{matchup} "
+            f"{date_iso}"
+        )
 
-                print(
-                    f"Skipping event "
-                    f"{index}: "
-                    f"no competition"
-                )
+        return {
+            "week": week,
+            "opponent": matchup,
+            "date": date_iso,
+            "logo_url": logo_url,
+        }
 
-                continue
+    print(
+        f"Week {week}: BYE"
+    )
 
-            # ------------------------------------------------
-            # REGULAR SEASON ONLY
-            # ------------------------------------------------
-
-            season_type = (
-                extract_season_type(
-                    event,
-                    competition,
-                )
-            )
-
-            if (
-                season_type
-                is not None
-                and season_type != 2
-            ):
-
-                continue
-
-            # ------------------------------------------------
-            # WEEK
-            # ------------------------------------------------
-
-            week_num = (
-                extract_week_number(
-                    event,
-                    competition,
-                )
-            )
-
-            if week_num is None:
-
-                print(
-                    f"Skipping event "
-                    f"{index}: "
-                    f"week not found"
-                )
-
-                continue
-
-            # ------------------------------------------------
-            # TEAMS
-            # ------------------------------------------------
-
-            team_entry = (
-                extract_team_entry(
-                    competition,
-                    team_abbr,
-                )
-            )
-
-            opponent_entry = (
-                extract_opponent_entry(
-                    competition,
-                    team_abbr,
-                )
-            )
-
-            if (
-                not team_entry
-                or not opponent_entry
-            ):
-
-                print(
-                    f"Skipping week "
-                    f"{week_num}: "
-                    f"teams not resolved"
-                )
-
-                continue
-
-            opponent_team = (
-                opponent_entry.get(
-                    "team"
-                )
-                or {}
-            )
-
-            opponent_abbr = (
-                get_team_abbreviation(
-                    opponent_team
-                )
-            )
-
-            if not opponent_abbr:
-
-                continue
-
-            home_away = str(
-                team_entry.get(
-                    "homeAway"
-                )
-                or ""
-            ).strip().lower()
-
-            if (
-                home_away
-                == "away"
-            ):
-
-                opponent = (
-                    f"@ "
-                    f"{opponent_abbr}"
-                )
-
-            else:
-
-                opponent = (
-                    f"vs "
-                    f"{opponent_abbr}"
-                )
-
-            # ------------------------------------------------
-            # DATE
-            # ------------------------------------------------
-
-            date_iso = str(
-                event.get(
-                    "date"
-                )
-                or competition.get(
-                    "date"
-                )
-                or ""
-            ).strip()
-
-            # ------------------------------------------------
-            # LOGO
-            # ------------------------------------------------
-
-            logo_url = (
-                get_team_logo(
-                    opponent_team
-                )
-            )
-
-            if (
-                not logo_url
-                and opponent_abbr
-                in team_map
-            ):
-
-                logo_url = str(
-                    team_map[
-                        opponent_abbr
-                    ].get(
-                        "logo",
-                        "",
-                    )
-                )
-
-            by_week[
-                week_num
-            ] = {
-                "week": week_num,
-                "opponent": opponent,
-                "date": date_iso,
-                "logo_url": logo_url,
-            }
-
-            print(
-                f"Week "
-                f"{week_num}: "
-                f"{opponent} | "
-                f"{date_iso}"
-            )
-
-        except Exception as exc:
-
-            print(
-                f"WARNING: Failed "
-                f"event {index}: "
-                f"{exc}"
-            )
-
-    return by_week
+    return None
 
 
 # ============================================================
@@ -1300,35 +799,26 @@ def format_date_eastern(
         not date_iso
         or date_iso == "-"
     ):
-
         return "-"
 
     try:
 
         raw = (
-            date_iso
-            .replace(
+            date_iso.replace(
                 "Z",
                 "+00:00",
             )
         )
 
-        dt = (
-            datetime.fromisoformat(
-                raw
-            )
+        dt = datetime.fromisoformat(
+            raw
         )
 
-        if (
-            ZoneInfo
-            is not None
-        ):
+        if ZoneInfo is not None:
 
-            eastern = (
-                dt.astimezone(
-                    ZoneInfo(
-                        "America/New_York"
-                    )
+            eastern = dt.astimezone(
+                ZoneInfo(
+                    "America/New_York"
                 )
             )
 
@@ -1374,53 +864,53 @@ def format_date_eastern(
 
 
 # ============================================================
-# FULL 18-WEEK SCHEDULE
+# BUILD 18-WEEK SCHEDULE
 # ============================================================
 
-def build_full_18_week_schedule(
+def build_schedule_from_weeks(
     team_abbr: str,
-    data: Any,
+    year: int,
     team_map: Dict[str, dict],
 ) -> List[dict]:
     """
-    Compatible with the original API.
+    Deterministically check Weeks 1-18.
 
-    nightly_publish_team_schedules.py can continue passing
-    the raw result of get_json(SCHEDULE_URL...).
+    If the team does not appear in a week's events,
+    that week is treated as the BYE.
     """
 
-    games_by_week = (
-        parse_games_only(
-            team_abbr,
-            data,
-            team_map,
-        )
-    )
+    full_schedule: List[
+        dict
+    ] = []
 
-    full_schedule = []
+    games_found = 0
 
     for week in range(
         1,
         19,
     ):
 
-        if (
-            week
-            in games_by_week
-        ):
-
-            game = (
-                games_by_week[
-                    week
-                ]
+        game = (
+            find_team_game_for_week(
+                team_abbr,
+                year,
+                week,
+                team_map,
             )
+        )
+
+        if game:
+
+            games_found += 1
 
             full_schedule.append(
                 {
                     "week": week,
-                    "opponent": game[
-                        "opponent"
-                    ],
+                    "opponent": (
+                        game[
+                            "opponent"
+                        ]
+                    ),
                     "date": (
                         format_date_eastern(
                             game[
@@ -1428,9 +918,11 @@ def build_full_18_week_schedule(
                             ]
                         )
                     ),
-                    "logo_url": game[
-                        "logo_url"
-                    ],
+                    "logo_url": (
+                        game[
+                            "logo_url"
+                        ]
+                    ),
                 }
             )
 
@@ -1445,17 +937,90 @@ def build_full_18_week_schedule(
                 }
             )
 
+    print()
     print(
-        f"Built final "
-        f"18-week schedule "
-        f"for {team_abbr}"
+        f"{team_abbr}: "
+        f"{games_found} games "
+        f"found across Weeks 1-18"
     )
+
+    # NFL regular-season schedule should have 17 games.
+    # Fail instead of silently producing another all-BYE poster.
+
+    if games_found < 16:
+
+        raise RuntimeError(
+            f"Only found {games_found} "
+            f"regular-season games "
+            f"for {team_abbr} {year}. "
+            "Refusing to generate "
+            "an incomplete schedule poster."
+        )
 
     return full_schedule
 
 
 # ============================================================
-# FONT
+# BACKWARD-COMPATIBLE FUNCTION
+# ============================================================
+
+def build_full_18_week_schedule(
+    team_abbr: str,
+    data: Any,
+    team_map: Dict[str, dict],
+) -> List[dict]:
+    """
+    This function name/signature is preserved because your
+    nightly publisher already imports it.
+
+    The old raw team-events payload is deliberately ignored.
+    We infer the year from that payload when possible,
+    otherwise default to 2025.
+    """
+
+    year = DEFAULT_YEAR
+
+    if isinstance(
+        data,
+        dict,
+    ):
+
+        season_obj = (
+            data.get("season")
+            or {}
+        )
+
+        if isinstance(
+            season_obj,
+            dict,
+        ):
+
+            candidate = (
+                season_obj.get("year")
+                or season_obj.get(
+                    "value"
+                )
+            )
+
+            try:
+
+                if candidate:
+                    year = int(
+                        candidate
+                    )
+
+            except Exception:
+                pass
+
+    return build_schedule_from_weeks(
+        team_abbr,
+        year,
+        team_map,
+    )
+
+
+# ============================================================
+# FONT HELPERS
 # ============================================================
 
 def get_font(
@@ -1506,15 +1071,10 @@ def draw_centered(
     fill,
 ):
 
-    bbox = (
-        draw.textbbox(
-            (
-                0,
-                0,
-            ),
-            text,
-            font=font,
-        )
+    bbox = draw.textbbox(
+        (0, 0),
+        text,
+        font=font,
     )
 
     text_width = (
@@ -1551,28 +1111,19 @@ def fit_text(
 
     if (
         draw.textbbox(
-            (
-                0,
-                0,
-            ),
+            (0, 0),
             text,
             font=font,
         )[2]
         <= max_width
     ):
-
         return text
 
-    shortened = (
-        text
-    )
+    shortened = text
 
-    while (
-        len(
-            shortened
-        )
-        > 3
-    ):
+    while len(
+        shortened
+    ) > 3:
 
         shortened = (
             shortened[:-1]
@@ -1585,16 +1136,12 @@ def fit_text(
 
         if (
             draw.textbbox(
-                (
-                    0,
-                    0,
-                ),
+                (0, 0),
                 candidate,
                 font=font,
             )[2]
             <= max_width
         ):
-
             return candidate
 
     return "..."
@@ -1616,14 +1163,9 @@ def fetch_logo_image(
 ]:
 
     if not url:
-
         return None
 
-    if (
-        url
-        in cache
-    ):
-
+    if url in cache:
         return (
             cache[
                 url
@@ -1632,12 +1174,10 @@ def fetch_logo_image(
 
     try:
 
-        response = (
-            requests.get(
-                url,
-                headers=HEADERS,
-                timeout=30,
-            )
+        response = requests.get(
+            url,
+            headers=HEADERS,
+            timeout=30,
         )
 
         response.raise_for_status()
@@ -1705,8 +1245,9 @@ def fetch_logo_image(
     except Exception as exc:
 
         print(
-            "WARNING: Logo "
-            f"failed: {exc}"
+            f"WARNING: logo "
+            f"fetch failed: "
+            f"{exc}"
         )
 
         return None
@@ -1740,15 +1281,13 @@ def make_poster(
         )
     )
 
-    background = (
-        Image.new(
-            "RGB",
-            (
-                width,
-                height,
-            ),
-            primary,
-        )
+    background = Image.new(
+        "RGB",
+        (
+            width,
+            height,
+        ),
+        primary,
     )
 
     draw = ImageDraw.Draw(
@@ -1780,10 +1319,6 @@ def make_poster(
         bold=True,
     )
 
-    # --------------------------------------------------------
-    # BORDERS
-    # --------------------------------------------------------
-
     draw.rectangle(
         [
             0,
@@ -1803,10 +1338,6 @@ def make_poster(
         ],
         fill=secondary,
     )
-
-    # --------------------------------------------------------
-    # TITLE
-    # --------------------------------------------------------
 
     draw_centered(
         draw,
@@ -1830,17 +1361,11 @@ def make_poster(
     )
 
     left = 62
-
-    right = (
-        width - 62
-    )
-
+    right = width - 62
     top = 334
 
     header_h = 126
-
     row_h = 120
-
     row_gap = 7
 
     draw.rounded_rectangle(
@@ -1848,7 +1373,8 @@ def make_poster(
             left,
             top,
             right,
-            top + header_h,
+            top
+            + header_h,
         ],
         radius=28,
         fill=secondary,
@@ -1921,7 +1447,6 @@ def make_poster(
     )
 
     logo_size = 78
-
     matchup_width = 675
 
     date_width = (
@@ -1934,10 +1459,6 @@ def make_poster(
         str,
         Image.Image,
     ] = {}
-
-    # --------------------------------------------------------
-    # GAME ROWS
-    # --------------------------------------------------------
 
     for index, game in enumerate(
         games
@@ -1989,20 +1510,15 @@ def make_poster(
             )
         )
 
-        week_text = (
-            str(
-                game[
-                    "week"
-                ]
-            )
+        week_text = str(
+            game[
+                "week"
+            ]
         )
 
         week_bbox = (
             draw.textbbox(
-                (
-                    0,
-                    0,
-                ),
+                (0, 0),
                 week_text,
                 font=week_font,
             )
@@ -2029,10 +1545,6 @@ def make_poster(
             fill=text_fill,
         )
 
-        # ----------------------------------------------------
-        # LOGO
-        # ----------------------------------------------------
-
         if (
             game[
                 "opponent"
@@ -2051,10 +1563,7 @@ def make_poster(
                 )
             )
 
-            if (
-                logo_image
-                is not None
-            ):
+            if logo_image is not None:
 
                 logo_y = (
                     y
@@ -2098,16 +1607,9 @@ def make_poster(
                 fill=text_fill,
             )
 
-        # ----------------------------------------------------
-        # MATCHUP
-        # ----------------------------------------------------
-
         matchup_bbox = (
             draw.textbbox(
-                (
-                    0,
-                    0,
-                ),
+                (0, 0),
                 matchup_text,
                 font=row_font,
             )
@@ -2134,16 +1636,9 @@ def make_poster(
             fill=text_fill,
         )
 
-        # ----------------------------------------------------
-        # DATE
-        # ----------------------------------------------------
-
         date_bbox = (
             draw.textbbox(
-                (
-                    0,
-                    0,
-                ),
+                (0, 0),
                 date_text,
                 font=row_font,
             )
@@ -2175,10 +1670,6 @@ def make_poster(
             + row_gap
         )
 
-    # --------------------------------------------------------
-    # SAVE
-    # --------------------------------------------------------
-
     background.save(
         output_path
     )
@@ -2195,13 +1686,11 @@ def make_poster(
 
 def main():
 
-    parser = (
-        argparse.ArgumentParser(
-            description=(
-                "Create a regular "
-                "season schedule poster "
-                "using ESPN Core API."
-            )
+    parser = argparse.ArgumentParser(
+        description=(
+            "Create a regular-season "
+            "schedule poster using "
+            "ESPN Core weekly events."
         )
     )
 
@@ -2209,20 +1698,12 @@ def main():
         "--year",
         type=int,
         default=DEFAULT_YEAR,
-        help=(
-            "Season year. "
-            "Defaults to 2025."
-        ),
     )
 
     parser.add_argument(
         "--team",
         type=str,
         required=True,
-        help=(
-            "Team abbreviation, "
-            "for example PHI."
-        ),
     )
 
     args = (
@@ -2238,10 +1719,7 @@ def main():
     try:
 
         print()
-
-        print(
-            "=" * 80
-        )
+        print("=" * 80)
 
         print(
             f"GENERATING "
@@ -2250,13 +1728,7 @@ def main():
             f"SCHEDULE"
         )
 
-        print(
-            "=" * 80
-        )
-
-        # ----------------------------------------------------
-        # TEAM MAP
-        # ----------------------------------------------------
+        print("=" * 80)
 
         team_map = (
             build_team_map(
@@ -2269,28 +1741,10 @@ def main():
             not in team_map
         ):
 
-            valid = (
-                ", ".join(
-                    sorted(
-                        team_map.keys()
-                    )
-                )
-            )
-
             raise RuntimeError(
-                f"Invalid team "
-                f"'{team_abbr}'. "
-                f"Valid teams: "
-                f"{valid}"
+                f"Invalid team: "
+                f"{team_abbr}"
             )
-
-        team_id = (
-            team_map[
-                team_abbr
-            ][
-                "id"
-            ]
-        )
 
         team_name = (
             team_map[
@@ -2300,37 +1754,13 @@ def main():
             ]
         )
 
-        # ----------------------------------------------------
-        # SCHEDULE
-        # ----------------------------------------------------
-
-        schedule_url = (
-            SCHEDULE_URL.format(
-                year=args.year,
-                team_id=team_id,
-            )
-        )
-
-        print(
-            f"Schedule URL: "
-            f"{schedule_url}"
-        )
-
-        data = get_json(
-            schedule_url
-        )
-
         games = (
-            build_full_18_week_schedule(
+            build_schedule_from_weeks(
                 team_abbr,
-                data,
+                args.year,
                 team_map,
             )
         )
-
-        # ----------------------------------------------------
-        # OUTPUT
-        # ----------------------------------------------------
 
         output_path = (
             f"{team_abbr.lower()}_"
@@ -2347,7 +1777,6 @@ def main():
         )
 
         print()
-
         print(
             "✅ SCHEDULE COMPLETE"
         )
@@ -2361,10 +1790,6 @@ def main():
 
         raise
 
-
-# ============================================================
-# ENTRY POINT
-# ============================================================
 
 if __name__ == "__main__":
     main()
