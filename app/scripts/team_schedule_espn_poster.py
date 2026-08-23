@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 
 import argparse
-import io
 import sys
 from datetime import datetime
 from typing import Dict, List, Optional
@@ -19,7 +18,7 @@ except ImportError:
 # CONFIG
 # ============================================================
 
-# Team schedules should currently use the 2026 season.
+# Team schedules currently use the 2026 season.
 DEFAULT_YEAR = 2026
 
 USER_AGENT = (
@@ -34,6 +33,7 @@ HEADERS = {
     "Accept-Language": "en-US,en;q=0.9",
 }
 
+# Lowercase league name is required internally by ESPN.
 CORE_API_BASE = (
     "https://sports.core.api.espn.com/v2/"
     "sports/football/leagues/nfl"
@@ -67,38 +67,38 @@ WEEK_EVENTS_URL = (
 # ============================================================
 
 TEAM_COLORS = {
-    "ARI": ("#97233F", "#000000"),
-    "ATL": ("#A71930", "#000000"),
-    "BAL": ("#241773", "#000000"),
-    "BUF": ("#00338D", "#C60C30"),
+    "ARI": ("#97233F", "#E6A13B"),
+    "ATL": ("#A71930", "#111111"),
+    "BAL": ("#4F2A86", "#D5A824"),
+    "BUF": ("#1769AA", "#C8102E"),
     "CAR": ("#0085CA", "#101820"),
-    "CHI": ("#0B162A", "#C83803"),
-    "CIN": ("#FB4F14", "#000000"),
-    "CLE": ("#311D00", "#FF3C00"),
-    "DAL": ("#041E42", "#869397"),
-    "DEN": ("#FB4F14", "#002244"),
-    "DET": ("#0076B6", "#B0B7BC"),
-    "GB": ("#203731", "#FFB612"),
-    "HOU": ("#03202F", "#A71930"),
-    "IND": ("#002C5F", "#A2AAAD"),
-    "JAX": ("#006778", "#101820"),
-    "KC": ("#E31837", "#FFB81C"),
-    "LV": ("#000000", "#A5ACAF"),
-    "LAC": ("#0080C6", "#FFC20E"),
-    "LAR": ("#003594", "#FFA300"),
-    "MIA": ("#008E97", "#FC4C02"),
-    "MIN": ("#4F2683", "#FFC62F"),
-    "NE": ("#002244", "#C60C30"),
-    "NO": ("#101820", "#D3BC8D"),
-    "NYG": ("#0B2265", "#A71930"),
-    "NYJ": ("#125740", "#000000"),
-    "PHI": ("#004C54", "#A5ACAF"),
-    "PIT": ("#101820", "#FFB612"),
-    "SF": ("#AA0000", "#B3995D"),
-    "SEA": ("#002244", "#69BE28"),
-    "TB": ("#D50A0A", "#34302B"),
-    "TEN": ("#0C2340", "#4B92DB"),
-    "WSH": ("#5A1414", "#FFB612"),
+    "CHI": ("#C95C12", "#5A3216"),
+    "CIN": ("#FB4F14", "#111111"),
+    "CLE": ("#E85D04", "#5B2C12"),
+    "DAL": ("#17365D", "#B7C1CC"),
+    "DEN": ("#F36C21", "#17365D"),
+    "DET": ("#1673B1", "#A7B1BA"),
+    "GB": ("#1F5132", "#E3B23C"),
+    "HOU": ("#17365D", "#C51F35"),
+    "IND": ("#194F90", "#FFFFFF"),
+    "JAX": ("#D5A52A", "#008C95"),
+    "KC": ("#C62828", "#EFB32B"),
+    "LV": ("#252525", "#B8B8B8"),
+    "LAC": ("#168DD0", "#F5C542"),
+    "LAR": ("#E0A520", "#1C4C8C"),
+    "MIA": ("#1499A5", "#ED6A29"),
+    "MIN": ("#5B328A", "#E5B735"),
+    "NE": ("#17365D", "#C6283E"),
+    "NO": ("#C9A13B", "#171717"),
+    "NYG": ("#1F5594", "#B92739"),
+    "NYJ": ("#1F573D", "#FFFFFF"),
+    "PHI": ("#126A70", "#D5D8DA"),
+    "PIT": ("#E3B52B", "#CB273A"),
+    "SF": ("#C5412D", "#D9A640"),
+    "SEA": ("#17365D", "#58A64A"),
+    "TB": ("#B82729", "#E36D2E"),
+    "TEN": ("#4D85BD", "#17365D"),
+    "WSH": ("#8F2433", "#E6B640"),
 }
 
 
@@ -157,33 +157,6 @@ def get_team_name(
     ).strip()
 
 
-def get_team_logo(team: dict) -> str:
-    logos = team.get("logos") or []
-
-    if isinstance(logos, list):
-        for logo in logos:
-            if not isinstance(logo, dict):
-                continue
-
-            href = str(
-                logo.get("href")
-                or ""
-            ).strip()
-
-            if href:
-                return href
-
-    logo = team.get("logo")
-
-    if isinstance(logo, dict):
-        return str(
-            logo.get("href")
-            or ""
-        ).strip()
-
-    return ""
-
-
 # ============================================================
 # TEAM MAP
 # ============================================================
@@ -198,23 +171,35 @@ def build_team_map(
 
     print()
     print("=" * 80)
-    print(f"FETCHING TEAM MAP FOR {year}")
+    print(
+        f"FETCHING TEAM MAP FOR "
+        f"{year}"
+    )
     print("=" * 80)
 
-    payload = get_json(url)
+    payload = get_json(
+        url
+    )
 
     items = (
         payload.get("items")
         or []
     )
 
-    team_map: Dict[str, dict] = {}
+    team_map: Dict[
+        str,
+        dict,
+    ] = {}
 
     for index, item in enumerate(
         items,
         start=1,
     ):
-        if not isinstance(item, dict):
+
+        if not isinstance(
+            item,
+            dict,
+        ):
             continue
 
         try:
@@ -224,7 +209,9 @@ def build_team_map(
             ).strip()
 
             if ref:
-                team = get_json(ref)
+                team = get_json(
+                    ref
+                )
             else:
                 team = item
 
@@ -245,13 +232,14 @@ def build_team_map(
             ):
                 continue
 
-            team_map[abbreviation] = {
+            team_map[
+                abbreviation
+            ] = {
                 "id": team_id,
                 "display_name": get_team_name(
                     team,
                     abbreviation,
                 ),
-                "logo": get_team_logo(team),
             }
 
         except Exception as exc:
@@ -265,7 +253,10 @@ def build_team_map(
         f"{len(team_map)}"
     )
 
-    if len(team_map) < 32:
+    if len(
+        team_map
+    ) < 32:
+
         raise RuntimeError(
             "Expected 32 teams, "
             f"parsed {len(team_map)}."
@@ -294,20 +285,28 @@ def get_week_events(
         f"{url}"
     )
 
-    payload = get_json(url)
+    payload = get_json(
+        url
+    )
 
     items = (
         payload.get("items")
         or []
     )
 
-    events: List[dict] = []
+    events: List[
+        dict
+    ] = []
 
     for index, item in enumerate(
         items,
         start=1,
     ):
-        if not isinstance(item, dict):
+
+        if not isinstance(
+            item,
+            dict,
+        ):
             continue
 
         try:
@@ -317,12 +316,19 @@ def get_week_events(
             ).strip()
 
             if ref:
-                event = get_json(ref)
+                event = get_json(
+                    ref
+                )
             else:
                 event = item
 
-            if isinstance(event, dict):
-                events.append(event)
+            if isinstance(
+                event,
+                dict,
+            ):
+                events.append(
+                    event
+                )
 
         except Exception as exc:
             print(
@@ -362,7 +368,9 @@ def extract_competition(
     if not competitions:
         return None
 
-    competition = competitions[0]
+    competition = (
+        competitions[0]
+    )
 
     if not isinstance(
         competition,
@@ -371,7 +379,9 @@ def extract_competition(
         return None
 
     if isinstance(
-        competition.get("competitors"),
+        competition.get(
+            "competitors"
+        ),
         list,
     ):
         return competition
@@ -383,7 +393,9 @@ def extract_competition(
 
     if ref:
         try:
-            resolved = get_json(ref)
+            resolved = get_json(
+                ref
+            )
 
             if isinstance(
                 resolved,
@@ -394,7 +406,8 @@ def extract_competition(
         except Exception as exc:
             print(
                 "WARNING: competition "
-                f"resolution failed: {exc}"
+                f"resolution failed: "
+                f"{exc}"
             )
 
     return competition
@@ -419,7 +432,9 @@ def resolve_team_from_competitor(
     ):
         return {}
 
-    if team.get("abbreviation"):
+    if team.get(
+        "abbreviation"
+    ):
         return team
 
     ref = str(
@@ -429,7 +444,9 @@ def resolve_team_from_competitor(
 
     if ref:
         try:
-            resolved = get_json(ref)
+            resolved = get_json(
+                ref
+            )
 
             if isinstance(
                 resolved,
@@ -452,19 +469,24 @@ def find_team_competitor(
 ) -> Optional[dict]:
 
     competitors = (
-        competition.get("competitors")
+        competition.get(
+            "competitors"
+        )
         or []
     )
 
     for competitor in competitors:
+
         if not isinstance(
             competitor,
             dict,
         ):
             continue
 
-        team = resolve_team_from_competitor(
-            competitor
+        team = (
+            resolve_team_from_competitor(
+                competitor
+            )
         )
 
         abbreviation = (
@@ -478,7 +500,9 @@ def find_team_competitor(
                 competitor
             )
 
-            result["team"] = team
+            result[
+                "team"
+            ] = team
 
             return result
 
@@ -491,19 +515,24 @@ def find_opponent_competitor(
 ) -> Optional[dict]:
 
     competitors = (
-        competition.get("competitors")
+        competition.get(
+            "competitors"
+        )
         or []
     )
 
     for competitor in competitors:
+
         if not isinstance(
             competitor,
             dict,
         ):
             continue
 
-        team = resolve_team_from_competitor(
-            competitor
+        team = (
+            resolve_team_from_competitor(
+                competitor
+            )
         )
 
         abbreviation = (
@@ -521,7 +550,9 @@ def find_opponent_competitor(
                 competitor
             )
 
-            result["team"] = team
+            result[
+                "team"
+            ] = team
 
             return result
 
@@ -576,7 +607,9 @@ def find_team_game_for_week(
             continue
 
         opponent_team = (
-            opponent_entry.get("team")
+            opponent_entry.get(
+                "team"
+            )
             or {}
         )
 
@@ -590,44 +623,31 @@ def find_team_game_for_week(
             continue
 
         home_away = str(
-            team_entry.get("homeAway")
+            team_entry.get(
+                "homeAway"
+            )
             or ""
         ).strip().lower()
 
         if home_away == "away":
+
             matchup = (
                 f"@ {opponent_abbr}"
             )
+
         else:
+
             matchup = (
                 f"vs {opponent_abbr}"
             )
 
         date_iso = str(
             event.get("date")
-            or competition.get("date")
+            or competition.get(
+                "date"
+            )
             or ""
         ).strip()
-
-        logo_url = (
-            get_team_logo(
-                opponent_team
-            )
-        )
-
-        if (
-            not logo_url
-            and opponent_abbr
-            in team_map
-        ):
-            logo_url = str(
-                team_map[
-                    opponent_abbr
-                ].get(
-                    "logo",
-                    "",
-                )
-            )
 
         print(
             f"{year} Week {week}: "
@@ -639,8 +659,10 @@ def find_team_game_for_week(
         return {
             "week": week,
             "opponent": matchup,
+            "opponent_abbr": (
+                opponent_abbr
+            ),
             "date": date_iso,
-            "logo_url": logo_url,
         }
 
     print(
@@ -676,12 +698,15 @@ def format_date_eastern(
         )
 
         if ZoneInfo is not None:
+
             eastern = dt.astimezone(
                 ZoneInfo(
                     "America/New_York"
                 )
             )
+
         else:
+
             eastern = dt
 
         date_part = (
@@ -718,10 +743,12 @@ def build_schedule_from_weeks(
 
     print()
     print("=" * 80)
+
     print(
         f"BUILDING {team_abbr} "
         f"{year} SCHEDULE"
     )
+
     print("=" * 80)
 
     full_schedule: List[
@@ -745,36 +772,45 @@ def build_schedule_from_weeks(
         )
 
         if game:
+
             games_found += 1
 
             full_schedule.append(
                 {
                     "week": week,
                     "opponent": (
-                        game["opponent"]
+                        game[
+                            "opponent"
+                        ]
+                    ),
+                    "opponent_abbr": (
+                        game[
+                            "opponent_abbr"
+                        ]
                     ),
                     "date": (
                         format_date_eastern(
-                            game["date"]
+                            game[
+                                "date"
+                            ]
                         )
-                    ),
-                    "logo_url": (
-                        game["logo_url"]
                     ),
                 }
             )
 
         else:
+
             full_schedule.append(
                 {
                     "week": week,
                     "opponent": "BYE",
+                    "opponent_abbr": "",
                     "date": "-",
-                    "logo_url": "",
                 }
             )
 
     print()
+
     print(
         f"{team_abbr} {year}: "
         f"{games_found} games found"
@@ -782,6 +818,7 @@ def build_schedule_from_weeks(
 
     # Prevent publishing obviously wrong schedules.
     if games_found < 16:
+
         raise RuntimeError(
             f"Only found {games_found} "
             f"games for "
@@ -804,9 +841,7 @@ def build_full_18_week_schedule(
     year: int = DEFAULT_YEAR,
 ) -> List[dict]:
     """
-    IMPORTANT:
-
-    The nightly publisher currently calls this with only:
+    The nightly publisher currently calls this with:
 
         build_full_18_week_schedule(
             team_abbr,
@@ -814,20 +849,14 @@ def build_full_18_week_schedule(
             team_map,
         )
 
-    The previous version tried to infer the season from
-    `data`, but ESPN's Core events collection does not
-    reliably contain a season year.
+    The old data argument remains so existing
+    imports and calls continue working.
 
-    That caused the 2026 poster title to contain 2025 games.
-
-    This version explicitly defaults to the 2026 schedule
-    season instead.
-
-    The old `data` argument is intentionally retained so
-    existing imports/calls do not break.
+    Team schedules explicitly default to 2026.
     """
 
     print()
+
     print(
         "build_full_18_week_schedule:"
     )
@@ -854,13 +883,16 @@ def get_font(
 ):
 
     if bold:
+
         candidates = [
             "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
             "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
             "/System/Library/Fonts/Supplemental/Helvetica.ttc",
             "/Library/Fonts/Arial Bold.ttf",
         ]
+
     else:
+
         candidates = [
             "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
             "/System/Library/Fonts/Supplemental/Arial.ttf",
@@ -869,11 +901,13 @@ def get_font(
         ]
 
     for path in candidates:
+
         try:
             return ImageFont.truetype(
                 path,
                 size,
             )
+
         except Exception:
             continue
 
@@ -890,7 +924,10 @@ def draw_centered(
 ):
 
     bbox = draw.textbbox(
-        (0, 0),
+        (
+            0,
+            0,
+        ),
         text,
         font=font,
     )
@@ -906,7 +943,10 @@ def draw_centered(
     ) // 2
 
     draw.text(
-        (x, y),
+        (
+            x,
+            y,
+        ),
         text,
         font=font,
         fill=fill,
@@ -920,11 +960,16 @@ def fit_text(
     max_width,
 ):
 
-    text = str(text)
+    text = str(
+        text
+    )
 
     if (
         draw.textbbox(
-            (0, 0),
+            (
+                0,
+                0,
+            ),
             text,
             font=font,
         )[2]
@@ -934,8 +979,16 @@ def fit_text(
 
     shortened = text
 
-    while len(shortened) > 3:
-        shortened = shortened[:-1]
+    while (
+        len(
+            shortened
+        )
+        > 3
+    ):
+
+        shortened = (
+            shortened[:-1]
+        )
 
         candidate = (
             shortened
@@ -944,7 +997,10 @@ def fit_text(
 
         if (
             draw.textbbox(
-                (0, 0),
+                (
+                    0,
+                    0,
+                ),
                 candidate,
                 font=font,
             )[2]
@@ -956,96 +1012,1734 @@ def fit_text(
 
 
 # ============================================================
-# LOGO IMAGE
+# PIXEL ICON HELPERS
 # ============================================================
 
-def fetch_logo_image(
-    url: str,
-    size: int,
-    cache: Dict[
-        str,
-        Image.Image,
-    ],
+def hex_to_rgb(
+    value: str,
+):
+
+    value = (
+        value
+        .replace(
+            "#",
+            "",
+        )
+        .strip()
+    )
+
+    return tuple(
+        int(
+            value[
+                i:i + 2
+            ],
+            16,
+        )
+        for i in (
+            0,
+            2,
+            4,
+        )
+    )
+
+
+def draw_star(
+    draw,
+    cx,
+    cy,
+    radius,
+    fill,
+):
+
+    points = [
+        (
+            cx,
+            cy - radius,
+        ),
+        (
+            cx + radius // 4,
+            cy - radius // 4,
+        ),
+        (
+            cx + radius,
+            cy - radius // 4,
+        ),
+        (
+            cx + radius // 3,
+            cy + radius // 5,
+        ),
+        (
+            cx + radius // 2,
+            cy + radius,
+        ),
+        (
+            cx,
+            cy + radius // 2,
+        ),
+        (
+            cx - radius // 2,
+            cy + radius,
+        ),
+        (
+            cx - radius // 3,
+            cy + radius // 5,
+        ),
+        (
+            cx - radius,
+            cy - radius // 4,
+        ),
+        (
+            cx - radius // 4,
+            cy - radius // 4,
+        ),
+    ]
+
+    draw.polygon(
+        points,
+        fill=fill,
+    )
+
+
+def draw_paw(
+    draw,
+    cx,
+    cy,
+    fill,
+):
+
+    draw.ellipse(
+        (
+            cx - 14,
+            cy - 2,
+            cx + 14,
+            cy + 22,
+        ),
+        fill=fill,
+    )
+
+    for dx, dy in [
+        (
+            -20,
+            -18,
+        ),
+        (
+            -7,
+            -25,
+        ),
+        (
+            7,
+            -25,
+        ),
+        (
+            20,
+            -18,
+        ),
+    ]:
+
+        draw.ellipse(
+            (
+                cx + dx - 5,
+                cy + dy - 7,
+                cx + dx + 5,
+                cy + dy + 7,
+            ),
+            fill=fill,
+        )
+
+
+def draw_football(
+    draw,
+    cx,
+    cy,
+    fill,
+    accent,
+):
+
+    draw.ellipse(
+        (
+            cx - 34,
+            cy - 17,
+            cx + 34,
+            cy + 17,
+        ),
+        fill=fill,
+    )
+
+    draw.line(
+        (
+            cx - 13,
+            cy,
+            cx + 13,
+            cy,
+        ),
+        fill=accent,
+        width=3,
+    )
+
+    for offset in (
+        -8,
+        0,
+        8,
+    ):
+
+        draw.line(
+            (
+                cx + offset,
+                cy - 5,
+                cx + offset,
+                cy + 5,
+            ),
+            fill=accent,
+            width=2,
+        )
+
+
+def draw_feather(
+    draw,
+    cx,
+    cy,
+    fill,
+    accent,
+):
+
+    draw.polygon(
+        [
+            (
+                cx - 27,
+                cy + 26,
+            ),
+            (
+                cx - 14,
+                cy - 18,
+            ),
+            (
+                cx + 27,
+                cy - 33,
+            ),
+            (
+                cx + 18,
+                cy + 8,
+            ),
+            (
+                cx - 9,
+                cy + 27,
+            ),
+        ],
+        fill=fill,
+    )
+
+    draw.line(
+        (
+            cx - 24,
+            cy + 30,
+            cx + 18,
+            cy - 24,
+        ),
+        fill=accent,
+        width=3,
+    )
+
+
+def draw_claws(
+    draw,
+    cx,
+    cy,
+    fill,
+):
+
+    for offset in (
+        -19,
+        0,
+        19,
+    ):
+
+        draw.polygon(
+            [
+                (
+                    cx
+                    + offset
+                    - 5,
+                    cy + 27,
+                ),
+                (
+                    cx
+                    + offset
+                    + 3,
+                    cy - 30,
+                ),
+                (
+                    cx
+                    + offset
+                    + 10,
+                    cy - 34,
+                ),
+                (
+                    cx
+                    + offset
+                    + 3,
+                    cy + 27,
+                ),
+            ],
+            fill=fill,
+        )
+
+
+def draw_stripes(
+    draw,
+    cx,
+    cy,
+    fill,
+    accent,
+):
+
+    draw.rectangle(
+        (
+            cx - 31,
+            cy - 30,
+            cx + 31,
+            cy + 30,
+        ),
+        fill=fill,
+    )
+
+    for offset in (
+        -34,
+        -9,
+        16,
+    ):
+
+        draw.polygon(
+            [
+                (
+                    cx + offset,
+                    cy - 30,
+                ),
+                (
+                    cx
+                    + offset
+                    + 10,
+                    cy - 30,
+                ),
+                (
+                    cx
+                    + offset
+                    + 35,
+                    cy + 30,
+                ),
+                (
+                    cx
+                    + offset
+                    + 25,
+                    cy + 30,
+                ),
+            ],
+            fill=accent,
+        )
+
+
+def draw_mountain(
+    draw,
+    cx,
+    cy,
+    fill,
+    accent,
+):
+
+    draw.polygon(
+        [
+            (
+                cx - 36,
+                cy + 27,
+            ),
+            (
+                cx,
+                cy - 31,
+            ),
+            (
+                cx + 36,
+                cy + 27,
+            ),
+        ],
+        fill=fill,
+    )
+
+    draw.polygon(
+        [
+            (
+                cx - 9,
+                cy - 17,
+            ),
+            (
+                cx,
+                cy - 31,
+            ),
+            (
+                cx + 10,
+                cy - 15,
+            ),
+            (
+                cx + 2,
+                cy - 20,
+            ),
+        ],
+        fill=accent,
+    )
+
+
+def draw_texas(
+    draw,
+    cx,
+    cy,
+    fill,
+    accent,
+):
+
+    draw.polygon(
+        [
+            (
+                cx - 28,
+                cy - 30,
+            ),
+            (
+                cx + 7,
+                cy - 30,
+            ),
+            (
+                cx + 8,
+                cy - 13,
+            ),
+            (
+                cx + 30,
+                cy - 12,
+            ),
+            (
+                cx + 23,
+                cy + 8,
+            ),
+            (
+                cx + 7,
+                cy + 15,
+            ),
+            (
+                cx - 2,
+                cy + 33,
+            ),
+            (
+                cx - 16,
+                cy + 16,
+            ),
+            (
+                cx - 30,
+                cy + 4,
+            ),
+        ],
+        fill=fill,
+    )
+
+    draw_star(
+        draw,
+        cx,
+        cy,
+        8,
+        accent,
+    )
+
+
+def draw_arc(
+    draw,
+    cx,
+    cy,
+    fill,
+    accent,
+):
+
+    draw.arc(
+        (
+            cx - 31,
+            cy - 31,
+            cx + 31,
+            cy + 31,
+        ),
+        205,
+        335,
+        fill=fill,
+        width=9,
+    )
+
+    draw.arc(
+        (
+            cx - 20,
+            cy - 20,
+            cx + 20,
+            cy + 20,
+        ),
+        205,
+        335,
+        fill=accent,
+        width=4,
+    )
+
+
+def draw_pennant(
+    draw,
+    cx,
+    cy,
+    fill,
+    accent,
+):
+
+    draw.rectangle(
+        (
+            cx - 30,
+            cy - 32,
+            cx - 26,
+            cy + 30,
+        ),
+        fill=accent,
+    )
+
+    draw.polygon(
+        [
+            (
+                cx - 26,
+                cy - 27,
+            ),
+            (
+                cx + 33,
+                cy - 4,
+            ),
+            (
+                cx - 26,
+                cy + 17,
+            ),
+        ],
+        fill=fill,
+    )
+
+
+def draw_lightning(
+    draw,
+    cx,
+    cy,
+    fill,
+):
+
+    draw.polygon(
+        [
+            (
+                cx + 5,
+                cy - 34,
+            ),
+            (
+                cx - 22,
+                cy + 1,
+            ),
+            (
+                cx - 5,
+                cy + 1,
+            ),
+            (
+                cx - 14,
+                cy + 34,
+            ),
+            (
+                cx + 25,
+                cy - 8,
+            ),
+            (
+                cx + 8,
+                cy - 8,
+            ),
+        ],
+        fill=fill,
+    )
+
+
+def draw_wave(
+    draw,
+    cx,
+    cy,
+    fill,
+    accent,
+):
+
+    draw.polygon(
+        [
+            (
+                cx - 34,
+                cy + 18,
+            ),
+            (
+                cx - 24,
+                cy - 5,
+            ),
+            (
+                cx - 10,
+                cy - 20,
+            ),
+            (
+                cx + 4,
+                cy - 23,
+            ),
+            (
+                cx + 21,
+                cy - 14,
+            ),
+            (
+                cx + 34,
+                cy + 4,
+            ),
+            (
+                cx + 13,
+                cy - 1,
+            ),
+            (
+                cx,
+                cy + 8,
+            ),
+            (
+                cx - 7,
+                cy + 20,
+            ),
+        ],
+        fill=fill,
+    )
+
+    draw.line(
+        (
+            cx - 29,
+            cy + 22,
+            cx + 30,
+            cy + 22,
+        ),
+        fill=accent,
+        width=4,
+    )
+
+
+def draw_spiral(
+    draw,
+    cx,
+    cy,
+    fill,
+):
+
+    draw.arc(
+        (
+            cx - 28,
+            cy - 28,
+            cx + 28,
+            cy + 28,
+        ),
+        20,
+        340,
+        fill=fill,
+        width=8,
+    )
+
+    draw.arc(
+        (
+            cx - 15,
+            cy - 15,
+            cx + 15,
+            cy + 15,
+        ),
+        20,
+        300,
+        fill=fill,
+        width=6,
+    )
+
+
+def draw_ship(
+    draw,
+    cx,
+    cy,
+    fill,
+    accent,
+):
+
+    draw.polygon(
+        [
+            (
+                cx - 34,
+                cy + 17,
+            ),
+            (
+                cx + 34,
+                cy + 17,
+            ),
+            (
+                cx + 22,
+                cy + 29,
+            ),
+            (
+                cx - 22,
+                cy + 29,
+            ),
+        ],
+        fill=accent,
+    )
+
+    draw.rectangle(
+        (
+            cx - 2,
+            cy - 31,
+            cx + 2,
+            cy + 15,
+        ),
+        fill=accent,
+    )
+
+    draw.polygon(
+        [
+            (
+                cx + 2,
+                cy - 27,
+            ),
+            (
+                cx + 23,
+                cy - 5,
+            ),
+            (
+                cx + 2,
+                cy - 5,
+            ),
+        ],
+        fill=fill,
+    )
+
+    draw.polygon(
+        [
+            (
+                cx - 3,
+                cy - 24,
+            ),
+            (
+                cx - 22,
+                cy - 4,
+            ),
+            (
+                cx - 3,
+                cy - 4,
+            ),
+        ],
+        fill=fill,
+    )
+
+
+def draw_hat(
+    draw,
+    cx,
+    cy,
+    fill,
+    accent,
+):
+
+    draw.polygon(
+        [
+            (
+                cx - 33,
+                cy + 16,
+            ),
+            (
+                cx - 19,
+                cy - 13,
+            ),
+            (
+                cx,
+                cy - 25,
+            ),
+            (
+                cx + 19,
+                cy - 13,
+            ),
+            (
+                cx + 33,
+                cy + 16,
+            ),
+            (
+                cx + 10,
+                cy + 9,
+            ),
+            (
+                cx,
+                cy + 21,
+            ),
+            (
+                cx - 10,
+                cy + 9,
+            ),
+        ],
+        fill=fill,
+    )
+
+    draw_star(
+        draw,
+        cx,
+        cy,
+        8,
+        accent,
+    )
+
+
+def draw_trumpet(
+    draw,
+    cx,
+    cy,
+    fill,
+):
+
+    draw.rectangle(
+        (
+            cx - 23,
+            cy - 5,
+            cx + 10,
+            cy + 5,
+        ),
+        fill=fill,
+    )
+
+    draw.polygon(
+        [
+            (
+                cx + 10,
+                cy - 14,
+            ),
+            (
+                cx + 32,
+                cy - 22,
+            ),
+            (
+                cx + 32,
+                cy + 22,
+            ),
+            (
+                cx + 10,
+                cy + 14,
+            ),
+        ],
+        fill=fill,
+    )
+
+    draw.arc(
+        (
+            cx - 29,
+            cy - 1,
+            cx - 11,
+            cy + 24,
+        ),
+        10,
+        190,
+        fill=fill,
+        width=4,
+    )
+
+
+def draw_skyline(
+    draw,
+    cx,
+    cy,
+    fill,
+    accent,
+):
+
+    buildings = [
+        (
+            -31,
+            11,
+            -22,
+            29,
+        ),
+        (
+            -20,
+            -3,
+            -8,
+            29,
+        ),
+        (
+            -6,
+            -29,
+            6,
+            29,
+        ),
+        (
+            8,
+            -10,
+            21,
+            29,
+        ),
+        (
+            23,
+            3,
+            32,
+            29,
+        ),
+    ]
+
+    for (
+        x1,
+        y1,
+        x2,
+        y2,
+    ) in buildings:
+
+        draw.rectangle(
+            (
+                cx + x1,
+                cy + y1,
+                cx + x2,
+                cy + y2,
+            ),
+            fill=fill,
+        )
+
+    draw.line(
+        (
+            cx - 35,
+            cy + 30,
+            cx + 35,
+            cy + 30,
+        ),
+        fill=accent,
+        width=4,
+    )
+
+
+def draw_jet(
+    draw,
+    cx,
+    cy,
+    fill,
+):
+
+    draw.polygon(
+        [
+            (
+                cx - 35,
+                cy + 6,
+            ),
+            (
+                cx - 7,
+                cy - 4,
+            ),
+            (
+                cx + 18,
+                cy - 28,
+            ),
+            (
+                cx + 25,
+                cy - 23,
+            ),
+            (
+                cx + 12,
+                cy - 3,
+            ),
+            (
+                cx + 34,
+                cy + 7,
+            ),
+            (
+                cx + 10,
+                cy + 10,
+            ),
+            (
+                cx + 3,
+                cy + 27,
+            ),
+            (
+                cx - 5,
+                cy + 27,
+            ),
+            (
+                cx - 6,
+                cy + 11,
+            ),
+        ],
+        fill=fill,
+    )
+
+
+def draw_diamonds(
+    draw,
+    cx,
+    cy,
+):
+
+    data = [
+        (
+            cx,
+            cy - 18,
+            "#F2C230",
+        ),
+        (
+            cx - 19,
+            cy + 13,
+            "#1E5FA8",
+        ),
+        (
+            cx + 19,
+            cy + 13,
+            "#D32E3E",
+        ),
+    ]
+
+    for (
+        x,
+        y,
+        color,
+    ) in data:
+
+        draw.polygon(
+            [
+                (
+                    x,
+                    y - 9,
+                ),
+                (
+                    x + 9,
+                    y,
+                ),
+                (
+                    x,
+                    y + 9,
+                ),
+                (
+                    x - 9,
+                    y,
+                ),
+            ],
+            fill=color,
+        )
+
+
+def draw_bridge(
+    draw,
+    cx,
+    cy,
+    fill,
+    accent,
+):
+
+    draw.rectangle(
+        (
+            cx - 26,
+            cy - 27,
+            cx - 21,
+            cy + 27,
+        ),
+        fill=fill,
+    )
+
+    draw.rectangle(
+        (
+            cx + 21,
+            cy - 27,
+            cx + 26,
+            cy + 27,
+        ),
+        fill=fill,
+    )
+
+    draw.line(
+        (
+            cx - 34,
+            cy + 18,
+            cx + 34,
+            cy + 18,
+        ),
+        fill=fill,
+        width=5,
+    )
+
+    draw.arc(
+        (
+            cx - 24,
+            cy - 22,
+            cx + 24,
+            cy + 31,
+        ),
+        180,
+        360,
+        fill=accent,
+        width=3,
+    )
+
+
+def draw_flag(
+    draw,
+    cx,
+    cy,
+    fill,
+    accent,
+):
+
+    draw.rectangle(
+        (
+            cx - 28,
+            cy - 32,
+            cx - 24,
+            cy + 30,
+        ),
+        fill=accent,
+    )
+
+    draw.polygon(
+        [
+            (
+                cx - 24,
+                cy - 26,
+            ),
+            (
+                cx + 29,
+                cy - 21,
+            ),
+            (
+                cx + 20,
+                cy + 3,
+            ),
+            (
+                cx - 24,
+                cy + 8,
+            ),
+        ],
+        fill=fill,
+    )
+
+
+def draw_sword(
+    draw,
+    cx,
+    cy,
+    fill,
+    accent,
+):
+
+    draw.polygon(
+        [
+            (
+                cx - 4,
+                cy - 33,
+            ),
+            (
+                cx + 5,
+                cy - 33,
+            ),
+            (
+                cx + 6,
+                cy + 13,
+            ),
+            (
+                cx - 6,
+                cy + 13,
+            ),
+        ],
+        fill=fill,
+    )
+
+    draw.polygon(
+        [
+            (
+                cx - 4,
+                cy - 33,
+            ),
+            (
+                cx,
+                cy - 42,
+            ),
+            (
+                cx + 5,
+                cy - 33,
+            ),
+        ],
+        fill=accent,
+    )
+
+    draw.rectangle(
+        (
+            cx - 18,
+            cy + 11,
+            cx + 18,
+            cy + 16,
+        ),
+        fill=accent,
+    )
+
+    draw.rectangle(
+        (
+            cx - 4,
+            cy + 16,
+            cx + 5,
+            cy + 31,
+        ),
+        fill=accent,
+    )
+
+
+def draw_column(
+    draw,
+    cx,
+    cy,
+    fill,
+    accent,
+):
+
+    draw.rectangle(
+        (
+            cx - 27,
+            cy - 28,
+            cx + 27,
+            cy - 22,
+        ),
+        fill=accent,
+    )
+
+    draw.rectangle(
+        (
+            cx - 31,
+            cy + 23,
+            cx + 31,
+            cy + 29,
+        ),
+        fill=accent,
+    )
+
+    for x in (
+        -19,
+        -6,
+        6,
+        19,
+    ):
+
+        draw.rectangle(
+            (
+                cx + x - 3,
+                cy - 19,
+                cx + x + 3,
+                cy + 21,
+            ),
+            fill=fill,
+        )
+
+
+# ============================================================
+# TEAM-SPECIFIC PIXEL SYMBOL
+# ============================================================
+
+def draw_team_symbol(
+    draw,
+    team,
+    cx,
+    cy,
+    primary,
+    secondary,
+):
+
+    if team == "ARI":
+
+        draw.rectangle(
+            (
+                cx - 5,
+                cy - 29,
+                cx + 5,
+                cy + 27,
+            ),
+            fill=primary,
+        )
+
+        draw.rectangle(
+            (
+                cx - 21,
+                cy - 6,
+                cx - 4,
+                cy + 3,
+            ),
+            fill=primary,
+        )
+
+        draw.rectangle(
+            (
+                cx - 21,
+                cy - 18,
+                cx - 13,
+                cy + 3,
+            ),
+            fill=primary,
+        )
+
+        draw.rectangle(
+            (
+                cx + 4,
+                cy - 10,
+                cx + 20,
+                cy - 2,
+            ),
+            fill=primary,
+        )
+
+        draw.rectangle(
+            (
+                cx + 13,
+                cy - 21,
+                cx + 20,
+                cy - 2,
+            ),
+            fill=primary,
+        )
+
+    elif team in {
+        "ATL",
+        "BAL",
+        "PHI",
+    }:
+
+        draw_feather(
+            draw,
+            cx,
+            cy,
+            primary,
+            secondary,
+        )
+
+    elif team == "BUF":
+
+        draw.ellipse(
+            (
+                cx - 26,
+                cy - 26,
+                cx - 4,
+                cy + 5,
+            ),
+            fill=primary,
+        )
+
+        draw.ellipse(
+            (
+                cx + 4,
+                cy - 26,
+                cx + 26,
+                cy + 5,
+            ),
+            fill=primary,
+        )
+
+        draw.ellipse(
+            (
+                cx - 9,
+                cy + 9,
+                cx + 9,
+                cy + 26,
+            ),
+            fill=secondary,
+        )
+
+    elif team == "CAR":
+
+        draw_claws(
+            draw,
+            cx,
+            cy,
+            primary,
+        )
+
+    elif team in {
+        "CHI",
+        "DET",
+        "JAX",
+    }:
+
+        draw_paw(
+            draw,
+            cx,
+            cy,
+            primary,
+        )
+
+    elif team == "CIN":
+
+        draw_stripes(
+            draw,
+            cx,
+            cy,
+            primary,
+            secondary,
+        )
+
+    elif team in {
+        "CLE",
+        "GB",
+    }:
+
+        draw_football(
+            draw,
+            cx,
+            cy,
+            primary,
+            secondary,
+        )
+
+    elif team == "DAL":
+
+        draw_star(
+            draw,
+            cx,
+            cy,
+            30,
+            primary,
+        )
+
+    elif team == "DEN":
+
+        draw_mountain(
+            draw,
+            cx,
+            cy,
+            primary,
+            secondary,
+        )
+
+    elif team == "HOU":
+
+        draw_texas(
+            draw,
+            cx,
+            cy,
+            primary,
+            secondary,
+        )
+
+    elif team == "IND":
+
+        draw_arc(
+            draw,
+            cx,
+            cy,
+            primary,
+            secondary,
+        )
+
+    elif team == "KC":
+
+        draw_pennant(
+            draw,
+            cx,
+            cy,
+            primary,
+            secondary,
+        )
+
+    elif team == "LV":
+
+        draw_hat(
+            draw,
+            cx,
+            cy,
+            primary,
+            secondary,
+        )
+
+    elif team == "LAC":
+
+        draw_lightning(
+            draw,
+            cx,
+            cy,
+            secondary,
+        )
+
+    elif team == "LAR":
+
+        draw_spiral(
+            draw,
+            cx,
+            cy,
+            primary,
+        )
+
+    elif team == "MIA":
+
+        draw_wave(
+            draw,
+            cx,
+            cy,
+            primary,
+            secondary,
+        )
+
+    elif team == "MIN":
+
+        draw_ship(
+            draw,
+            cx,
+            cy,
+            primary,
+            secondary,
+        )
+
+    elif team == "NE":
+
+        draw_hat(
+            draw,
+            cx,
+            cy,
+            primary,
+            secondary,
+        )
+
+    elif team == "NO":
+
+        draw_trumpet(
+            draw,
+            cx,
+            cy,
+            primary,
+        )
+
+    elif team == "NYG":
+
+        draw_skyline(
+            draw,
+            cx,
+            cy,
+            primary,
+            secondary,
+        )
+
+    elif team == "NYJ":
+
+        draw_jet(
+            draw,
+            cx,
+            cy,
+            primary,
+        )
+
+    elif team == "PIT":
+
+        draw_diamonds(
+            draw,
+            cx,
+            cy,
+        )
+
+    elif team == "SF":
+
+        draw_bridge(
+            draw,
+            cx,
+            cy,
+            primary,
+            secondary,
+        )
+
+    elif team == "SEA":
+
+        draw_wave(
+            draw,
+            cx,
+            cy,
+            primary,
+            secondary,
+        )
+
+    elif team == "TB":
+
+        draw_flag(
+            draw,
+            cx,
+            cy,
+            primary,
+            secondary,
+        )
+
+    elif team == "TEN":
+
+        draw_sword(
+            draw,
+            cx,
+            cy,
+            primary,
+            secondary,
+        )
+
+    elif team == "WSH":
+
+        draw_column(
+            draw,
+            cx,
+            cy,
+            secondary,
+            primary,
+        )
+
+    else:
+
+        draw_football(
+            draw,
+            cx,
+            cy,
+            primary,
+            secondary,
+        )
+
+
+# ============================================================
+# CREATE ORIGINAL TEAM ICON
+#
+# The abbreviation is part of the icon itself.
+# ============================================================
+
+def create_team_icon(
+    team_abbr: str,
+    size: int = 78,
 ) -> Optional[
     Image.Image
 ]:
 
-    if not url:
+    team_abbr = (
+        str(
+            team_abbr
+            or ""
+        )
+        .strip()
+        .upper()
+    )
+
+    if (
+        not team_abbr
+        or team_abbr
+        not in TEAM_COLORS
+    ):
         return None
 
-    if url in cache:
-        return (
-            cache[url]
-            .copy()
+    (
+        primary_hex,
+        secondary_hex,
+    ) = TEAM_COLORS[
+        team_abbr
+    ]
+
+    primary = hex_to_rgb(
+        primary_hex
+    )
+
+    secondary = hex_to_rgb(
+        secondary_hex
+    )
+
+    base_width = 104
+    base_height = 118
+
+    icon = Image.new(
+        "RGBA",
+        (
+            base_width,
+            base_height,
+        ),
+        (
+            0,
+            0,
+            0,
+            0,
+        ),
+    )
+
+    draw = ImageDraw.Draw(
+        icon
+    )
+
+    draw_team_symbol(
+        draw,
+        team_abbr,
+        base_width // 2,
+        45,
+        primary,
+        secondary,
+    )
+
+    abbreviation_font = (
+        get_font(
+            18,
+            bold=True,
+        )
+    )
+
+    bbox = draw.textbbox(
+        (
+            0,
+            0,
+        ),
+        team_abbr,
+        font=abbreviation_font,
+    )
+
+    text_width = (
+        bbox[2]
+        - bbox[0]
+    )
+
+    draw.rounded_rectangle(
+        (
+            13,
+            88,
+            base_width - 13,
+            115,
+        ),
+        radius=4,
+        fill=(
+            8,
+            12,
+            18,
+            235,
+        ),
+    )
+
+    text_fill = primary
+
+    if sum(
+        primary
+    ) < 140:
+
+        text_fill = (
+            230,
+            230,
+            230,
         )
 
-    try:
-        response = requests.get(
-            url,
-            headers=HEADERS,
-            timeout=30,
-        )
-
-        response.raise_for_status()
-
-        image = (
-            Image.open(
-                io.BytesIO(
-                    response.content
-                )
+    draw.text(
+        (
+            (
+                base_width
+                - text_width
             )
-            .convert("RGBA")
-        )
+            // 2,
+            91,
+        ),
+        team_abbr,
+        font=abbreviation_font,
+        fill=text_fill,
+    )
 
-        image.thumbnail(
-            (
-                size,
-                size,
-            ),
-            Image.LANCZOS,
-        )
+    ratio = (
+        size
+        / base_height
+    )
 
-        canvas = Image.new(
-            "RGBA",
-            (
-                size,
-                size,
-            ),
-            (
-                0,
-                0,
-                0,
-                0,
-            ),
-        )
+    output_width = max(
+        1,
+        int(
+            base_width
+            * ratio
+        ),
+    )
 
-        x = (
-            size
-            - image.width
-        ) // 2
-
-        y = (
-            size
-            - image.height
-        ) // 2
-
-        canvas.paste(
-            image,
-            (x, y),
-            image,
-        )
-
-        cache[url] = canvas
-
-        return canvas.copy()
-
-    except Exception as exc:
-        print(
-            f"WARNING: logo "
-            f"fetch failed: {exc}"
-        )
-
-        return None
+    return icon.resize(
+        (
+            output_width,
+            size,
+        ),
+        Image.Resampling.NEAREST,
+    )
 
 
 # ============================================================
@@ -1166,18 +2860,31 @@ def make_poster(
             left,
             top,
             right,
-            top
-            + header_h,
+            top + header_h,
         ],
         radius=28,
         fill=secondary,
     )
 
-    week_x = left + 30
-    opp_label_x = left + 245
-    logo_x = left + 255
-    matchup_x = left + 405
-    date_x = left + 1115
+    week_x = (
+        left + 30
+    )
+
+    opp_label_x = (
+        left + 245
+    )
+
+    logo_x = (
+        left + 250
+    )
+
+    matchup_x = (
+        left + 405
+    )
+
+    date_x = (
+        left + 1115
+    )
 
     draw.text(
         (
@@ -1225,7 +2932,10 @@ def make_poster(
         + 12
     )
 
-    logo_size = 78
+    # The icon height is deliberately smaller than the
+    # 120px row so it has comfortable padding above/below.
+    logo_size = 82
+
     matchup_width = 675
 
     date_width = (
@@ -1236,7 +2946,9 @@ def make_poster(
 
     logo_cache: Dict[
         str,
-        Image.Image,
+        Optional[
+            Image.Image
+        ],
     ] = {}
 
     for index, game in enumerate(
@@ -1266,26 +2978,37 @@ def make_poster(
 
         matchup_text = fit_text(
             draw,
-            game["opponent"],
+            game[
+                "opponent"
+            ],
             row_font,
             matchup_width,
         )
 
         date_text = fit_text(
             draw,
-            game["date"],
+            game[
+                "date"
+            ],
             row_font,
             date_width,
         )
 
         week_text = str(
-            game["week"]
+            game[
+                "week"
+            ]
         )
 
-        week_bbox = draw.textbbox(
-            (0, 0),
-            week_text,
-            font=week_font,
+        week_bbox = (
+            draw.textbbox(
+                (
+                    0,
+                    0,
+                ),
+                week_text,
+                font=week_font,
+            )
         )
 
         week_height = (
@@ -1309,19 +3032,40 @@ def make_poster(
             fill=text_fill,
         )
 
+        # ----------------------------------------------------
+        # ORIGINAL PIXEL OPPONENT ICON
+        # ----------------------------------------------------
+
+        opponent_abbr = (
+            game.get(
+                "opponent_abbr",
+                "",
+            )
+        )
+
         if (
-            game["opponent"]
+            game[
+                "opponent"
+            ]
             != "BYE"
+            and opponent_abbr
         ):
 
+            if (
+                opponent_abbr
+                not in logo_cache
+            ):
+
+                logo_cache[
+                    opponent_abbr
+                ] = create_team_icon(
+                    opponent_abbr,
+                    size=logo_size,
+                )
+
             logo_image = (
-                fetch_logo_image(
-                    game.get(
-                        "logo_url",
-                        "",
-                    ),
-                    logo_size,
-                    logo_cache,
+                logo_cache.get(
+                    opponent_abbr
                 )
             )
 
@@ -1330,11 +3074,20 @@ def make_poster(
                 is not None
             ):
 
-                logo_y = (
+                icon_x = (
+                    logo_x
+                    + (
+                        90
+                        - logo_image.width
+                    )
+                    // 2
+                )
+
+                icon_y = (
                     y
                     + (
                         row_h
-                        - logo_size
+                        - logo_image.height
                     )
                     // 2
                 )
@@ -1342,13 +3095,14 @@ def make_poster(
                 background.paste(
                     logo_image,
                     (
-                        logo_x,
-                        logo_y,
+                        icon_x,
+                        icon_y,
                     ),
                     logo_image,
                 )
 
             else:
+
                 draw.text(
                     (
                         logo_x + 22,
@@ -1360,6 +3114,7 @@ def make_poster(
                 )
 
         else:
+
             draw.text(
                 (
                     logo_x + 22,
@@ -1370,10 +3125,15 @@ def make_poster(
                 fill=text_fill,
             )
 
-        matchup_bbox = draw.textbbox(
-            (0, 0),
-            matchup_text,
-            font=row_font,
+        matchup_bbox = (
+            draw.textbbox(
+                (
+                    0,
+                    0,
+                ),
+                matchup_text,
+                font=row_font,
+            )
         )
 
         matchup_height = (
@@ -1397,10 +3157,15 @@ def make_poster(
             fill=text_fill,
         )
 
-        date_bbox = draw.textbbox(
-            (0, 0),
-            date_text,
-            font=row_font,
+        date_bbox = (
+            draw.textbbox(
+                (
+                    0,
+                    0,
+                ),
+                date_text,
+                font=row_font,
+            )
         )
 
         date_height = (
@@ -1469,7 +3234,9 @@ def main():
         required=True,
     )
 
-    args = parser.parse_args()
+    args = (
+        parser.parse_args()
+    )
 
     team_abbr = (
         args.team
@@ -1498,6 +3265,7 @@ def main():
             team_abbr
             not in team_map
         ):
+
             raise RuntimeError(
                 f"Invalid team: "
                 f"{team_abbr}"
@@ -1539,6 +3307,7 @@ def main():
         )
 
     except Exception as exc:
+
         print(
             f"ERROR: {exc}",
             file=sys.stderr,
