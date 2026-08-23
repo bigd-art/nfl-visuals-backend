@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 
 import argparse
-import json
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Tuple, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 from PIL import Image, ImageDraw, ImageFont
@@ -110,7 +109,7 @@ class TeamRow:
 
 
 # ============================================================
-# ESPN CORE API REQUEST
+# HTTP
 # ============================================================
 
 def core_get_json(url: str) -> dict:
@@ -134,8 +133,8 @@ def core_get_json(url: str) -> dict:
     )
 
     print(
-        f"HTTP {response.status_code} "
-        f"for {response.url}"
+        f"HTTP {response.status_code}: "
+        f"{response.url}"
     )
 
     response.raise_for_status()
@@ -143,17 +142,27 @@ def core_get_json(url: str) -> dict:
     return response.json()
 
 
+# ============================================================
+# ESPN STANDINGS REQUEST
+# ============================================================
+
 def get_json(season: int) -> Dict[str, dict]:
     """
-    Fetch the documented conference standings endpoints.
+    Fetch the actual "overall" standings table for AFC and NFC.
 
-    AFC group = 8
-    NFC group = 7
+    ESPN conference group IDs:
+        AFC = 8
+        NFC = 7
 
-    IMPORTANT:
-    We intentionally stop at /standings here.
+    First request:
+        /groups/{group}/standings
 
-    We are NOT using /standings/0.
+    That gives us the available standings tables.
+
+    We then select:
+        name == "overall"
+
+    and follow its $ref.
     """
 
     conference_ids = {
@@ -161,11 +170,11 @@ def get_json(season: int) -> Dict[str, dict]:
         "NFC": 7,
     }
 
-    data: Dict[str, dict] = {}
+    results: Dict[str, dict] = {}
 
     for conference, group_id in conference_ids.items():
 
-        url = (
+        index_url = (
             f"{CORE_API_BASE}/"
             f"seasons/{season}/"
             f"types/2/"
@@ -176,289 +185,269 @@ def get_json(season: int) -> Dict[str, dict]:
         print()
         print("=" * 80)
         print(
-            f"FETCHING {conference} STANDINGS"
+            f"FETCHING {conference} STANDINGS INDEX"
         )
         print("=" * 80)
 
-        print(url)
-
-        payload = core_get_json(url)
-
-        data[conference] = payload
-
-        debug_payload_structure(
-            conference,
-            payload,
+        index_payload = core_get_json(
+            index_url
         )
 
-    return data
-
-
-# ============================================================
-# DEBUGGING
-# ============================================================
-
-def debug_payload_structure(
-    conference: str,
-    payload: Any,
-) -> None:
-    """
-    Print enough of the real ESPN response structure to GitHub Actions
-    so we can build the parser against the actual JSON.
-
-    This avoids dumping an enormous JSON response while still showing:
-      - root type
-      - root keys
-      - list lengths
-      - item keys
-      - any $ref values
-      - shallow nested structure
-      - a truncated JSON preview
-    """
-
-    print()
-    print("#" * 80)
-    print(
-        f"{conference} RESPONSE STRUCTURE"
-    )
-    print("#" * 80)
-
-    print(
-        f"Root Python type: "
-        f"{type(payload).__name__}"
-    )
-
-    if isinstance(payload, dict):
-
-        print(
-            f"Root keys: "
-            f"{list(payload.keys())}"
+        items = (
+            index_payload.get("items")
+            or []
         )
 
-        for key, value in payload.items():
+        overall_ref = None
 
-            print()
-            print(
-                f"ROOT KEY: {key}"
-            )
+        for item in items:
 
-            print(
-                f"  type: "
-                f"{type(value).__name__}"
-            )
-
-            if isinstance(value, dict):
-
-                print(
-                    f"  keys: "
-                    f"{list(value.keys())}"
-                )
-
-                if "$ref" in value:
-                    print(
-                        f"  $ref: "
-                        f"{value.get('$ref')}"
-                    )
-
-            elif isinstance(value, list):
-
-                print(
-                    f"  list length: "
-                    f"{len(value)}"
-                )
-
-                for index, item in enumerate(
-                    value[:5]
-                ):
-
-                    print(
-                        f"  item[{index}] type: "
-                        f"{type(item).__name__}"
-                    )
-
-                    if isinstance(item, dict):
-
-                        print(
-                            f"  item[{index}] keys: "
-                            f"{list(item.keys())}"
-                        )
-
-                        if "$ref" in item:
-
-                            print(
-                                f"  item[{index}] $ref: "
-                                f"{item.get('$ref')}"
-                            )
-
-                        for item_key, item_value in item.items():
-
-                            if isinstance(
-                                item_value,
-                                dict,
-                            ):
-
-                                print(
-                                    f"    {item_key}: "
-                                    f"dict keys="
-                                    f"{list(item_value.keys())}"
-                                )
-
-                                if "$ref" in item_value:
-
-                                    print(
-                                        f"    {item_key}.$ref="
-                                        f"{item_value.get('$ref')}"
-                                    )
-
-                            elif isinstance(
-                                item_value,
-                                list,
-                            ):
-
-                                print(
-                                    f"    {item_key}: "
-                                    f"list length="
-                                    f"{len(item_value)}"
-                                )
-
-                            else:
-
-                                value_text = str(
-                                    item_value
-                                )
-
-                                if len(
-                                    value_text
-                                ) > 250:
-                                    value_text = (
-                                        value_text[:250]
-                                        + "..."
-                                    )
-
-                                print(
-                                    f"    {item_key}: "
-                                    f"{value_text}"
-                                )
-
-            else:
-
-                value_text = str(
-                    value
-                )
-
-                if len(
-                    value_text
-                ) > 500:
-                    value_text = (
-                        value_text[:500]
-                        + "..."
-                    )
-
-                print(
-                    f"  value: "
-                    f"{value_text}"
-                )
-
-    elif isinstance(
-        payload,
-        list,
-    ):
-
-        print(
-            f"Root list length: "
-            f"{len(payload)}"
-        )
-
-        for index, item in enumerate(
-            payload[:5]
-        ):
-
-            print(
-                f"item[{index}] type: "
-                f"{type(item).__name__}"
-            )
-
-            if isinstance(
+            if not isinstance(
                 item,
                 dict,
             ):
+                continue
 
-                print(
-                    f"item[{index}] keys: "
-                    f"{list(item.keys())}"
-                )
+            if (
+                str(
+                    item.get("name")
+                    or ""
+                ).strip().lower()
+                == "overall"
+            ):
 
-    print()
-    print(
-        f"{conference} TRUNCATED JSON PREVIEW:"
-    )
+                overall_ref = str(
+                    item.get("$ref")
+                    or ""
+                ).strip()
 
-    try:
+                break
 
-        pretty = json.dumps(
-            payload,
-            indent=2,
-        )
+        if not overall_ref:
 
-        # Keep GitHub logs readable.
-        max_chars = 12000
-
-        if len(pretty) > max_chars:
-
-            pretty = (
-                pretty[:max_chars]
-                + "\n... [TRUNCATED] ..."
+            raise RuntimeError(
+                f"Could not find the overall "
+                f"{conference} standings table."
             )
 
-        print(pretty)
-
-    except Exception as exc:
-
         print(
-            f"Could not serialize payload: "
-            f"{exc}"
+            f"{conference} overall standings ref:"
         )
 
-    print()
-    print(
-        f"END {conference} RESPONSE STRUCTURE"
-    )
+        print(
+            overall_ref
+        )
 
-    print("#" * 80)
-    print()
+        print()
+        print(
+            f"FETCHING ACTUAL "
+            f"{conference} STANDINGS"
+        )
+
+        standings_payload = core_get_json(
+            overall_ref
+        )
+
+        results[
+            conference
+        ] = standings_payload
+
+    return results
 
 
 # ============================================================
-# BASIC HELPERS
+# VALUE HELPERS
 # ============================================================
 
 def to_int(value: Any) -> int:
     try:
+
         return int(
             float(
                 str(value).strip()
             )
         )
+
     except Exception:
+
         return 0
 
 
+def team_id_from_ref(
+    ref: str,
+) -> str:
+
+    if not ref:
+        return ""
+
+    clean = (
+        ref
+        .split("?")[0]
+        .rstrip("/")
+    )
+
+    final_piece = (
+        clean
+        .split("/")[-1]
+    )
+
+    if final_piece.isdigit():
+        return final_piece
+
+    return ""
+
+
 # ============================================================
-# STAT PARSING
+# TEAM RESOLUTION
 # ============================================================
 
-def extract_stats(
-    entry: dict,
-) -> Tuple[int, int, int]:
+def resolve_team(
+    team_obj: Any,
+) -> Tuple[str, str]:
 
-    wins = 0
-    losses = 0
-    ties = 0
+    if not isinstance(
+        team_obj,
+        dict,
+    ):
 
-    stats = (
-        entry.get("stats")
+        return "", ""
+
+    team_id = str(
+        team_obj.get("id")
+        or ""
+    ).strip()
+
+    team_name = str(
+        team_obj.get("displayName")
+        or team_obj.get("shortDisplayName")
+        or team_obj.get("name")
+        or ""
+    ).strip()
+
+    ref = str(
+        team_obj.get("$ref")
+        or ""
+    ).strip()
+
+    if not team_id and ref:
+
+        team_id = team_id_from_ref(
+            ref
+        )
+
+    if team_name:
+
+        return (
+            team_id,
+            team_name,
+        )
+
+    if not ref:
+
+        return (
+            team_id,
+            "",
+        )
+
+    team_data = core_get_json(
+        ref
+    )
+
+    team_id = str(
+        team_data.get("id")
+        or team_id
+    ).strip()
+
+    team_name = str(
+        team_data.get("displayName")
+        or team_data.get("shortDisplayName")
+        or team_data.get("name")
+        or ""
+    ).strip()
+
+    return (
+        team_id,
+        team_name,
+    )
+
+
+# ============================================================
+# RECORD PARSING
+# ============================================================
+
+def get_overall_record(
+    standing_entry: dict,
+) -> Optional[dict]:
+    """
+    Each standings row contains:
+
+        "records": [
+            {
+                "id": "0",
+                "name": "overall",
+                ...
+                "stats": [...]
+            },
+            ...
+        ]
+
+    Return the overall record only.
+    """
+
+    records = (
+        standing_entry.get("records")
         or []
     )
+
+    for record in records:
+
+        if not isinstance(
+            record,
+            dict,
+        ):
+            continue
+
+        record_id = str(
+            record.get("id")
+            or ""
+        ).strip()
+
+        record_name = str(
+            record.get("name")
+            or ""
+        ).strip().lower()
+
+        record_type = str(
+            record.get("type")
+            or ""
+        ).strip().lower()
+
+        if (
+            record_id == "0"
+            or record_name == "overall"
+            or record_type == "total"
+        ):
+
+            return record
+
+    return None
+
+
+def stat_value(
+    stats: List[dict],
+    names: Tuple[str, ...],
+    abbreviations: Tuple[str, ...] = (),
+) -> Optional[Any]:
+
+    normalized_names = {
+        name.lower()
+        for name in names
+    }
+
+    normalized_abbreviations = {
+        abbreviation.lower()
+        for abbreviation in abbreviations
+    }
 
     for stat in stats:
 
@@ -473,8 +462,8 @@ def extract_stats(
             or ""
         ).strip().lower()
 
-        display_name = str(
-            stat.get("displayName")
+        stat_type = str(
+            stat.get("type")
             or ""
         ).strip().lower()
 
@@ -483,517 +472,296 @@ def extract_stats(
             or ""
         ).strip().lower()
 
-        value = stat.get(
-            "value",
-            stat.get(
-                "displayValue"
-            ),
+        if (
+            name in normalized_names
+            or stat_type in normalized_names
+            or abbreviation in normalized_abbreviations
+        ):
+
+            return stat.get(
+                "value",
+                stat.get("displayValue"),
+            )
+
+    return None
+
+
+def extract_record_stats(
+    standing_entry: dict,
+) -> Tuple[
+    int,
+    int,
+    int,
+    Optional[int],
+]:
+    """
+    Extract W/L/T and playoff seed from the overall record.
+    """
+
+    overall_record = get_overall_record(
+        standing_entry
+    )
+
+    if overall_record is None:
+
+        return (
+            0,
+            0,
+            0,
+            None,
         )
 
-        if (
-            name == "wins"
-            or display_name == "wins"
-            or abbreviation == "w"
-        ):
+    stats = (
+        overall_record.get("stats")
+        or []
+    )
 
-            wins = to_int(
-                value
-            )
+    wins = to_int(
+        stat_value(
+            stats,
+            ("wins",),
+            ("w",),
+        )
+    )
 
-        elif (
-            name == "losses"
-            or display_name == "losses"
-            or abbreviation == "l"
-        ):
+    losses = to_int(
+        stat_value(
+            stats,
+            ("losses",),
+            ("l",),
+        )
+    )
 
-            losses = to_int(
-                value
-            )
+    ties = to_int(
+        stat_value(
+            stats,
+            ("ties",),
+            ("t",),
+        )
+    )
 
-        elif (
-            name == "ties"
-            or display_name == "ties"
-            or abbreviation == "t"
-        ):
+    seed_raw = stat_value(
+        stats,
+        (
+            "playoffseed",
+            "seed",
+        ),
+        (
+            "seed",
+        ),
+    )
 
-            ties = to_int(
-                value
-            )
+    seed = to_int(
+        seed_raw
+    )
+
+    if seed <= 0:
+        seed = None
 
     return (
         wins,
         losses,
         ties,
+        seed,
     )
 
 
-def extract_espn_seed(
-    entry: dict,
-) -> Optional[int]:
+# ============================================================
+# CONFERENCE PARSING
+# ============================================================
 
-    stats = (
-        entry.get("stats")
+def parse_conference(
+    conference: str,
+    payload: dict,
+) -> List[TeamRow]:
+    """
+    IMPORTANT:
+
+    ESPN /standings/0 uses:
+
+        {
+            "standings": [
+                {
+                    "team": {...},
+                    "records": [...]
+                }
+            ]
+        }
+
+    It does NOT use an "entries" array.
+    """
+
+    standings = (
+        payload.get("standings")
         or []
     )
 
-    for stat in stats:
+    print()
+    print(
+        f"{conference}: "
+        f"received {len(standings)} "
+        f"standings rows"
+    )
+
+    rows: List[TeamRow] = []
+
+    for index, entry in enumerate(
+        standings
+    ):
 
         if not isinstance(
-            stat,
+            entry,
             dict,
         ):
+
             continue
 
-        name = (
-            str(
-                stat.get("name")
-                or ""
-            )
-            .lower()
-            .replace(
-                "_",
-                "",
+        team_obj = (
+            entry.get("team")
+            or {}
+        )
+
+        team_id, team_name = (
+            resolve_team(
+                team_obj
             )
         )
 
-        display_name = (
-            str(
-                stat.get("displayName")
-                or ""
+        if not team_name:
+
+            print(
+                f"{conference}: "
+                f"skipping row "
+                f"{index + 1}; "
+                f"team could not be resolved"
             )
-            .lower()
-            .replace(
-                " ",
-                "",
+
+            continue
+
+        wins, losses, ties, seed = (
+            extract_record_stats(
+                entry
             )
         )
 
-        abbreviation = (
-            str(
-                stat.get("abbreviation")
-                or ""
+        division = hardcoded_div(
+            team_name
+        )
+
+        row = TeamRow(
+            team_id=team_id,
+            team_name=team_name,
+            division=division,
+            w=wins,
+            l=losses,
+            t=ties,
+            espn_seed=seed,
+        )
+
+        rows.append(
+            row
+        )
+
+        print(
+            f"{conference} "
+            f"{team_name}: "
+            f"{wins}-{losses}"
+            + (
+                f"-{ties}"
+                if ties
+                else ""
             )
-            .lower()
+            + (
+                f" | seed={seed}"
+                if seed
+                else ""
+            )
+        )
+
+    # Remove duplicates safely.
+
+    seen = set()
+
+    unique_rows: List[
+        TeamRow
+    ] = []
+
+    for row in rows:
+
+        key = (
+            row.team_id
+            or row.team_name
         )
 
         if (
-            name in (
-                "seed",
-                "playoffseed",
-                "rank",
-                "conferencerank",
-            )
-            or display_name in (
-                "seed",
-                "playoffseed",
-                "rank",
-                "conferencerank",
-            )
-            or abbreviation == "seed"
+            key
+            and key not in seen
         ):
 
-            value = stat.get(
-                "value",
-                stat.get(
-                    "displayValue"
+            seen.add(
+                key
+            )
+
+            unique_rows.append(
+                row
+            )
+
+    # ESPN's standings array is already ordered,
+    # but if all/most teams have playoff seeds,
+    # sort explicitly by seed.
+
+    seeded_rows = [
+        row
+        for row in unique_rows
+        if (
+            row.espn_seed
+            is not None
+            and row.espn_seed > 0
+        )
+    ]
+
+    if unique_rows:
+
+        required_seed_count = max(
+            4,
+            int(
+                len(unique_rows)
+                * 0.8
+            ),
+        )
+
+        if (
+            len(seeded_rows)
+            >= required_seed_count
+        ):
+
+            unique_rows = sorted(
+                unique_rows,
+                key=lambda row: (
+                    row.espn_seed
+                    if row.espn_seed
+                    is not None
+                    else 999
                 ),
             )
 
-            seed = to_int(
-                value
-            )
+    return unique_rows
 
-            if seed > 0:
-                return seed
-
-    return None
-
-
-# ============================================================
-# GENERIC ENTRY DISCOVERY
-# ============================================================
-
-def find_entries(
-    obj: Any,
-    depth: int = 0,
-) -> List[dict]:
-    """
-    Generic recursive search.
-
-    For this diagnostic version we keep this parser,
-    but the debug output above is what we care about.
-
-    Once we see ESPN's real JSON layout, we can replace
-    this with an exact parser.
-    """
-
-    if depth > 20:
-        return []
-
-    if isinstance(
-        obj,
-        dict,
-    ):
-
-        entries = obj.get(
-            "entries"
-        )
-
-        if isinstance(
-            entries,
-            list,
-        ):
-
-            if entries:
-
-                print(
-                    f"Parser found an 'entries' list "
-                    f"with {len(entries)} items "
-                    f"at recursion depth {depth}"
-                )
-
-                first = entries[0]
-
-                if isinstance(
-                    first,
-                    dict,
-                ):
-
-                    print(
-                        "First entry keys: "
-                        f"{list(first.keys())}"
-                    )
-
-                return [
-                    item
-                    for item in entries
-                    if isinstance(
-                        item,
-                        dict,
-                    )
-                ]
-
-        for key, value in obj.items():
-
-            found = find_entries(
-                value,
-                depth + 1,
-            )
-
-            if found:
-                return found
-
-    elif isinstance(
-        obj,
-        list,
-    ):
-
-        for item in obj:
-
-            found = find_entries(
-                item,
-                depth + 1,
-            )
-
-            if found:
-                return found
-
-    return []
-
-
-# ============================================================
-# TEAM RESOLUTION
-# ============================================================
-
-def team_id_from_ref(
-    ref: str,
-) -> str:
-
-    if not ref:
-        return ""
-
-    clean = ref.rstrip(
-        "/"
-    )
-
-    final_piece = (
-        clean
-        .split("/")[-1]
-    )
-
-    if final_piece.isdigit():
-        return final_piece
-
-    return ""
-
-
-def resolve_team(
-    team_obj: Any,
-) -> Tuple[str, str]:
-
-    if not isinstance(
-        team_obj,
-        dict,
-    ):
-
-        return (
-            "",
-            "",
-        )
-
-    team_id = str(
-        team_obj.get("id")
-        or ""
-    ).strip()
-
-    team_name = str(
-        team_obj.get("displayName")
-        or team_obj.get(
-            "shortDisplayName"
-        )
-        or team_obj.get("name")
-        or ""
-    ).strip()
-
-    ref = str(
-        team_obj.get("$ref")
-        or ""
-    ).strip()
-
-    if (
-        not team_id
-        and ref
-    ):
-
-        team_id = team_id_from_ref(
-            ref
-        )
-
-    if team_name:
-
-        return (
-            team_id,
-            team_name,
-        )
-
-    if ref:
-
-        print(
-            f"Resolving team reference: "
-            f"{ref}"
-        )
-
-        resolved = core_get_json(
-            ref
-        )
-
-        team_id = str(
-            resolved.get("id")
-            or team_id
-        ).strip()
-
-        team_name = str(
-            resolved.get(
-                "displayName"
-            )
-            or resolved.get(
-                "shortDisplayName"
-            )
-            or resolved.get(
-                "name"
-            )
-            or ""
-        ).strip()
-
-    return (
-        team_id,
-        team_name,
-    )
-
-
-# ============================================================
-# CONFERENCE PARSER
-# ============================================================
 
 def extract_conferences(
     data: Dict[str, dict],
 ) -> Dict[str, List[TeamRow]]:
 
-    conferences: Dict[
-        str,
-        List[TeamRow],
-    ] = {
-        "AFC": [],
-        "NFC": [],
+    conferences = {
+        "AFC": parse_conference(
+            "AFC",
+            data.get("AFC") or {},
+        ),
+        "NFC": parse_conference(
+            "NFC",
+            data.get("NFC") or {},
+        ),
     }
-
-    for conference in (
-        "AFC",
-        "NFC",
-    ):
-
-        print()
-        print(
-            "=" * 80
-        )
-
-        print(
-            f"ATTEMPTING TO PARSE "
-            f"{conference}"
-        )
-
-        print(
-            "=" * 80
-        )
-
-        payload = (
-            data.get(
-                conference
-            )
-            or {}
-        )
-
-        entries = find_entries(
-            payload
-        )
-
-        print(
-            f"{conference}: "
-            f"generic parser found "
-            f"{len(entries)} entries"
-        )
-
-        rows: List[
-            TeamRow
-        ] = []
-
-        for index, entry in enumerate(
-            entries
-        ):
-
-            print(
-                f"{conference} entry "
-                f"{index + 1} keys: "
-                f"{list(entry.keys())}"
-            )
-
-            team_obj = (
-                entry.get("team")
-                or {}
-            )
-
-            team_id, team_name = (
-                resolve_team(
-                    team_obj
-                )
-            )
-
-            if not team_name:
-
-                print(
-                    f"Skipping entry "
-                    f"{index + 1}: "
-                    f"could not resolve team"
-                )
-
-                continue
-
-            wins, losses, ties = (
-                extract_stats(
-                    entry
-                )
-            )
-
-            seed = extract_espn_seed(
-                entry
-            )
-
-            rows.append(
-                TeamRow(
-                    team_id=team_id,
-                    team_name=team_name,
-                    division=hardcoded_div(
-                        team_name
-                    ),
-                    w=wins,
-                    l=losses,
-                    t=ties,
-                    espn_seed=seed,
-                )
-            )
-
-        seen = set()
-
-        unique_rows: List[
-            TeamRow
-        ] = []
-
-        for row in rows:
-
-            key = (
-                row.team_id
-                or row.team_name
-            )
-
-            if (
-                key
-                and key not in seen
-            ):
-
-                seen.add(
-                    key
-                )
-
-                unique_rows.append(
-                    row
-                )
-
-        seeded = [
-            row
-            for row in unique_rows
-            if (
-                row.espn_seed
-                is not None
-                and row.espn_seed > 0
-            )
-        ]
-
-        if unique_rows:
-
-            threshold = max(
-                4,
-                int(
-                    0.8
-                    * len(
-                        unique_rows
-                    )
-                ),
-            )
-
-            if (
-                len(seeded)
-                >= threshold
-            ):
-
-                unique_rows = sorted(
-                    unique_rows,
-                    key=lambda row: (
-                        row.espn_seed
-                        if row.espn_seed
-                        is not None
-                        else 999
-                    ),
-                )
-
-        conferences[
-            conference
-        ] = unique_rows
-
-        print(
-            f"{conference}: "
-            f"parsed "
-            f"{len(unique_rows)} teams"
-        )
 
     return conferences
 
@@ -1037,13 +805,50 @@ def get_font(
             )
 
         except Exception:
+
             pass
 
     return ImageFont.load_default()
 
 
+def fit_font(
+    draw: ImageDraw.ImageDraw,
+    text_value: str,
+    max_width: int,
+    starting_size: int,
+    minimum_size: int = 18,
+    bold: bool = False,
+):
+
+    size = starting_size
+
+    while size >= minimum_size:
+
+        font = get_font(
+            size,
+            bold=bold,
+        )
+
+        if (
+            draw.textlength(
+                text_value,
+                font=font,
+            )
+            <= max_width
+        ):
+
+            return font
+
+        size -= 1
+
+    return get_font(
+        minimum_size,
+        bold=bold,
+    )
+
+
 # ============================================================
-# POSTER
+# POSTER RENDERING
 # ============================================================
 
 def render_conference_poster(
@@ -1057,6 +862,10 @@ def render_conference_poster(
 
     width = 1080
     height = 1920
+
+    # --------------------------------------------------------
+    # COLORS
+    # --------------------------------------------------------
 
     bg_top = (
         6,
@@ -1148,6 +957,10 @@ def render_conference_poster(
         90,
     )
 
+    # --------------------------------------------------------
+    # IMAGE
+    # --------------------------------------------------------
+
     image = Image.new(
         "RGB",
         (
@@ -1161,7 +974,10 @@ def render_conference_poster(
         image
     )
 
-    # Gradient
+    # --------------------------------------------------------
+    # GRADIENT
+    # --------------------------------------------------------
+
     for yy in range(
         height
     ):
@@ -1209,6 +1025,10 @@ def render_conference_poster(
             ),
         )
 
+    # --------------------------------------------------------
+    # OUTER BORDER
+    # --------------------------------------------------------
+
     draw.rounded_rectangle(
         (
             18,
@@ -1237,9 +1057,14 @@ def render_conference_poster(
         width=1,
     )
 
+    # --------------------------------------------------------
+    # HEADER
+    # --------------------------------------------------------
+
     left = 38
     right = width - 38
     y = 38
+
     top_height = 150
 
     draw.rounded_rectangle(
@@ -1270,32 +1095,24 @@ def render_conference_poster(
         f"NFL STANDINGS {season}"
     )
 
-    title_font = get_font(
-        68,
+    title_font = fit_font(
+        draw,
+        title,
+        right - left - 60,
+        76,
+        52,
         bold=True,
     )
 
-    while (
+    title_width = (
         draw.textlength(
             title,
             font=title_font,
         )
-        > (
-            right
-            - left
-            - 60
-        )
-        and title_font.size > 48
-    ):
+    )
 
-        title_font = get_font(
-            title_font.size - 1,
-            bold=True,
-        )
-
-    title_width = draw.textlength(
-        title,
-        font=title_font,
+    title_height = (
+        title_font.size
     )
 
     draw.text(
@@ -1305,7 +1122,13 @@ def render_conference_poster(
                 - title_width
             )
             / 2,
-            y + 37,
+            y
+            + (
+                top_height
+                - title_height
+            )
+            / 2
+            - 8,
         ),
         title,
         fill=text_color,
@@ -1317,8 +1140,11 @@ def render_conference_poster(
         + 24
     )
 
-    section_gap = 24
+    # --------------------------------------------------------
+    # SECTION DIMENSIONS
+    # --------------------------------------------------------
 
+    section_gap = 24
     bottom_margin = 34
 
     available_height = (
@@ -1328,12 +1154,9 @@ def render_conference_poster(
     )
 
     section_height = (
-        (
-            available_height
-            - section_gap
-        )
-        // 2
-    )
+        available_height
+        - section_gap
+    ) // 2
 
     headers = [
         "#",
@@ -1371,6 +1194,10 @@ def render_conference_poster(
     stat_font = get_font(
         28,
     )
+
+    # --------------------------------------------------------
+    # CONFERENCE SECTION
+    # --------------------------------------------------------
 
     def draw_section(
         top_y: int,
@@ -1447,6 +1274,10 @@ def render_conference_poster(
             fill=text_color,
             font=section_font,
         )
+
+        # ----------------------------------------------------
+        # TABLE
+        # ----------------------------------------------------
 
         table_left = (
             left + 16
@@ -1536,8 +1367,7 @@ def render_conference_poster(
                         ]
                         - 12
                         - header_width,
-                        header_y
-                        + 10,
+                        header_y + 10,
                     ),
                     header,
                     fill=muted,
@@ -1547,6 +1377,28 @@ def render_conference_poster(
             x += column_widths[
                 index
             ]
+
+            if (
+                index
+                != len(headers) - 1
+            ):
+
+                draw.line(
+                    (
+                        x,
+                        header_y + 7,
+                        x,
+                        header_y
+                        + header_height
+                        - 7,
+                    ),
+                    fill=grid,
+                    width=1,
+                )
+
+        # ----------------------------------------------------
+        # ROWS
+        # ----------------------------------------------------
 
         rows_top = (
             header_y
@@ -1581,7 +1433,9 @@ def render_conference_poster(
             // number_of_rows,
         )
 
-        current_y = rows_top
+        current_y = (
+            rows_top
+        )
 
         for index, row in enumerate(
             rows
@@ -1611,80 +1465,100 @@ def render_conference_poster(
                 ),
                 row.team_name,
                 row.division,
-                str(row.w),
-                str(row.l),
-                str(row.t),
+                str(
+                    row.w
+                ),
+                str(
+                    row.l
+                ),
+                str(
+                    row.t
+                ),
             ]
 
-            x = table_left
+            x = (
+                table_left
+            )
 
             for column_index, value in enumerate(
                 values
             ):
 
-                if column_index == 0:
+                # --------------------------------------------
+                # RANK
+                # --------------------------------------------
 
-                    color = (
+                if (
+                    column_index == 0
+                ):
+
+                    rank_color = (
                         gold
                         if index < 7
                         else accent
                     )
 
+                    text_y = (
+                        current_y
+                        + (
+                            row_height - 28
+                        )
+                        / 2
+                        - 2
+                    )
+
                     draw.text(
                         (
                             x + 14,
-                            current_y
-                            + (
-                                row_height
-                                - 28
-                            )
-                            / 2
-                            - 2,
+                            text_y,
                         ),
                         value,
-                        fill=color,
+                        fill=rank_color,
                         font=seed_font,
                     )
 
-                elif column_index == 1:
+                # --------------------------------------------
+                # TEAM
+                # --------------------------------------------
 
-                    team_font = get_font(
-                        28
+                elif (
+                    column_index == 1
+                ):
+
+                    team_font = fit_font(
+                        draw,
+                        value,
+                        column_widths[
+                            column_index
+                        ]
+                        - 24,
+                        28,
+                        18,
                     )
 
-                    while (
-                        draw.textlength(
-                            value,
-                            font=team_font,
+                    text_y = (
+                        current_y
+                        + (
+                            row_height
+                            - team_font.size
                         )
-                        > (
-                            column_widths[
-                                column_index
-                            ]
-                            - 24
-                        )
-                        and team_font.size > 18
-                    ):
-
-                        team_font = get_font(
-                            team_font.size - 1
-                        )
+                        / 2
+                        - 2
+                    )
 
                     draw.text(
                         (
                             x + 12,
-                            current_y
-                            + (
-                                row_height
-                                - team_font.size
-                            )
-                            / 2
-                            - 2,
+                            text_y,
                         ),
                         value,
                         fill=text_color,
                         font=team_font,
                     )
+
+                # --------------------------------------------
+                # OTHER COLUMNS
+                # --------------------------------------------
 
                 else:
 
@@ -1695,6 +1569,15 @@ def render_conference_poster(
                         )
                     )
 
+                    text_y = (
+                        current_y
+                        + (
+                            row_height - 28
+                        )
+                        / 2
+                        - 2
+                    )
+
                     draw.text(
                         (
                             x
@@ -1703,13 +1586,7 @@ def render_conference_poster(
                             ]
                             - 12
                             - value_width,
-                            current_y
-                            + (
-                                row_height
-                                - 28
-                            )
-                            / 2
-                            - 2,
+                            text_y,
                         ),
                         value,
                         fill=text_color,
@@ -1720,10 +1597,32 @@ def render_conference_poster(
                     column_index
                 ]
 
+                if (
+                    column_index
+                    != len(values) - 1
+                ):
+
+                    draw.line(
+                        (
+                            x,
+                            current_y + 7,
+                            x,
+                            current_y
+                            + row_height
+                            - 7,
+                        ),
+                        fill=grid,
+                        width=1,
+                    )
+
             current_y += (
                 row_height
                 + row_gap
             )
+
+    # --------------------------------------------------------
+    # AFC
+    # --------------------------------------------------------
 
     draw_section(
         y,
@@ -1733,6 +1632,10 @@ def render_conference_poster(
             [],
         ),
     )
+
+    # --------------------------------------------------------
+    # NFC
+    # --------------------------------------------------------
 
     draw_section(
         y
@@ -1751,7 +1654,7 @@ def render_conference_poster(
 
 
 # ============================================================
-# MAIN GENERATION
+# GENERATE STANDINGS
 # ============================================================
 
 def generate_standings_conference_png(
@@ -1760,35 +1663,17 @@ def generate_standings_conference_png(
 ) -> str:
 
     print()
-    print(
-        "=" * 80
-    )
+    print("=" * 80)
 
     print(
         f"GENERATING STANDINGS "
         f"FOR SEASON {season}"
     )
 
-    print(
-        "=" * 80
-    )
+    print("=" * 80)
 
     data = get_json(
         season
-    )
-
-    print()
-    print(
-        "=" * 80
-    )
-
-    print(
-        "API RESPONSES RECEIVED. "
-        "NOW ATTEMPTING GENERIC PARSER."
-    )
-
-    print(
-        "=" * 80
     )
 
     conferences = (
@@ -1812,9 +1697,7 @@ def generate_standings_conference_png(
     )
 
     print()
-    print(
-        "=" * 80
-    )
+    print("=" * 80)
 
     print(
         "FINAL STANDINGS COUNTS"
@@ -1828,22 +1711,17 @@ def generate_standings_conference_png(
         f"NFC = {nfc_count}"
     )
 
-    print(
-        "=" * 80
-    )
+    print("=" * 80)
 
     if (
-        afc_count == 0
-        or nfc_count == 0
+        afc_count != 16
+        or nfc_count != 16
     ):
 
         raise RuntimeError(
-            "Diagnostic standings run completed, "
-            "but the current generic parser "
-            "did not find both conferences. "
-            "Use the JSON structure printed above "
-            "to build the exact parser. "
-            f"AFC={afc_count}, NFC={nfc_count}."
+            "Expected 16 teams in each conference, "
+            f"but received AFC={afc_count}, "
+            f"NFC={nfc_count}."
         )
 
     render_conference_poster(
@@ -1853,7 +1731,7 @@ def generate_standings_conference_png(
     )
 
     print(
-        f"Standings poster saved: "
+        f"✅ Standings poster saved: "
         f"{out_path}"
     )
 
