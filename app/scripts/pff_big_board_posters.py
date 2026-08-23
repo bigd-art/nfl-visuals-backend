@@ -12,7 +12,7 @@ from PIL import Image, ImageDraw, ImageFont
 SEASON_DEFAULT = 2026
 VERSION = 4
 TOP_N = 5
-OUTPUT_DIR = "pff_posters"
+OUTPUT_DIR = "big_board_posters"
 
 BOARD_URL = "https://www.pff.com/api/college/big_board"
 
@@ -22,7 +22,11 @@ USER_AGENT = (
     "Chrome/138.0.0.0 Safari/537.36"
 )
 
-SKIP_POSITIONS = {"FB", "K", "P"}
+SKIP_POSITIONS = {
+    "FB",
+    "K",
+    "P",
+}
 
 POSTER_WIDTH = 1450
 HEADER_HEIGHT = 280
@@ -31,14 +35,22 @@ BOTTOM_PADDING = 60
 MARGIN = 44
 
 
+# ============================================================
+# OUTPUT
+# ============================================================
+
 def ensure_output_dir():
+
     os.makedirs(
         OUTPUT_DIR,
         exist_ok=True,
     )
 
 
-def safe_filename(name: str) -> str:
+def safe_filename(
+    name: str,
+) -> str:
+
     return re.sub(
         r"[^A-Za-z0-9._-]+",
         "_",
@@ -46,10 +58,15 @@ def safe_filename(name: str) -> str:
     ).strip("_")
 
 
+# ============================================================
+# FONTS
+# ============================================================
+
 def get_font(
     size=30,
     bold=False,
 ):
+
     candidates = [
         (
             "/usr/share/fonts/truetype/dejavu/"
@@ -77,12 +94,16 @@ def get_font(
     ]
 
     for path in candidates:
+
         try:
+
             return ImageFont.truetype(
                 path,
                 size,
             )
+
         except Exception:
+
             pass
 
     return ImageFont.load_default()
@@ -124,9 +145,19 @@ SMALL_TEXT_FONT = get_font(
 )
 
 
-def get_headers(season):
+# ============================================================
+# SOURCE HEADERS
+# ============================================================
+
+def get_headers(
+    season,
+):
+
     return {
-        "accept": "application/json, text/plain, */*",
+        "accept": (
+            "application/json, "
+            "text/plain, */*"
+        ),
         "referer": (
             "https://www.pff.com/draft/"
             f"big-board?season={season}"
@@ -135,12 +166,18 @@ def get_headers(season):
     }
 
 
+# ============================================================
+# DATA HELPERS
+# ============================================================
+
 def pick(
     data,
     keys,
     default="N/A",
 ):
+
     for key in keys:
+
         if (
             key in data
             and data[key] not in (
@@ -149,13 +186,20 @@ def pick(
                 [],
             )
         ):
-            return data[key]
+
+            return data[
+                key
+            ]
 
     return default
 
 
-def normalize_position(position):
+def normalize_position(
+    position,
+):
+
     if not position:
+
         return "UNK"
 
     position = str(
@@ -184,12 +228,21 @@ def normalize_position(position):
     )
 
 
-def get_player_list(data):
+# ============================================================
+# PLAYER LIST
+# ============================================================
+
+def get_player_list(
+    data,
+):
+
     if isinstance(
         data,
         list,
     ):
+
         if data:
+
             return data
 
         return []
@@ -198,6 +251,7 @@ def get_player_list(data):
         data,
         dict,
     ):
+
         preferred_keys = [
             "players",
             "big_board",
@@ -208,68 +262,98 @@ def get_player_list(data):
         ]
 
         for key in preferred_keys:
+
             value = data.get(
                 key,
             )
 
             if (
-                isinstance(value, list)
+                isinstance(
+                    value,
+                    list,
+                )
                 and value
             ):
+
                 return value
 
             if isinstance(
                 value,
                 dict,
             ):
+
                 try:
-                    nested_players = get_player_list(
-                        value,
+
+                    nested_players = (
+                        get_player_list(
+                            value,
+                        )
                     )
 
                     if nested_players:
+
                         return nested_players
 
                 except ValueError:
+
                     pass
 
         for value in data.values():
+
             if (
-                isinstance(value, list)
+                isinstance(
+                    value,
+                    list,
+                )
                 and value
             ):
+
                 if isinstance(
                     value[0],
                     dict,
                 ):
+
                     return value
 
             if isinstance(
                 value,
                 dict,
             ):
+
                 try:
-                    nested_players = get_player_list(
-                        value,
+
+                    nested_players = (
+                        get_player_list(
+                            value,
+                        )
                     )
 
                     if nested_players:
+
                         return nested_players
 
                 except ValueError:
+
                     pass
 
     raise ValueError(
-        "Could not find a non-empty player list."
+        "Could not find a non-empty "
+        "player list."
     )
 
+
+# ============================================================
+# PLAYER PARSING
+# ============================================================
 
 def parse_player(
     raw,
     rank,
 ):
+
     return {
         "rank": rank,
+
         "name": str(
             pick(
                 raw,
@@ -281,6 +365,7 @@ def parse_player(
                 "Unknown",
             )
         ),
+
         "position": normalize_position(
             pick(
                 raw,
@@ -291,6 +376,7 @@ def parse_player(
                 "UNK",
             )
         ),
+
         "college": str(
             pick(
                 raw,
@@ -303,6 +389,7 @@ def parse_player(
                 "N/A",
             )
         ),
+
         "height": str(
             pick(
                 raw,
@@ -314,6 +401,7 @@ def parse_player(
                 "N/A",
             )
         ),
+
         "weight": str(
             pick(
                 raw,
@@ -325,6 +413,7 @@ def parse_player(
                 "N/A",
             )
         ),
+
         "age": str(
             pick(
                 raw,
@@ -337,7 +426,14 @@ def parse_player(
     }
 
 
-def fetch_big_board(season):
+# ============================================================
+# FETCH BIG BOARD
+# ============================================================
+
+def fetch_big_board(
+    season,
+):
+
     response = requests.get(
         BOARD_URL,
         params={
@@ -355,7 +451,14 @@ def fetch_big_board(season):
     return response.json()
 
 
-def group_top_players(players):
+# ============================================================
+# GROUP PLAYERS
+# ============================================================
+
+def group_top_players(
+    players,
+):
+
     grouped = defaultdict(
         list,
     )
@@ -363,24 +466,40 @@ def group_top_players(players):
     for index, raw in enumerate(
         players,
     ):
+
         player = parse_player(
             raw,
             index + 1,
         )
 
-        if player["position"] in SKIP_POSITIONS:
+        if (
+            player[
+                "position"
+            ]
+            in SKIP_POSITIONS
+        ):
+
             continue
 
         grouped[
-            player["position"]
+            player[
+                "position"
+            ]
         ].append(
             player,
         )
 
     for position in grouped:
-        grouped[position] = grouped[
+
+        grouped[
             position
-        ][:TOP_N]
+        ] = (
+            grouped[
+                position
+            ][
+                :TOP_N
+            ]
+        )
 
     return dict(
         sorted(
@@ -388,6 +507,10 @@ def group_top_players(players):
         )
     )
 
+
+# ============================================================
+# TEXT FITTING
+# ============================================================
 
 def fit_font(
     draw,
@@ -397,18 +520,29 @@ def fit_font(
     min_size=20,
     bold=False,
 ):
+
     size = start_size
 
-    while size >= min_size:
+    while (
+        size
+        >= min_size
+    ):
+
         font = get_font(
             size,
             bold=bold,
         )
 
-        if draw.textlength(
-            str(text),
-            font=font,
-        ) <= max_width:
+        if (
+            draw.textlength(
+                str(
+                    text
+                ),
+                font=font,
+            )
+            <= max_width
+        ):
+
             return font
 
         size -= 1
@@ -419,6 +553,10 @@ def fit_font(
     )
 
 
+# ============================================================
+# BACKGROUND
+# ============================================================
+
 def draw_vertical_gradient(
     draw,
     width,
@@ -426,27 +564,44 @@ def draw_vertical_gradient(
     top_color,
     bottom_color,
 ):
+
     for y in range(
         height,
     ):
-        ratio = y / max(
-            1,
-            height - 1,
+
+        ratio = (
+            y
+            / max(
+                1,
+                height - 1,
+            )
         )
 
         red = int(
-            top_color[0] * (1 - ratio)
-            + bottom_color[0] * ratio
+            top_color[0]
+            * (
+                1 - ratio
+            )
+            + bottom_color[0]
+            * ratio
         )
 
         green = int(
-            top_color[1] * (1 - ratio)
-            + bottom_color[1] * ratio
+            top_color[1]
+            * (
+                1 - ratio
+            )
+            + bottom_color[1]
+            * ratio
         )
 
         blue = int(
-            top_color[2] * (1 - ratio)
-            + bottom_color[2] * ratio
+            top_color[2]
+            * (
+                1 - ratio
+            )
+            + bottom_color[2]
+            * ratio
         )
 
         draw.line(
@@ -464,14 +619,22 @@ def draw_vertical_gradient(
         )
 
 
+# ============================================================
+# POSTER
+# ============================================================
+
 def create_poster(
     position,
     players,
     season,
 ):
+
     height = (
         HEADER_HEIGHT
-        + len(players) * ROW_HEIGHT
+        + len(
+            players
+        )
+        * ROW_HEIGHT
         + BOTTOM_PADDING
     )
 
@@ -572,6 +735,10 @@ def create_poster(
         image,
     )
 
+    # --------------------------------------------------------
+    # BACKGROUND
+    # --------------------------------------------------------
+
     draw_vertical_gradient(
         draw,
         POSTER_WIDTH,
@@ -579,6 +746,10 @@ def create_poster(
         bg_top,
         bg_bottom,
     )
+
+    # --------------------------------------------------------
+    # OUTER BORDER
+    # --------------------------------------------------------
 
     draw.rounded_rectangle(
         (
@@ -609,17 +780,27 @@ def create_poster(
     )
 
     left = MARGIN
-    right = POSTER_WIDTH - MARGIN
+
+    right = (
+        POSTER_WIDTH
+        - MARGIN
+    )
 
     top_height = 180
+
     top_y = 34
+
+    # --------------------------------------------------------
+    # TITLE PANEL
+    # --------------------------------------------------------
 
     draw.rounded_rectangle(
         (
             left,
             top_y,
             right,
-            top_y + top_height,
+            top_y
+            + top_height,
         ),
         radius=28,
         fill=panel,
@@ -632,29 +813,39 @@ def create_poster(
             left + 10,
             top_y + 10,
             right - 10,
-            top_y + top_height - 10,
+            top_y
+            + top_height
+            - 10,
         ),
         radius=24,
         fill=panel_2,
     )
 
+    # --------------------------------------------------------
+    # TITLE
+    # --------------------------------------------------------
+
     title = (
         f"{position} - TOP "
-        f"{len(players)} PFF PROSPECTS"
+        f"{len(players)} PROSPECTS"
     )
 
     title_font = fit_font(
         draw,
         title,
-        right - left - 60,
+        right
+        - left
+        - 60,
         84,
         44,
         bold=True,
     )
 
-    title_width = draw.textlength(
-        title,
-        font=title_font,
+    title_width = (
+        draw.textlength(
+            title,
+            font=title_font,
+        )
     )
 
     draw.text(
@@ -662,7 +853,8 @@ def create_poster(
             (
                 POSTER_WIDTH
                 - title_width
-            ) / 2,
+            )
+            / 2,
             top_y + 28,
         ),
         title,
@@ -670,11 +862,19 @@ def create_poster(
         font=title_font,
     )
 
-    subtitle = f"SEASON {season}"
+    # --------------------------------------------------------
+    # SUBTITLE
+    # --------------------------------------------------------
 
-    subtitle_width = draw.textlength(
-        subtitle,
-        font=SUBTITLE_FONT,
+    subtitle = (
+        f"SEASON {season}"
+    )
+
+    subtitle_width = (
+        draw.textlength(
+            subtitle,
+            font=SUBTITLE_FONT,
+        )
     )
 
     draw.text(
@@ -682,7 +882,8 @@ def create_poster(
             (
                 POSTER_WIDTH
                 - subtitle_width
-            ) / 2,
+            )
+            / 2,
             top_y + 120,
         ),
         subtitle,
@@ -690,8 +891,18 @@ def create_poster(
         font=SUBTITLE_FONT,
     )
 
-    table_left = left + 12
-    table_right = right - 12
+    # --------------------------------------------------------
+    # TABLE SETUP
+    # --------------------------------------------------------
+
+    table_left = (
+        left + 12
+    )
+
+    table_right = (
+        right - 12
+    )
+
     table_width = (
         table_right
         - table_left
@@ -708,14 +919,20 @@ def create_poster(
 
     column_widths = [
         int(
-            table_width * fraction
+            table_width
+            * fraction
         )
-        for fraction in column_fractions
+        for fraction
+        in column_fractions
     ]
 
-    column_widths[-1] += (
+    column_widths[
+        -1
+    ] += (
         table_width
-        - sum(column_widths)
+        - sum(
+            column_widths
+        )
     )
 
     headers = [
@@ -735,12 +952,17 @@ def create_poster(
 
     header_height = 58
 
+    # --------------------------------------------------------
+    # TABLE HEADER
+    # --------------------------------------------------------
+
     draw.rounded_rectangle(
         (
             table_left,
             header_y,
             table_right,
-            header_y + header_height,
+            header_y
+            + header_height,
         ),
         radius=16,
         fill=title_bar,
@@ -751,7 +973,9 @@ def create_poster(
             table_left,
             header_y,
             table_right,
-            header_y + header_height // 2,
+            header_y
+            + header_height
+            // 2,
         ),
         radius=16,
         fill=title_bar_hi,
@@ -762,11 +986,13 @@ def create_poster(
     for index, header in enumerate(
         headers,
     ):
+
         if index in (
             0,
             1,
             2,
         ):
+
             draw.text(
                 (
                     x + 14,
@@ -778,15 +1004,20 @@ def create_poster(
             )
 
         else:
-            header_width = draw.textlength(
-                header,
-                font=HEADER_FONT,
+
+            header_width = (
+                draw.textlength(
+                    header,
+                    font=HEADER_FONT,
+                )
             )
 
             draw.text(
                 (
                     x
-                    + column_widths[index]
+                    + column_widths[
+                        index
+                    ]
                     - 14
                     - header_width,
                     header_y + 12,
@@ -796,9 +1027,20 @@ def create_poster(
                 font=HEADER_FONT,
             )
 
-        x += column_widths[index]
+        x += (
+            column_widths[
+                index
+            ]
+        )
 
-        if index != len(headers) - 1:
+        if (
+            index
+            != len(
+                headers
+            )
+            - 1
+        ):
+
             draw.line(
                 (
                     x,
@@ -812,18 +1054,30 @@ def create_poster(
                 width=1,
             )
 
+    # --------------------------------------------------------
+    # PLAYER ROWS
+    # --------------------------------------------------------
+
     row_y = (
         header_y
         + header_height
         + 14
     )
 
-    for row_index, player in enumerate(
+    for (
+        row_index,
+        player,
+    ) in enumerate(
         players,
     ):
+
         fill = (
             row_a
-            if row_index % 2 == 0
+            if (
+                row_index
+                % 2
+                == 0
+            )
             else row_b
         )
 
@@ -832,41 +1086,84 @@ def create_poster(
                 table_left,
                 row_y,
                 table_right,
-                row_y + ROW_HEIGHT - 12,
+                row_y
+                + ROW_HEIGHT
+                - 12,
             ),
             radius=18,
             fill=fill,
         )
 
         values = [
-            str(player["rank"]),
-            str(player["name"]),
-            str(player["college"]),
-            str(player["height"]),
-            str(player["weight"]),
-            str(player["age"]),
+            str(
+                player[
+                    "rank"
+                ]
+            ),
+            str(
+                player[
+                    "name"
+                ]
+            ),
+            str(
+                player[
+                    "college"
+                ]
+            ),
+            str(
+                player[
+                    "height"
+                ]
+            ),
+            str(
+                player[
+                    "weight"
+                ]
+            ),
+            str(
+                player[
+                    "age"
+                ]
+            ),
         ]
 
         x = table_left
 
-        for column_index, value in enumerate(
+        for (
+            column_index,
+            value,
+        ) in enumerate(
             values,
         ):
-            column_width = column_widths[
-                column_index
-            ]
 
-            if column_index == 0:
+            column_width = (
+                column_widths[
+                    column_index
+                ]
+            )
+
+            # ------------------------------------------------
+            # RANK
+            # ------------------------------------------------
+
+            if (
+                column_index
+                == 0
+            ):
+
                 font = fit_font(
                     draw,
                     value,
-                    column_width - 28,
+                    column_width
+                    - 28,
                     42,
                     24,
                     bold=True,
                 )
 
-                text_y = row_y + 24
+                text_y = (
+                    row_y + 24
+                )
 
                 draw.text(
                     (
@@ -878,17 +1175,28 @@ def create_poster(
                     font=font,
                 )
 
-            elif column_index == 1:
+            # ------------------------------------------------
+            # NAME
+            # ------------------------------------------------
+
+            elif (
+                column_index
+                == 1
+            ):
+
                 font = fit_font(
                     draw,
                     value,
-                    column_width - 24,
+                    column_width
+                    - 24,
                     44,
                     24,
                     bold=True,
                 )
 
-                text_y = row_y + 18
+                text_y = (
+                    row_y + 18
+                )
 
                 draw.text(
                     (
@@ -900,17 +1208,28 @@ def create_poster(
                     font=font,
                 )
 
-            elif column_index == 2:
+            # ------------------------------------------------
+            # COLLEGE
+            # ------------------------------------------------
+
+            elif (
+                column_index
+                == 2
+            ):
+
                 font = fit_font(
                     draw,
                     value,
-                    column_width - 24,
+                    column_width
+                    - 24,
                     34,
                     20,
                     bold=False,
                 )
 
-                text_y = row_y + 64
+                text_y = (
+                    row_y + 64
+                )
 
                 draw.text(
                     (
@@ -922,25 +1241,35 @@ def create_poster(
                     font=font,
                 )
 
+            # ------------------------------------------------
+            # HEIGHT / WEIGHT
+            # ------------------------------------------------
+
             elif column_index in (
                 3,
                 4,
             ):
+
                 font = fit_font(
                     draw,
                     value,
-                    column_width - 24,
+                    column_width
+                    - 24,
                     38,
                     24,
                     bold=False,
                 )
 
-                text_width = draw.textlength(
-                    value,
-                    font=font,
+                text_width = (
+                    draw.textlength(
+                        value,
+                        font=font,
+                    )
                 )
 
-                text_y = row_y + 42
+                text_y = (
+                    row_y + 42
+                )
 
                 draw.text(
                     (
@@ -955,22 +1284,32 @@ def create_poster(
                     font=font,
                 )
 
+            # ------------------------------------------------
+            # AGE
+            # ------------------------------------------------
+
             else:
+
                 font = fit_font(
                     draw,
                     value,
-                    column_width - 20,
+                    column_width
+                    - 20,
                     40,
                     26,
                     bold=False,
                 )
 
-                text_width = draw.textlength(
-                    value,
-                    font=font,
+                text_width = (
+                    draw.textlength(
+                        value,
+                        font=font,
+                    )
                 )
 
-                text_y = row_y + 42
+                text_y = (
+                    row_y + 42
+                )
 
                 draw.text(
                     (
@@ -985,9 +1324,18 @@ def create_poster(
                     font=font,
                 )
 
-            x += column_width
+            x += (
+                column_width
+            )
 
-            if column_index != len(values) - 1:
+            if (
+                column_index
+                != len(
+                    values
+                )
+                - 1
+            ):
+
                 draw.line(
                     (
                         x,
@@ -1001,7 +1349,13 @@ def create_poster(
                     width=1,
                 )
 
-        row_y += ROW_HEIGHT
+        row_y += (
+            ROW_HEIGHT
+        )
+
+    # --------------------------------------------------------
+    # SAVE
+    # --------------------------------------------------------
 
     path = os.path.join(
         OUTPUT_DIR,
@@ -1021,8 +1375,15 @@ def create_poster(
     )
 
 
+# ============================================================
+# MAIN
+# ============================================================
+
 def main():
-    parser = argparse.ArgumentParser()
+
+    parser = (
+        argparse.ArgumentParser()
+    )
 
     parser.add_argument(
         "--season",
@@ -1030,12 +1391,14 @@ def main():
         default=SEASON_DEFAULT,
     )
 
-    args = parser.parse_args()
+    args = (
+        parser.parse_args()
+    )
 
     ensure_output_dir()
 
     print(
-        "Fetching PFF big board for "
+        "Fetching big board for "
         f"{args.season}..."
     )
 
@@ -1051,7 +1414,11 @@ def main():
         players,
     )
 
-    for position, player_list in grouped.items():
+    for (
+        position,
+        player_list,
+    ) in grouped.items():
+
         create_poster(
             position,
             player_list,
