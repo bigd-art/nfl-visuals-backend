@@ -15,7 +15,7 @@ USER_AGENT = (
     "Chrome/120.0.0.0 Safari/537.36"
 )
 
-SITE_API = "https://site.api.espn.com/apis/v2/sports/football/nfl/standings"
+CORE_API_BASE = "https://sports.core.api.espn.com/v2/sports/football/leagues/nfl"
 SUPABASE_PUBLIC_BASE = "https://rojsabkwywygludonpdf.supabase.co/storage/v1/object/public/nfl-posters"
 
 # ✅ HARDCODED DIVISIONS (East/North/South/West) by ESPN displayName
@@ -79,23 +79,50 @@ class TeamRow:
     espn_seed: Optional[int] = None  # if ESPN provides seed/rank, use it
 
 
-def get_json(season: int) -> dict:
+def core_get_json(url: str) -> dict:
+    """
+    Fetch JSON from ESPN's Core API.
+
+    ESPN sometimes returns $ref URLs using http://. Convert those to https://
+    before requesting them.
+    """
+    if url.startswith("http://"):
+        url = "https://" + url[len("http://"):]
+
     headers = {
         "User-Agent": USER_AGENT,
         "Accept": "application/json,text/plain,*/*",
         "Accept-Language": "en-US,en;q=0.9",
-        "Referer": "https://www.espn.com/",
-        "Origin": "https://www.espn.com",
     }
 
-    r = requests.get(
-        SITE_API,
-        params={"season": season, "type": 2},
-        headers=headers,
-        timeout=25,
-    )
+    r = requests.get(url, headers=headers, timeout=25)
     r.raise_for_status()
     return r.json()
+
+
+def get_json(season: int) -> dict:
+    """
+    Fetch regular-season conference standings from ESPN Core API.
+
+    Conference IDs:
+      AFC = 8
+      NFC = 7
+    """
+    conference_ids = {
+        "AFC": 8,
+        "NFC": 7,
+    }
+
+    data: Dict[str, dict] = {}
+
+    for conference, group_id in conference_ids.items():
+        url = (
+            f"{CORE_API_BASE}/seasons/{season}/types/2/"
+            f"groups/{group_id}/standings"
+        )
+        data[conference] = core_get_json(url)
+
+    return data
 
 
 def to_int(v: Any) -> int:
@@ -124,136 +151,213 @@ def normalize_division_name(name: str) -> str:
 
 def extract_stats(entry: dict) -> Tuple[int, int, int]:
     w = l = t = 0
+
     for s in entry.get("stats", []) or []:
         if not isinstance(s, dict):
             continue
-        k = s.get("name")
-        if k == "wins":
-            w = to_int(s.get("value", s.get("displayValue")))
-        elif k == "losses":
-            l = to_int(s.get("value", s.get("displayValue")))
-        elif k == "ties":
-            t = to_int(s.get("value", s.get("displayValue")))
+
+        name = str(s.get("name") or "").strip().lower()
+        display_name = str(s.get("displayName") or "").strip().lower()
+        abbreviation = str(s.get("abbreviation") or "").strip().lower()
+
+        value = s.get("value", s.get("displayValue"))
+
+        if name == "wins" or display_name == "wins" or abbreviation == "w":
+            w = to_int(value)
+        elif name == "losses" or display_name == "losses" or abbreviation == "l":
+            l = to_int(value)
+        elif name == "ties" or display_name == "ties" or abbreviation == "t":
+            t = to_int(value)
+
     return w, l, t
 
 
 def extract_espn_seed(entry: dict) -> Optional[int]:
-    # ESPN sometimes includes seed/rank in stats under one of these names
     for s in entry.get("stats", []) or []:
         if not isinstance(s, dict):
             continue
-        name = (s.get("name") or "").lower()
-        if name in (
-            "seed",
-            "playoffseed",
-            "playoff_seed",
-            "rank",
-            "conferencerank",
-            "conference_rank",
+
+        name = (s.get("name") or "").lower().replace("_", "")
+        display_name = (s.get("displayName") or "").lower().replace(" ", "")
+        abbreviation = (s.get("abbreviation") or "").lower()
+
+        if (
+            name in (
+                "seed",
+                "playoffseed",
+                "rank",
+                "conferencerank",
+            )
+            or display_name in (
+                "seed",
+                "playoffseed",
+                "rank",
+                "conferencerank",
+            )
+            or abbreviation in ("seed",)
         ):
             val = s.get("value", s.get("displayValue"))
             seed = to_int(val)
             if seed > 0:
                 return seed
+
     return None
 
 
-def build_division_map(conf_obj: dict) -> Dict[str, str]:
-    mapping: Dict[str, str] = {}
-    for div in conf_obj.get("children", []) or []:
-        div_name = (div.get("shortName") or div.get("name") or "").strip()
-        div_short = normalize_division_name(div_name)
-        standings = (div.get("standings") or {}).get("entries") or []
-        for e in standings:
-            team = e.get("team") or {}
-            tid = str(team.get("id") or "").strip()
-            if tid:
-                mapping[tid] = div_short
-    return mapping
+def _find_entries(obj: Any) -> List[dict]:
+    """
+    Recursively find the first standings-style entries list.
+
+    ESPN's Core API has changed nesting slightly over time, so this keeps the
+    parser tolerant instead of depending on one exact JSON layout.
+    """
+    if isinstance(obj, dict):
+        entries = obj.get("entries")
+        if isinstance(entries, list) and entries:
+            if any(
+                isinstance(item, dict) and ("team" in item or "stats" in item)
+                for item in entries
+            ):
+                return [item for item in entries if isinstance(item, dict)]
+
+        for value in obj.values():
+            found = _find_entries(value)
+            if found:
+                return found
+
+    elif isinstance(obj, list):
+        for item in obj:
+            found = _find_entries(item)
+            if found:
+                return found
+
+    return []
+
+
+def _overall_entries(payload: dict) -> List[dict]:
+    """
+    Prefer the 'overall' standings table if ESPN returns multiple tables.
+    """
+    items = payload.get("items") or []
+
+    if isinstance(items, list):
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+
+            name = str(item.get("name") or "").strip().lower()
+            display_name = str(item.get("displayName") or "").strip().lower()
+
+            if name == "overall" or "overall standings" in display_name:
+                entries = _find_entries(item)
+                if entries:
+                    return entries
+
+    return _find_entries(payload)
+
+
+def _team_id_from_ref(ref: str) -> str:
+    if not ref:
+        return ""
+
+    clean = ref.rstrip("/")
+    last = clean.split("/")[-1]
+    return last if last.isdigit() else ""
+
+
+def _resolve_team(team_obj: Any) -> Tuple[str, str]:
+    """
+    Return (team_id, display_name).
+
+    Core standings entries commonly store the team as a $ref. If the team is
+    already expanded, no extra request is made.
+    """
+    if not isinstance(team_obj, dict):
+        return "", ""
+
+    team_id = str(team_obj.get("id") or "").strip()
+    team_name = str(
+        team_obj.get("displayName")
+        or team_obj.get("shortDisplayName")
+        or team_obj.get("name")
+        or ""
+    ).strip()
+
+    ref = str(team_obj.get("$ref") or "").strip()
+
+    if not team_id and ref:
+        team_id = _team_id_from_ref(ref)
+
+    if team_name:
+        return team_id, team_name
+
+    if ref:
+        resolved = core_get_json(ref)
+        team_id = str(resolved.get("id") or team_id).strip()
+        team_name = str(
+            resolved.get("displayName")
+            or resolved.get("shortDisplayName")
+            or resolved.get("name")
+            or ""
+        ).strip()
+
+    return team_id, team_name
 
 
 def extract_conferences(data: dict) -> Dict[str, List[TeamRow]]:
     conferences: Dict[str, List[TeamRow]] = {"AFC": [], "NFC": []}
 
-    for conf in data.get("children", []) or []:
-        conf_abbr = (
-            conf.get("abbreviation")
-            or conf.get("shortName")
-            or conf.get("name")
-            or ""
-        ).strip().upper()
-        if conf_abbr not in ("AFC", "NFC"):
-            continue
+    for conference in ("AFC", "NFC"):
+        payload = data.get(conference) or {}
+        entries = _overall_entries(payload)
 
-        div_map = build_division_map(conf)
-        conf_entries = (conf.get("standings") or {}).get("entries") or []
+        rows: List[TeamRow] = []
 
-        # ✅ If ESPN provides conference standings entries, KEEP ESPN order
-        if conf_entries:
-            rows: List[TeamRow] = []
-            seeds: List[Optional[int]] = []
+        for entry in entries:
+            team_obj = entry.get("team") or {}
+            team_id, team_name = _resolve_team(team_obj)
 
-            for e in conf_entries:
-                team = e.get("team") or {}
-                tid = str(team.get("id") or "").strip()
-                name = str(team.get("displayName") or team.get("name") or "").strip()
-                w, l, t = extract_stats(e)
-                seed = extract_espn_seed(e)
-                seeds.append(seed)
+            if not team_name:
+                continue
 
-                rows.append(
-                    TeamRow(
-                        team_id=tid,
-                        team_name=name,
-                        division=div_map.get(tid, ""),
-                        w=w,
-                        l=l,
-                        t=t,
-                        espn_seed=seed,
-                    )
+            w, l, t = extract_stats(entry)
+            seed = extract_espn_seed(entry)
+
+            rows.append(
+                TeamRow(
+                    team_id=team_id,
+                    team_name=team_name,
+                    division=hardcoded_div(team_name),
+                    w=w,
+                    l=l,
+                    t=t,
+                    espn_seed=seed,
                 )
+            )
 
-            # If most teams have a seed, sort by that seed; otherwise preserve API order
-            non_null = sum(1 for s in seeds if isinstance(s, int) and s > 0)
-            if non_null >= max(4, int(0.8 * len(rows))):
-                rows = sorted(
-                    rows,
-                    key=lambda r: (r.espn_seed if r.espn_seed is not None else 999),
-                )
-
-            conferences[conf_abbr] = rows
-            continue
-
-        # Fallback: build from divisions (rare), keep old logic but stable
-        fallback_rows: List[TeamRow] = []
-        for div in conf.get("children", []) or []:
-            div_name = (div.get("shortName") or div.get("name") or "").strip()
-            div_short = normalize_division_name(div_name)
-            div_entries = (div.get("standings") or {}).get("entries") or []
-            for e in div_entries:
-                team = e.get("team") or {}
-                tid = str(team.get("id") or "").strip()
-                name = str(team.get("displayName") or team.get("name") or "").strip()
-                w, l, t = extract_stats(e)
-                fallback_rows.append(
-                    TeamRow(
-                        team_id=tid,
-                        team_name=name,
-                        division=div_short,
-                        w=w,
-                        l=l,
-                        t=t,
-                    )
-                )
-
+        # Remove duplicates while preserving ESPN's returned order.
         seen = set()
-        uniq: List[TeamRow] = []
-        for r in fallback_rows:
-            if r.team_id and r.team_id not in seen:
-                seen.add(r.team_id)
-                uniq.append(r)
+        unique_rows: List[TeamRow] = []
+        for row in rows:
+            key = row.team_id or row.team_name
+            if key and key not in seen:
+                seen.add(key)
+                unique_rows.append(row)
 
-        conferences[conf_abbr] = uniq
+        # If ESPN supplies usable seeds for most teams, use them.
+        seeded = [
+            row for row in unique_rows
+            if isinstance(row.espn_seed, int) and row.espn_seed > 0
+        ]
+        if len(seeded) >= max(4, int(0.8 * len(unique_rows))):
+            unique_rows = sorted(
+                unique_rows,
+                key=lambda row: (
+                    row.espn_seed if row.espn_seed is not None else 999
+                ),
+            )
+
+        conferences[conference] = unique_rows
 
     return conferences
 
@@ -455,6 +559,16 @@ def render_conference_poster(season: int, conferences: Dict[str, List[TeamRow]],
 def generate_standings_conference_png(season: int, out_path: str) -> str:
     data = get_json(season)
     conferences = extract_conferences(data)
+
+    afc_count = len(conferences.get("AFC", []))
+    nfc_count = len(conferences.get("NFC", []))
+
+    if afc_count == 0 or nfc_count == 0:
+        raise RuntimeError(
+            "ESPN Core API returned standings, but the parser could not find "
+            f"both conferences (AFC={afc_count}, NFC={nfc_count})."
+        )
+
     render_conference_poster(season, conferences, out_path)
     return out_path
 
