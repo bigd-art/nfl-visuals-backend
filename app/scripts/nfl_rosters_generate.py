@@ -20,7 +20,6 @@ DEFAULT_YEAR = int(
     )
 )
 
-# Internal ESPN API path.
 CORE_API_BASE = (
     "https://sports.core.api.espn.com/v2/"
     "sports/football/leagues/nfl"
@@ -440,7 +439,6 @@ def normalize_position(pos):
 def normalize_ref(
     url: str,
 ) -> str:
-
     url = str(
         url or ""
     ).strip()
@@ -459,7 +457,6 @@ def normalize_ref(
 def fetch_json(
     url: str,
 ) -> dict:
-
     url = normalize_ref(
         url
     )
@@ -488,7 +485,6 @@ def get_font(
     size,
     bold=False,
 ):
-
     paths = [
         (
             "/System/Library/Fonts/Supplemental/Arial Bold.ttf"
@@ -511,13 +507,11 @@ def get_font(
     ]
 
     for path in paths:
-
         try:
             return ImageFont.truetype(
                 path,
                 size,
             )
-
         except Exception:
             pass
 
@@ -527,7 +521,6 @@ def get_font(
 def hex_to_rgb(
     hex_color,
 ):
-
     hex_color = (
         hex_color
         .lstrip("#")
@@ -553,7 +546,6 @@ def blend(
     c2,
     t,
 ):
-
     return tuple(
         int(
             c1[i]
@@ -571,7 +563,6 @@ def make_gradient_background(
     top_hex,
     bottom_hex,
 ):
-
     top = hex_to_rgb(
         top_hex
     )
@@ -593,7 +584,6 @@ def make_gradient_background(
     for y in range(
         height
     ):
-
         t = (
             y
             / max(
@@ -627,7 +617,6 @@ def center_text(
     canvas_width,
     y,
 ):
-
     bbox = draw.textbbox(
         (
             0,
@@ -667,7 +656,6 @@ def fit_text(
     font,
     max_width,
 ):
-
     text = str(
         text
     )
@@ -703,7 +691,6 @@ def wrap_text(
     font,
     max_width,
 ):
-
     words = str(
         text
     ).split()
@@ -712,11 +699,9 @@ def wrap_text(
         return [""]
 
     lines = []
-
     current = words[0]
 
     for word in words[1:]:
-
         trial = (
             current
             + " "
@@ -757,7 +742,6 @@ def draw_star(
     radius,
     fill,
 ):
-
     points = [
         (cx, cy - radius),
         (cx + radius // 4, cy - radius // 4),
@@ -783,7 +767,6 @@ def draw_paw(
     cy,
     fill,
 ):
-
     draw.ellipse(
         (
             cx - 14,
@@ -818,7 +801,6 @@ def draw_football(
     fill,
     accent,
 ):
-
     draw.ellipse(
         (
             cx - 34,
@@ -864,7 +846,6 @@ def draw_feather(
     fill,
     accent,
 ):
-
     draw.polygon(
         [
             (cx - 27, cy + 26),
@@ -894,7 +875,6 @@ def draw_claws(
     cy,
     fill,
 ):
-
     for offset in (
         -19,
         0,
@@ -930,7 +910,6 @@ def draw_stripes(
     fill,
     accent,
 ):
-
     draw.rectangle(
         (
             cx - 31,
@@ -976,7 +955,6 @@ def draw_mountain(
     fill,
     accent,
 ):
-
     draw.polygon(
         [
             (cx - 36, cy + 27),
@@ -1004,7 +982,6 @@ def draw_texas(
     fill,
     accent,
 ):
-
     draw.polygon(
         [
             (cx - 28, cy - 30),
@@ -1036,7 +1013,6 @@ def draw_arc(
     fill,
     accent,
 ):
-
     draw.arc(
         (
             cx - 31,
@@ -1071,7 +1047,6 @@ def draw_pennant(
     fill,
     accent,
 ):
-
     draw.rectangle(
         (
             cx - 30,
@@ -1098,7 +1073,6 @@ def draw_lightning(
     cy,
     fill,
 ):
-
     draw.polygon(
         [
             (cx + 5, cy - 34),
@@ -1119,7 +1093,6 @@ def draw_wave(
     fill,
     accent,
 ):
-
     draw.polygon(
         [
             (cx - 34, cy + 18),
@@ -1153,7 +1126,6 @@ def draw_spiral(
     cy,
     fill,
 ):
-
     draw.arc(
         (
             cx - 28,
@@ -1188,7 +1160,6 @@ def draw_ship(
     fill,
     accent,
 ):
-
     draw.polygon(
         [
             (cx - 34, cy + 17),
@@ -1235,7 +1206,6 @@ def draw_hat(
     fill,
     accent,
 ):
-
     draw.polygon(
         [
             (cx - 33, cy + 16),
@@ -1265,7 +1235,6 @@ def draw_trumpet(
     cy,
     fill,
 ):
-
     draw.rectangle(
         (
             cx - 23,
@@ -1307,7 +1276,6 @@ def draw_skyline(
     fill,
     accent,
 ):
-
     buildings = [
         (-31, 11, -22, 29),
         (-20, -3, -8, 29),
@@ -1322,7 +1290,6 @@ def draw_skyline(
         x2,
         y2,
     ) in buildings:
-
         draw.rectangle(
             (
                 cx + x1,
@@ -1351,7 +1318,6 @@ def draw_jet(
     cy,
     fill,
 ):
-
     draw.polygon(
         [
             (cx - 35, cy + 6),
@@ -1374,7 +1340,6 @@ def draw_diamonds(
     cx,
     cy,
 ):
-
     data = [
         (
             cx,
@@ -1398,7 +1363,6 @@ def draw_diamonds(
         y,
         color,
     ) in data:
-
         draw.polygon(
             [
                 (x, y - 9),
@@ -1417,7 +1381,6 @@ def draw_bridge(
     fill,
     accent,
 ):
-
     draw.rectangle(
         (
             cx - 26,
@@ -1470,7 +1433,6 @@ def draw_flag(
     fill,
     accent,
 ):
-
     draw.rectangle(
         (
             cx - 28,
@@ -1499,7 +1461,6 @@ def draw_sword(
     fill,
     accent,
 ):
-
     draw.polygon(
         [
             (cx - 4, cy - 33),
@@ -1547,7 +1508,6 @@ def draw_column(
     fill,
     accent,
 ):
-
     draw.rectangle(
         (
             cx - 27,
@@ -1574,7 +1534,6 @@ def draw_column(
         6,
         19,
     ):
-
         draw.rectangle(
             (
                 cx + x - 3,
@@ -1598,10 +1557,7 @@ def draw_team_symbol(
     primary,
     secondary,
 ):
-
     if abbreviation == "ARI":
-
-        # Desert cactus
         draw.rectangle(
             (
                 cx - 5,
@@ -1657,7 +1613,6 @@ def draw_team_symbol(
         "BAL",
         "PHI",
     }:
-
         draw_feather(
             draw,
             cx,
@@ -1667,8 +1622,6 @@ def draw_team_symbol(
         )
 
     elif abbreviation == "BUF":
-
-        # Generic hoof marks
         draw.ellipse(
             (
                 cx - 26,
@@ -1700,7 +1653,6 @@ def draw_team_symbol(
         )
 
     elif abbreviation == "CAR":
-
         draw_claws(
             draw,
             cx,
@@ -1713,7 +1665,6 @@ def draw_team_symbol(
         "DET",
         "JAX",
     }:
-
         draw_paw(
             draw,
             cx,
@@ -1722,7 +1673,6 @@ def draw_team_symbol(
         )
 
     elif abbreviation == "CIN":
-
         draw_stripes(
             draw,
             cx,
@@ -1735,9 +1685,6 @@ def draw_team_symbol(
         "CLE",
         "GB",
     }:
-
-        # CLE is intentionally a generic football,
-        # not a helmet.
         draw_football(
             draw,
             cx,
@@ -1747,7 +1694,6 @@ def draw_team_symbol(
         )
 
     elif abbreviation == "DAL":
-
         draw_star(
             draw,
             cx,
@@ -1757,7 +1703,6 @@ def draw_team_symbol(
         )
 
     elif abbreviation == "DEN":
-
         draw_mountain(
             draw,
             cx,
@@ -1767,7 +1712,6 @@ def draw_team_symbol(
         )
 
     elif abbreviation == "HOU":
-
         draw_texas(
             draw,
             cx,
@@ -1777,8 +1721,6 @@ def draw_team_symbol(
         )
 
     elif abbreviation == "IND":
-
-        # Original speed/racing arc.
         draw_arc(
             draw,
             cx,
@@ -1788,7 +1730,6 @@ def draw_team_symbol(
         )
 
     elif abbreviation == "KC":
-
         draw_pennant(
             draw,
             cx,
@@ -1798,7 +1739,6 @@ def draw_team_symbol(
         )
 
     elif abbreviation == "LV":
-
         draw_hat(
             draw,
             cx,
@@ -1808,7 +1748,6 @@ def draw_team_symbol(
         )
 
     elif abbreviation == "LAC":
-
         draw_lightning(
             draw,
             cx,
@@ -1817,7 +1756,6 @@ def draw_team_symbol(
         )
 
     elif abbreviation == "LAR":
-
         draw_spiral(
             draw,
             cx,
@@ -1826,7 +1764,6 @@ def draw_team_symbol(
         )
 
     elif abbreviation == "MIA":
-
         draw_wave(
             draw,
             cx,
@@ -1836,7 +1773,6 @@ def draw_team_symbol(
         )
 
     elif abbreviation == "MIN":
-
         draw_ship(
             draw,
             cx,
@@ -1846,7 +1782,6 @@ def draw_team_symbol(
         )
 
     elif abbreviation == "NE":
-
         draw_hat(
             draw,
             cx,
@@ -1856,8 +1791,6 @@ def draw_team_symbol(
         )
 
     elif abbreviation == "NO":
-
-        # Generic trumpet.
         draw_trumpet(
             draw,
             cx,
@@ -1866,7 +1799,6 @@ def draw_team_symbol(
         )
 
     elif abbreviation == "NYG":
-
         draw_skyline(
             draw,
             cx,
@@ -1876,7 +1808,6 @@ def draw_team_symbol(
         )
 
     elif abbreviation == "NYJ":
-
         draw_jet(
             draw,
             cx,
@@ -1885,7 +1816,6 @@ def draw_team_symbol(
         )
 
     elif abbreviation == "PIT":
-
         draw_diamonds(
             draw,
             cx,
@@ -1893,7 +1823,6 @@ def draw_team_symbol(
         )
 
     elif abbreviation == "SF":
-
         draw_bridge(
             draw,
             cx,
@@ -1903,7 +1832,6 @@ def draw_team_symbol(
         )
 
     elif abbreviation == "SEA":
-
         draw_wave(
             draw,
             cx,
@@ -1913,7 +1841,6 @@ def draw_team_symbol(
         )
 
     elif abbreviation == "TB":
-
         draw_flag(
             draw,
             cx,
@@ -1923,7 +1850,6 @@ def draw_team_symbol(
         )
 
     elif abbreviation == "TEN":
-
         draw_sword(
             draw,
             cx,
@@ -1933,7 +1859,6 @@ def draw_team_symbol(
         )
 
     elif abbreviation == "WSH":
-
         draw_column(
             draw,
             cx,
@@ -1943,7 +1868,6 @@ def draw_team_symbol(
         )
 
     else:
-
         draw_football(
             draw,
             cx,
@@ -1954,16 +1878,17 @@ def draw_team_symbol(
 
 
 # ============================================================
-# CREATE ORIGINAL PIXEL TEAM ICON
+# CREATE TEAM ICON
 #
-# Abbreviation is built into the icon.
+# The symbol + abbreviation now sit inside a white rounded card.
+# This prevents team-colored artwork from disappearing into
+# the team-colored roster poster background.
 # ============================================================
 
 def create_team_icon(
     team_code,
-    size=155,
+    size=145,
 ):
-
     team_code = (
         str(
             team_code
@@ -1982,7 +1907,6 @@ def create_team_icon(
     )
 
     if not team:
-
         return Image.new(
             "RGBA",
             (
@@ -2009,8 +1933,10 @@ def create_team_icon(
         ]
     )
 
-    base_width = 112
-    base_height = 130
+    # The full 132x150 base is the complete logo badge,
+    # including the white space.
+    base_width = 132
+    base_height = 150
 
     icon = Image.new(
         "RGBA",
@@ -2030,17 +1956,67 @@ def create_team_icon(
         icon
     )
 
+    # --------------------------------------------------------
+    # WHITE ROUNDED BACKGROUND
+    # --------------------------------------------------------
+
+    draw.rounded_rectangle(
+        (
+            5,
+            5,
+            base_width - 5,
+            base_height - 5,
+        ),
+        radius=18,
+        fill=(
+            255,
+            255,
+            255,
+            250,
+        ),
+        outline=(
+            215,
+            218,
+            224,
+            255,
+        ),
+        width=2,
+    )
+
+    # Subtle second edge so the white card stays defined
+    # even on very light parts of a poster.
+    draw.rounded_rectangle(
+        (
+            10,
+            10,
+            base_width - 10,
+            base_height - 10,
+        ),
+        radius=14,
+        outline=(
+            238,
+            240,
+            244,
+            255,
+        ),
+        width=2,
+    )
+
+    # --------------------------------------------------------
+    # TEAM SYMBOL
+    # --------------------------------------------------------
+
     draw_team_symbol(
         draw,
         abbreviation,
         base_width // 2,
-        50,
+        52,
         primary,
         secondary,
     )
 
     # --------------------------------------------------------
-    # ABBREVIATION UNDER SYMBOL
+    # ABBREVIATION
     # --------------------------------------------------------
 
     abbreviation_font = get_font(
@@ -2062,33 +2038,22 @@ def create_team_icon(
         - bbox[0]
     )
 
+    # Dark abbreviation badge contrasts against the white card.
     draw.rounded_rectangle(
         (
-            17,
-            101,
-            base_width - 17,
-            127,
+            27,
+            108,
+            base_width - 27,
+            136,
         ),
-        radius=4,
+        radius=6,
         fill=(
-            8,
-            12,
-            20,
-            225,
+            15,
+            18,
+            25,
+            255,
         ),
     )
-
-    text_fill = primary
-
-    if sum(
-        primary
-    ) < 120:
-
-        text_fill = (
-            225,
-            225,
-            225,
-        )
 
     draw.text(
         (
@@ -2097,13 +2062,20 @@ def create_team_icon(
                 - text_width
             )
             // 2,
-            103,
+            110,
         ),
         abbreviation,
         font=abbreviation_font,
-        fill=text_fill,
+        fill=(
+            255,
+            255,
+            255,
+            255,
+        ),
     )
 
+    # Resize the WHOLE badge so the white padding is counted
+    # inside the existing 145px logo footprint.
     ratio = (
         size
         / base_height
@@ -2136,7 +2108,6 @@ def paste_logo_centered(
     max_width=155,
     max_height=155,
 ):
-
     logo = logo.copy()
 
     logo.thumbnail(
@@ -2170,7 +2141,6 @@ def paste_logo_centered(
 def fetch_roster_json(
     team_code,
 ):
-
     team_id = (
         TEAM_INFO[
             team_code
@@ -2179,7 +2149,6 @@ def fetch_roster_json(
         ]
     )
 
-    # Internal ESPN API path.
     url = (
         "https://site.web.api.espn.com/"
         "apis/common/v3/"
@@ -2200,7 +2169,6 @@ def fetch_depthchart_json(
     team_code,
     year=DEFAULT_YEAR,
 ):
-
     team_id = (
         TEAM_INFO[
             team_code
@@ -2229,7 +2197,6 @@ def fetch_depthchart_json(
 def resolve_ref_object(
     obj: Any,
 ) -> Any:
-
     if not isinstance(
         obj,
         dict,
@@ -2276,7 +2243,6 @@ def resolve_ref_object(
 def get_depthchart_groups(
     data: Any,
 ) -> List[dict]:
-
     groups: List[
         dict
     ] = []
@@ -2298,14 +2264,11 @@ def get_depthchart_groups(
         old_depthchart,
         list,
     ):
-
         for item in old_depthchart:
-
             if isinstance(
                 item,
                 dict,
             ):
-
                 groups.append(
                     resolve_ref_object(
                         item
@@ -2323,9 +2286,7 @@ def get_depthchart_groups(
         items,
         list,
     ):
-
         for item in items:
-
             if not isinstance(
                 item,
                 dict,
@@ -2359,7 +2320,6 @@ def get_depthchart_groups(
             ),
         )
     ):
-
         groups.append(
             data
         )
@@ -2374,7 +2334,6 @@ def get_depthchart_groups(
 def parse_player(
     raw,
 ):
-
     name = clean_text(
         raw.get(
             "displayName"
@@ -2402,7 +2361,6 @@ def parse_player(
         pos_obj,
         dict,
     ):
-
         pos = clean_text(
             pos_obj.get(
                 "abbreviation"
@@ -2414,7 +2372,6 @@ def parse_player(
         )
 
     else:
-
         pos = clean_text(
             pos_obj
         )
@@ -2458,7 +2415,6 @@ def parse_player(
         experience,
         dict,
     ):
-
         exp = clean_text(
             experience.get(
                 "years"
@@ -2467,7 +2423,6 @@ def parse_player(
         )
 
     else:
-
         exp = clean_text(
             experience
             or ""
@@ -2485,7 +2440,6 @@ def parse_player(
         college_obj,
         dict,
     ):
-
         college = clean_text(
             college_obj.get(
                 "name"
@@ -2497,7 +2451,6 @@ def parse_player(
         )
 
     else:
-
         college = clean_text(
             college_obj
             or ""
@@ -2534,7 +2487,6 @@ def parse_player(
 def parse_team_roster(
     team_code,
 ):
-
     data = fetch_roster_json(
         team_code
     )
@@ -2553,7 +2505,6 @@ def parse_team_roster(
     )
 
     for group in groups:
-
         group_type = clean_text(
             group.get(
                 "type",
@@ -2607,7 +2558,6 @@ def parse_team_roster(
             continue
 
         for raw in items:
-
             player = parse_player(
                 raw
             )
@@ -2620,7 +2570,6 @@ def parse_team_roster(
                     "pos"
                 ]
             ):
-
                 sections[
                     section_key
                 ].append(
@@ -2668,7 +2617,6 @@ def parse_team_roster(
 def depth_position_from_position_data(
     position_data,
 ):
-
     position_obj = (
         position_data.get(
             "position",
@@ -2681,7 +2629,6 @@ def depth_position_from_position_data(
         position_obj,
         dict,
     ):
-
         position_obj = (
             resolve_ref_object(
                 position_obj
@@ -2694,7 +2641,6 @@ def depth_position_from_position_data(
         position_obj,
         dict,
     ):
-
         parent_obj = (
             position_obj.get(
                 "parent",
@@ -2707,7 +2653,6 @@ def depth_position_from_position_data(
             parent_obj,
             dict,
         ):
-
             parent_obj = (
                 resolve_ref_object(
                     parent_obj
@@ -2721,7 +2666,6 @@ def depth_position_from_position_data(
         position_obj,
         dict,
     ):
-
         own_abbr = clean_text(
             position_obj.get(
                 "abbreviation",
@@ -2737,7 +2681,6 @@ def depth_position_from_position_data(
         parent_obj,
         dict,
     ):
-
         parent_abbr = clean_text(
             parent_obj.get(
                 "abbreviation",
@@ -2750,7 +2693,6 @@ def depth_position_from_position_data(
         )
 
     if own_abbr:
-
         normalized_own = (
             normalize_position(
                 own_abbr
@@ -2765,7 +2707,6 @@ def depth_position_from_position_data(
             return normalized_own
 
     if parent_abbr:
-
         normalized_parent = (
             normalize_position(
                 parent_abbr
@@ -2788,7 +2729,6 @@ def depth_position_from_position_data(
 def resolve_depth_athlete(
     athlete: dict,
 ) -> dict:
-
     if not isinstance(
         athlete,
         dict,
@@ -2818,7 +2758,6 @@ def resolve_depth_athlete(
         nested,
         dict,
     ):
-
         nested_resolved = (
             resolve_ref_object(
                 nested
@@ -2829,7 +2768,6 @@ def resolve_depth_athlete(
             nested_resolved,
             dict,
         ):
-
             merged = dict(
                 athlete
             )
@@ -2858,7 +2796,6 @@ def resolve_depth_athlete(
 def iter_positions(
     group: dict,
 ):
-
     positions = (
         group.get(
             "positions"
@@ -2870,17 +2807,14 @@ def iter_positions(
         positions,
         dict,
     ):
-
         for (
             position_key,
             position_data,
         ) in positions.items():
-
             if isinstance(
                 position_data,
                 dict,
             ):
-
                 yield (
                     position_key,
                     resolve_ref_object(
@@ -2892,14 +2826,12 @@ def iter_positions(
         positions,
         list,
     ):
-
         for (
             index,
             position_data,
         ) in enumerate(
             positions
         ):
-
             if not isinstance(
                 position_data,
                 dict,
@@ -2940,7 +2872,6 @@ def iter_positions(
 def classify_depth_group(
     group: dict,
 ) -> str:
-
     group_name = clean_text(
         group.get(
             "name"
@@ -2979,7 +2910,6 @@ def parse_depthchart_order(
     team_code,
     year=DEFAULT_YEAR,
 ):
-
     data = fetch_depthchart_json(
         team_code,
         year=year,
@@ -3009,7 +2939,6 @@ def parse_depthchart_order(
     }
 
     for group in groups:
-
         if not isinstance(
             group,
             dict,
@@ -3028,7 +2957,6 @@ def parse_depthchart_order(
         ) in iter_positions(
             group
         ):
-
             if not isinstance(
                 position_data,
                 dict,
@@ -3064,7 +2992,6 @@ def parse_depthchart_order(
                 athletes,
                 start=1,
             ):
-
                 if not isinstance(
                     athlete,
                     dict,
@@ -3181,7 +3108,6 @@ def order_section_by_depthchart(
     roster_players,
     depth_players,
 ):
-
     roster_by_name = {
         player[
             "name_key"
@@ -3194,7 +3120,6 @@ def order_section_by_depthchart(
     used = set()
 
     for depth_player in depth_players:
-
         key = (
             depth_player[
                 "name_key"
@@ -3202,7 +3127,6 @@ def order_section_by_depthchart(
         )
 
         if key in roster_by_name:
-
             player = (
                 roster_by_name[
                     key
@@ -3245,7 +3169,6 @@ def order_section_by_depthchart(
             )
 
     for player in roster_players:
-
         if (
             player[
                 "name_key"
@@ -3263,7 +3186,6 @@ def select_players_by_requirements(
     players,
     requirements,
 ):
-
     selected = []
     used_indices = set()
 
@@ -3271,7 +3193,6 @@ def select_players_by_requirements(
         wanted_pos,
         wanted_count,
     ) in requirements:
-
         count = 0
 
         for (
@@ -3280,7 +3201,6 @@ def select_players_by_requirements(
         ) in enumerate(
             players
         ):
-
             if idx in used_indices:
                 continue
 
@@ -3290,7 +3210,6 @@ def select_players_by_requirements(
                 )
                 == wanted_pos
             ):
-
                 selected.append(
                     player
                 )
@@ -3313,12 +3232,10 @@ def select_players_by_requirements(
 def apply_numbered_position_labels(
     players,
 ):
-
     counts = {}
     labeled = []
 
     for player in players:
-
         player = (
             player.copy()
         )
@@ -3367,9 +3284,7 @@ def build_display_players(
     unit_key,
     players,
 ):
-
     if unit_key == "offense":
-
         selected = (
             select_players_by_requirements(
                 players,
@@ -3380,7 +3295,6 @@ def build_display_players(
         if len(
             selected
         ) >= 14:
-
             return (
                 apply_numbered_position_labels(
                     selected
@@ -3394,7 +3308,6 @@ def build_display_players(
         )
 
     if unit_key == "defense":
-
         selected = (
             select_players_by_requirements(
                 players,
@@ -3405,7 +3318,6 @@ def build_display_players(
         if len(
             selected
         ) >= 14:
-
             return (
                 apply_numbered_position_labels(
                     selected
@@ -3439,11 +3351,9 @@ def draw_players_block(
     fonts,
     colors,
 ):
-
     y = start_y
 
     for player in players:
-
         pos = (
             player.get(
                 "poster_pos_label"
@@ -3511,7 +3421,6 @@ def draw_players_block(
         if player[
             "age"
         ]:
-
             meta_parts.append(
                 f"Age "
                 f"{player['age']}"
@@ -3520,7 +3429,6 @@ def draw_players_block(
         if player[
             "height"
         ]:
-
             meta_parts.append(
                 player[
                     "height"
@@ -3530,7 +3438,6 @@ def draw_players_block(
         if player[
             "weight"
         ]:
-
             meta_parts.append(
                 f"{player['weight']} lbs"
             )
@@ -3538,7 +3445,6 @@ def draw_players_block(
         if player[
             "exp"
         ]:
-
             meta_parts.append(
                 f"Exp "
                 f"{player['exp']}"
@@ -3547,7 +3453,6 @@ def draw_players_block(
         if player[
             "college"
         ]:
-
             meta_parts.append(
                 player[
                     "college"
@@ -3579,7 +3484,6 @@ def draw_players_block(
         for line in meta_lines[
             :2
         ]:
-
             draw.text(
                 (
                     name_x,
@@ -3629,7 +3533,6 @@ def create_single_poster(
     players,
     output_dir,
 ):
-
     team = (
         TEAM_INFO[
             team_code
@@ -3637,7 +3540,6 @@ def create_single_poster(
     )
 
     if unit_key == "offense":
-
         unit_title = "OFFENSE"
 
         section_label = (
@@ -3645,7 +3547,6 @@ def create_single_poster(
         )
 
     elif unit_key == "defense":
-
         unit_title = "DEFENSE"
 
         section_label = (
@@ -3653,7 +3554,6 @@ def create_single_poster(
         )
 
     else:
-
         unit_title = (
             "SPECIAL TEAMS"
         )
@@ -3733,7 +3633,10 @@ def create_single_poster(
     }
 
     # --------------------------------------------------------
-    # ORIGINAL PIXEL TEAM ICON
+    # CUSTOM TEAM ICON WITH WHITE BACKGROUND
+    #
+    # 145px is the entire white badge height, so the header
+    # stays almost exactly the same size as before.
     # --------------------------------------------------------
 
     logo = create_team_icon(
@@ -3750,7 +3653,7 @@ def create_single_poster(
         max_height=145,
     )
 
-    # The abbreviation is already built into the icon.
+    # Team abbreviation is already inside the logo card.
 
     center_text(
         draw,
@@ -3926,11 +3829,9 @@ def create_single_poster(
 # ============================================================
 
 def get_team_code_from_args():
-
     if len(
         sys.argv
     ) < 2:
-
         print(
             "Usage: python3 "
             "rosters_depthchart_labels.py "
@@ -3971,7 +3872,6 @@ def get_team_code_from_args():
         team_code
         not in TEAM_INFO
     ):
-
         print(
             f"Invalid team code: "
             f"{team_code}"
@@ -3998,7 +3898,6 @@ def get_team_code_from_args():
     if len(
         sys.argv
     ) >= 3:
-
         try:
             year = int(
                 sys.argv[2]
@@ -4024,7 +3923,6 @@ def get_team_code_from_args():
 # ============================================================
 
 def main():
-
     (
         team_code,
         year,
@@ -4069,7 +3967,6 @@ def main():
     )
 
     try:
-
         depth_sections = (
             parse_depthchart_order(
                 team_code,
@@ -4078,7 +3975,6 @@ def main():
         )
 
     except Exception as exc:
-
         print(
             "WARNING: Core depth "
             f"chart failed: {exc}"
@@ -4093,7 +3989,6 @@ def main():
     if any(
         depth_sections.values()
     ):
-
         sections[
             "offense"
         ] = (
@@ -4139,7 +4034,6 @@ def main():
         )
 
     else:
-
         print(
             "WARNING: No Core "
             "depth-chart order found."
