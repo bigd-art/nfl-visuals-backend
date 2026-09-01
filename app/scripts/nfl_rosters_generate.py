@@ -3,6 +3,7 @@
 import os
 import re
 import sys
+import time
 from typing import Any, Dict, List
 
 import requests
@@ -36,6 +37,11 @@ HEADERS = {
     "Accept": "application/json,text/plain,*/*",
     "Accept-Language": "en-US,en;q=0.9",
 }
+
+HTTP_MAX_ATTEMPTS = 4
+HTTP_TIMEOUT = 30
+
+REF_CACHE: Dict[str, dict] = {}
 
 
 # ============================================================
@@ -293,6 +299,33 @@ DEFENSE_REQUIREMENTS = [
 ]
 
 
+OFFENSE_POSITIONS = {
+    "QB",
+    "RB",
+    "WR",
+    "TE",
+    "G",
+    "T",
+    "C",
+}
+
+DEFENSE_POSITIONS = {
+    "DE",
+    "DT",
+    "LB",
+    "CB",
+    "S",
+}
+
+SPECIAL_TEAMS_POSITIONS = {
+    "K",
+    "P",
+    "LS",
+    "PR",
+    "KR",
+}
+
+
 # ============================================================
 # TEXT HELPERS
 # ============================================================
@@ -436,9 +469,7 @@ def normalize_position(pos):
 # HTTP
 # ============================================================
 
-def normalize_ref(
-    url: str,
-) -> str:
+def normalize_ref(url: str) -> str:
     url = str(
         url or ""
     ).strip()
@@ -456,25 +487,116 @@ def normalize_ref(
 
 def fetch_json(
     url: str,
+    use_cache: bool = True,
 ) -> dict:
     url = normalize_ref(
         url
     )
 
-    response = requests.get(
-        url,
-        headers=HEADERS,
-        timeout=30,
+    if (
+        use_cache
+        and url in REF_CACHE
+    ):
+        return REF_CACHE[
+            url
+        ]
+
+    last_exception = None
+
+    for attempt in range(
+        1,
+        HTTP_MAX_ATTEMPTS + 1,
+    ):
+        try:
+            response = requests.get(
+                url,
+                headers=HEADERS,
+                timeout=HTTP_TIMEOUT,
+            )
+
+            print(
+                f"HTTP {response.status_code}: "
+                f"{response.url}"
+            )
+
+            if (
+                response.status_code
+                in {
+                    429,
+                    500,
+                    502,
+                    503,
+                    504,
+                }
+                and attempt
+                < HTTP_MAX_ATTEMPTS
+            ):
+                wait_seconds = (
+                    attempt * 2
+                )
+
+                print(
+                    f"Temporary HTTP "
+                    f"{response.status_code}. "
+                    f"Retrying in "
+                    f"{wait_seconds}s..."
+                )
+
+                time.sleep(
+                    wait_seconds
+                )
+
+                continue
+
+            response.raise_for_status()
+
+            data = response.json()
+
+            if use_cache:
+                REF_CACHE[
+                    url
+                ] = data
+
+            return data
+
+        except (
+            requests.RequestException,
+            ValueError,
+        ) as exc:
+            last_exception = exc
+
+            if (
+                attempt
+                >= HTTP_MAX_ATTEMPTS
+            ):
+                break
+
+            wait_seconds = (
+                attempt * 2
+            )
+
+            print(
+                f"Request failed "
+                f"(attempt {attempt}/"
+                f"{HTTP_MAX_ATTEMPTS}): "
+                f"{exc}"
+            )
+
+            print(
+                f"Retrying in "
+                f"{wait_seconds}s..."
+            )
+
+            time.sleep(
+                wait_seconds
+            )
+
+    raise RuntimeError(
+        f"Unable to fetch JSON after "
+        f"{HTTP_MAX_ATTEMPTS} attempts: "
+        f"{url}. "
+        f"Last error: {last_exception}"
     )
-
-    print(
-        f"HTTP {response.status_code}: "
-        f"{response.url}"
-    )
-
-    response.raise_for_status()
-
-    return response.json()
 
 
 # ============================================================
@@ -1879,10 +2001,6 @@ def draw_team_symbol(
 
 # ============================================================
 # CREATE TEAM ICON
-#
-# The symbol + abbreviation now sit inside a white rounded card.
-# This prevents team-colored artwork from disappearing into
-# the team-colored roster poster background.
 # ============================================================
 
 def create_team_icon(
@@ -1933,8 +2051,6 @@ def create_team_icon(
         ]
     )
 
-    # The full 132x150 base is the complete logo badge,
-    # including the white space.
     base_width = 132
     base_height = 150
 
@@ -1955,10 +2071,6 @@ def create_team_icon(
     draw = ImageDraw.Draw(
         icon
     )
-
-    # --------------------------------------------------------
-    # WHITE ROUNDED BACKGROUND
-    # --------------------------------------------------------
 
     draw.rounded_rectangle(
         (
@@ -1983,8 +2095,6 @@ def create_team_icon(
         width=2,
     )
 
-    # Subtle second edge so the white card stays defined
-    # even on very light parts of a poster.
     draw.rounded_rectangle(
         (
             10,
@@ -2002,10 +2112,6 @@ def create_team_icon(
         width=2,
     )
 
-    # --------------------------------------------------------
-    # TEAM SYMBOL
-    # --------------------------------------------------------
-
     draw_team_symbol(
         draw,
         abbreviation,
@@ -2014,10 +2120,6 @@ def create_team_icon(
         primary,
         secondary,
     )
-
-    # --------------------------------------------------------
-    # ABBREVIATION
-    # --------------------------------------------------------
 
     abbreviation_font = get_font(
         20,
@@ -2038,7 +2140,6 @@ def create_team_icon(
         - bbox[0]
     )
 
-    # Dark abbreviation badge contrasts against the white card.
     draw.rounded_rectangle(
         (
             27,
@@ -2074,8 +2175,6 @@ def create_team_icon(
         ),
     )
 
-    # Resize the WHOLE badge so the white padding is counted
-    # inside the existing 145px logo footprint.
     ratio = (
         size
         / base_height
@@ -2135,12 +2234,30 @@ def paste_logo_centered(
 
 
 # ============================================================
-# ROSTER API
+# NEW CORE ROSTER API
 # ============================================================
 
 def fetch_roster_json(
     team_code,
+    year=DEFAULT_YEAR,
 ):
+    """
+    Fetch all athlete records belonging to a team for a
+    specific season.
+
+    Step 1:
+        /seasons/{year}/teams/{team_id}/athletes?limit=200
+
+    Step 2:
+        Follow each athlete $ref to obtain full player data.
+
+    Returns:
+        {
+            "count": ...,
+            "items": [full athlete dicts]
+        }
+    """
+
     team_id = (
         TEAM_INFO[
             team_code
@@ -2149,16 +2266,112 @@ def fetch_roster_json(
         ]
     )
 
-    url = (
-        "https://site.web.api.espn.com/"
-        "apis/common/v3/"
-        "sports/football/nfl/"
-        f"teams/{team_id}/roster"
+    roster_url = (
+        f"{CORE_API_BASE}/"
+        f"seasons/{year}/"
+        f"teams/{team_id}/"
+        "athletes"
+        "?limit=200"
     )
 
-    return fetch_json(
-        url
+    print(
+        "Fetching Core team athlete list: "
+        f"{roster_url}"
     )
+
+    roster_index = fetch_json(
+        roster_url
+    )
+
+    refs = (
+        roster_index.get(
+            "items"
+        )
+        or []
+    )
+
+    print(
+        f"Roster athlete references: "
+        f"{len(refs)}"
+    )
+
+    athletes = []
+
+    for index, item in enumerate(
+        refs,
+        start=1,
+    ):
+        if not isinstance(
+            item,
+            dict,
+        ):
+            continue
+
+        ref = clean_text(
+            item.get(
+                "$ref"
+            )
+        )
+
+        if not ref:
+            continue
+
+        try:
+            athlete = fetch_json(
+                ref
+            )
+
+            if not isinstance(
+                athlete,
+                dict,
+            ):
+                continue
+
+            name = clean_text(
+                athlete.get(
+                    "displayName"
+                )
+                or athlete.get(
+                    "fullName"
+                )
+                or ""
+            )
+
+            print(
+                f"Athlete "
+                f"{index}/{len(refs)}: "
+                f"{name or ref}"
+            )
+
+            athletes.append(
+                athlete
+            )
+
+        except Exception as exc:
+            print(
+                "WARNING: Could not fetch "
+                f"athlete {index}/"
+                f"{len(refs)}: {exc}"
+            )
+
+            # One bad athlete must not kill
+            # the entire team roster.
+            continue
+
+    if not athletes:
+        raise RuntimeError(
+            f"No athlete records were "
+            f"returned for "
+            f"{team_code.upper()} "
+            f"{year}."
+        )
+
+    return {
+        "count": len(
+            athletes
+        ),
+        "items": athletes,
+    }
 
 
 # ============================================================
@@ -2218,6 +2431,7 @@ def resolve_ref_object(
         "positions",
         "athletes",
         "position",
+        "abbreviation",
     }
 
     if any(
@@ -2331,6 +2545,82 @@ def get_depthchart_groups(
 # PLAYER PARSING
 # ============================================================
 
+def resolve_college_name(
+    college_obj,
+):
+    if not college_obj:
+        return ""
+
+    if isinstance(
+        college_obj,
+        str,
+    ):
+        return clean_text(
+            college_obj
+        )
+
+    if not isinstance(
+        college_obj,
+        dict,
+    ):
+        return ""
+
+    college_name = clean_text(
+        college_obj.get(
+            "name"
+        )
+        or college_obj.get(
+            "displayName"
+        )
+        or college_obj.get(
+            "shortName"
+        )
+        or ""
+    )
+
+    if college_name:
+        return college_name
+
+    ref = clean_text(
+        college_obj.get(
+            "$ref"
+        )
+    )
+
+    if not ref:
+        return ""
+
+    try:
+        resolved = fetch_json(
+            ref
+        )
+
+        if isinstance(
+            resolved,
+            dict,
+        ):
+            return clean_text(
+                resolved.get(
+                    "name"
+                )
+                or resolved.get(
+                    "displayName"
+                )
+                or resolved.get(
+                    "shortName"
+                )
+                or ""
+            )
+
+    except Exception as exc:
+        print(
+            "WARNING: Could not resolve "
+            f"college reference: {exc}"
+        )
+
+    return ""
+
+
 def parse_player(
     raw,
 ):
@@ -2361,6 +2651,20 @@ def parse_player(
         pos_obj,
         dict,
     ):
+        if (
+            not pos_obj.get(
+                "abbreviation"
+            )
+            and pos_obj.get(
+                "$ref"
+            )
+        ):
+            pos_obj = (
+                resolve_ref_object(
+                    pos_obj
+                )
+            )
+
         pos = clean_text(
             pos_obj.get(
                 "abbreviation"
@@ -2415,12 +2719,16 @@ def parse_player(
         experience,
         dict,
     ):
-        exp = clean_text(
+        exp_value = (
             experience.get(
                 "years"
             )
-            or ""
         )
+
+        if exp_value is not None:
+            exp = clean_text(
+                exp_value
+            )
 
     else:
         exp = clean_text(
@@ -2428,33 +2736,11 @@ def parse_player(
             or ""
         )
 
-    college = ""
-
-    college_obj = (
+    college = resolve_college_name(
         raw.get(
             "college"
         )
     )
-
-    if isinstance(
-        college_obj,
-        dict,
-    ):
-        college = clean_text(
-            college_obj.get(
-                "name"
-            )
-            or college_obj.get(
-                "shortName"
-            )
-            or ""
-        )
-
-    else:
-        college = clean_text(
-            college_obj
-            or ""
-        )
 
     return {
         "name": name,
@@ -2484,11 +2770,38 @@ def parse_player(
     }
 
 
+def classify_roster_player(
+    player,
+):
+    pos = normalize_position(
+        player.get(
+            "display_pos"
+        )
+        or player.get(
+            "pos"
+        )
+        or ""
+    )
+
+    if pos in OFFENSE_POSITIONS:
+        return "offense"
+
+    if pos in DEFENSE_POSITIONS:
+        return "defense"
+
+    if pos in SPECIAL_TEAMS_POSITIONS:
+        return "special_teams"
+
+    return ""
+
+
 def parse_team_roster(
     team_code,
+    year=DEFAULT_YEAR,
 ):
     data = fetch_roster_json(
-        team_code
+        team_code,
+        year=year,
     )
 
     sections = {
@@ -2497,87 +2810,83 @@ def parse_team_roster(
         "special_teams": [],
     }
 
-    groups = (
+    athletes = (
         data.get(
-            "positionGroups"
+            "items"
         )
         or []
     )
 
-    for group in groups:
-        group_type = clean_text(
-            group.get(
-                "type",
-                "",
-            )
-        ).lower()
+    seen = {
+        "offense": set(),
+        "defense": set(),
+        "special_teams": set(),
+    }
 
-        group_name = clean_text(
-            group.get(
-                "displayName",
-                "",
-            )
-        ).lower()
+    for raw in athletes:
+        if not isinstance(
+            raw,
+            dict,
+        ):
+            continue
 
-        items = (
-            group.get(
-                "athletes"
-            )
-            or []
+        player = parse_player(
+            raw
         )
 
         if (
-            group_type == "offense"
-            or "offense"
-            in group_name
+            not player[
+                "name"
+            ]
+            or not player[
+                "pos"
+            ]
         ):
-            section_key = (
-                "offense"
-            )
-
-        elif (
-            group_type == "defense"
-            or "defense"
-            in group_name
-        ):
-            section_key = (
-                "defense"
-            )
-
-        elif (
-            "special"
-            in group_type
-            or "special"
-            in group_name
-        ):
-            section_key = (
-                "special_teams"
-            )
-
-        else:
             continue
 
-        for raw in items:
-            player = parse_player(
-                raw
+        section_key = (
+            classify_roster_player(
+                player
             )
+        )
 
-            if (
-                player[
-                    "name"
-                ]
-                and player[
-                    "pos"
-                ]
-            ):
-                sections[
-                    section_key
-                ].append(
-                    player
-                )
+        if not section_key:
+            print(
+                "Skipping unclassified "
+                f"position: "
+                f"{player['name']} "
+                f"({player['pos']})"
+            )
+            continue
+
+        name_key = (
+            player[
+                "name_key"
+            ]
+        )
+
+        if (
+            name_key
+            in seen[
+                section_key
+            ]
+        ):
+            continue
+
+        seen[
+            section_key
+        ].add(
+            name_key
+        )
+
+        sections[
+            section_key
+        ].append(
+            player
+        )
 
     print(
-        "Roster API rows:"
+        "Core roster rows:"
     )
 
     print(
@@ -3098,6 +3407,117 @@ def parse_depthchart_order(
     )
 
     return depth_sections
+
+
+# ============================================================
+# SPECIAL TEAMS SUPPORT
+# ============================================================
+
+def add_depthchart_special_team_players(
+    sections,
+    depth_sections,
+):
+    """
+    Core team-athletes classifies players by their normal
+    roster position. A WR who is also a KR, for example,
+    belongs to offense in the athlete data.
+
+    The old roster endpoint could duplicate those players
+    into a Special Teams position group.
+
+    This helper restores that behavior by copying any player
+    appearing on the Special Teams depth chart into the
+    special_teams section.
+    """
+
+    all_players = []
+
+    all_players.extend(
+        sections.get(
+            "offense",
+            [],
+        )
+    )
+
+    all_players.extend(
+        sections.get(
+            "defense",
+            [],
+        )
+    )
+
+    all_players.extend(
+        sections.get(
+            "special_teams",
+            [],
+        )
+    )
+
+    lookup = {
+        player[
+            "name_key"
+        ]: player
+        for player in all_players
+        if player.get(
+            "name_key"
+        )
+    }
+
+    existing = {
+        player[
+            "name_key"
+        ]
+        for player in sections.get(
+            "special_teams",
+            [],
+        )
+        if player.get(
+            "name_key"
+        )
+    }
+
+    for depth_player in depth_sections.get(
+        "special_teams",
+        [],
+    ):
+        key = depth_player.get(
+            "name_key"
+        )
+
+        if (
+            not key
+            or key in existing
+            or key not in lookup
+        ):
+            continue
+
+        player = (
+            lookup[
+                key
+            ].copy()
+        )
+
+        player[
+            "display_pos"
+        ] = depth_player.get(
+            "display_pos",
+            player.get(
+                "display_pos",
+                "",
+            ),
+        )
+
+        sections[
+            "special_teams"
+        ].append(
+            player
+        )
+
+        existing.add(
+            key
+        )
+
+    return sections
 
 
 # ============================================================
@@ -3632,13 +4052,6 @@ def create_single_poster(
         "line": "#CFCFCF",
     }
 
-    # --------------------------------------------------------
-    # CUSTOM TEAM ICON WITH WHITE BACKGROUND
-    #
-    # 145px is the entire white badge height, so the header
-    # stays almost exactly the same size as before.
-    # --------------------------------------------------------
-
     logo = create_team_icon(
         team_code,
         size=145,
@@ -3652,8 +4065,6 @@ def create_single_poster(
         max_width=145,
         max_height=145,
     )
-
-    # Team abbreviation is already inside the logo card.
 
     center_text(
         draw,
@@ -3841,7 +4252,7 @@ def get_team_code_from_args():
         print(
             "Example: python3 "
             "rosters_depthchart_labels.py "
-            "ari 2025"
+            "ari 2026"
         )
 
         print()
@@ -3950,12 +4361,14 @@ def main():
     print()
 
     print(
-        "Fetching roster API..."
+        "Fetching ESPN Core "
+        "team athletes..."
     )
 
     sections = (
         parse_team_roster(
-            team_code
+            team_code,
+            year=year,
         )
     )
 
@@ -3989,6 +4402,13 @@ def main():
     if any(
         depth_sections.values()
     ):
+        sections = (
+            add_depthchart_special_team_players(
+                sections,
+                depth_sections,
+            )
+        )
+
         sections[
             "offense"
         ] = (
@@ -4040,8 +4460,8 @@ def main():
         )
 
         print(
-            "Falling back to roster "
-            "API order."
+            "Falling back to Core "
+            "team-athlete roster order."
         )
 
     output_dir = (
