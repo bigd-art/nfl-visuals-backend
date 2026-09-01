@@ -4,6 +4,7 @@ import argparse
 import os
 import re
 import shutil
+import time
 from typing import Any, Dict, List, Tuple, Optional
 
 import requests
@@ -37,6 +38,11 @@ HEADERS = {
     "Accept": "application/json,text/plain,*/*",
     "Accept-Language": "en-US,en;q=0.9",
 }
+
+HTTP_MAX_ATTEMPTS = 4
+HTTP_TIMEOUT = 30
+
+REF_CACHE: Dict[str, Dict] = {}
 
 
 # ============================================================
@@ -376,21 +382,31 @@ def normalize_ref(
 
 def fetch_json(
     url: str,
+    use_cache: bool = True,
 ) -> Dict:
     url = normalize_ref(
         url
     )
 
+    if (
+        use_cache
+        and url in REF_CACHE
+    ):
+        return REF_CACHE[
+            url
+        ]
+
     last_error = None
 
     for attempt in range(
-        3
+        1,
+        HTTP_MAX_ATTEMPTS + 1,
     ):
         try:
             response = requests.get(
                 url,
                 headers=HEADERS,
-                timeout=30,
+                timeout=HTTP_TIMEOUT,
             )
 
             print(
@@ -401,23 +417,77 @@ def fetch_json(
 
             if (
                 response.status_code
-                != 200
+                in {
+                    429,
+                    500,
+                    502,
+                    503,
+                    504,
+                }
+                and attempt
+                < HTTP_MAX_ATTEMPTS
             ):
-                raise RuntimeError(
-                    "Bad status code: "
-                    f"{response.status_code}"
+                wait_seconds = (
+                    attempt * 2
                 )
 
-            return response.json()
+                print(
+                    f"Temporary HTTP "
+                    f"{response.status_code}. "
+                    f"Retrying in "
+                    f"{wait_seconds}s..."
+                )
 
-        except Exception as exc:
+                time.sleep(
+                    wait_seconds
+                )
+
+                continue
+
+            response.raise_for_status()
+
+            data = (
+                response.json()
+            )
+
+            if use_cache:
+                REF_CACHE[
+                    url
+                ] = data
+
+            return data
+
+        except (
+            requests.RequestException,
+            ValueError,
+        ) as exc:
             last_error = exc
 
+            if (
+                attempt
+                >= HTTP_MAX_ATTEMPTS
+            ):
+                break
+
+            wait_seconds = (
+                attempt * 2
+            )
+
             print(
-                f"Retry "
-                f"{attempt + 1}/3 "
-                f"failed for "
-                f"{url}"
+                f"Request failed "
+                f"(attempt "
+                f"{attempt}/"
+                f"{HTTP_MAX_ATTEMPTS}): "
+                f"{exc}"
+            )
+
+            print(
+                f"Retrying in "
+                f"{wait_seconds}s..."
+            )
+
+            time.sleep(
+                wait_seconds
             )
 
     raise RuntimeError(
@@ -1602,9 +1672,6 @@ def draw_team_symbol(
 
 # ============================================================
 # CREATE ORIGINAL PIXEL TEAM ICON
-#
-# White rounded card added around the symbol and abbreviation.
-# The requested size includes the entire card.
 # ============================================================
 
 def create_team_icon(
@@ -1648,7 +1715,6 @@ def create_team_icon(
         secondary_hex
     )
 
-    # Entire badge canvas, including white padding.
     base_width = 132
     base_height = 150
 
@@ -1669,10 +1735,6 @@ def create_team_icon(
     draw = ImageDraw.Draw(
         icon
     )
-
-    # --------------------------------------------------------
-    # WHITE CARD
-    # --------------------------------------------------------
 
     draw.rounded_rectangle(
         (
@@ -1697,7 +1759,6 @@ def create_team_icon(
         width=2,
     )
 
-    # Subtle inside border.
     draw.rounded_rectangle(
         (
             10,
@@ -1715,10 +1776,6 @@ def create_team_icon(
         width=2,
     )
 
-    # --------------------------------------------------------
-    # SYMBOL
-    # --------------------------------------------------------
-
     draw_team_symbol(
         draw,
         team,
@@ -1727,10 +1784,6 @@ def create_team_icon(
         primary,
         secondary,
     )
-
-    # --------------------------------------------------------
-    # ABBREVIATION BADGE
-    # --------------------------------------------------------
 
     abbreviation_font = load_font(
         20,
@@ -1809,12 +1862,26 @@ def create_team_icon(
 
 
 # ============================================================
-# ROSTER
+# CORE TEAM ATHLETE ROSTER API
 # ============================================================
 
 def fetch_roster_json(
     team: str,
+    year: int = DEFAULT_YEAR,
 ) -> Dict:
+    """
+    Uses the working ESPN Core team-athletes endpoint.
+
+    Example:
+    /seasons/2026/teams/22/athletes?limit=200
+
+    The first request returns athlete $refs.
+    Each athlete $ref is then fetched individually.
+
+    One failed athlete will be skipped instead of killing
+    the entire team request.
+    """
+
     team_id, _, _ = (
         TEAM_META[
             team
@@ -1822,15 +1889,119 @@ def fetch_roster_json(
     )
 
     url = (
-        "https://site.web.api.espn.com/"
-        "apis/common/v3/"
-        "sports/football/nfl/"
-        f"teams/{team_id}/roster"
+        f"{CORE_API_BASE}/"
+        f"seasons/{year}/"
+        f"teams/{team_id}/"
+        "athletes"
+        "?limit=200"
     )
 
-    return fetch_json(
+    print(
+        f"{team}: Fetching Core "
+        f"team athletes: "
+        f"{url}"
+    )
+
+    index_data = fetch_json(
         url
     )
+
+    athlete_refs = (
+        index_data.get(
+            "items"
+        )
+        or []
+    )
+
+    print(
+        f"{team}: Core athlete "
+        f"references="
+        f"{len(athlete_refs)}"
+    )
+
+    athletes: List[
+        Dict
+    ] = []
+
+    for index, item in enumerate(
+        athlete_refs,
+        start=1,
+    ):
+        if not isinstance(
+            item,
+            dict,
+        ):
+            continue
+
+        ref = clean_text(
+            item.get(
+                "$ref"
+            )
+        )
+
+        if not ref:
+            continue
+
+        try:
+            athlete = (
+                fetch_json(
+                    ref
+                )
+            )
+
+            if not isinstance(
+                athlete,
+                dict,
+            ):
+                continue
+
+            name = clean_text(
+                athlete.get(
+                    "displayName"
+                )
+                or athlete.get(
+                    "fullName"
+                )
+                or ""
+            )
+
+            print(
+                f"{team}: Athlete "
+                f"{index}/"
+                f"{len(athlete_refs)}: "
+                f"{name or ref}"
+            )
+
+            athletes.append(
+                athlete
+            )
+
+        except Exception as exc:
+            print(
+                f"WARNING {team}: "
+                f"Could not fetch "
+                f"athlete "
+                f"{index}/"
+                f"{len(athlete_refs)}: "
+                f"{exc}"
+            )
+
+            continue
+
+    if not athletes:
+        raise RuntimeError(
+            f"No Core athlete "
+            f"records returned "
+            f"for {team} "
+            f"season {year}."
+        )
+
+    return {
+        "count": len(
+            athletes
+        ),
+        "items": athletes,
+    }
 
 
 # ============================================================
@@ -1852,6 +2023,12 @@ def fetch_depthchart_json(
         f"seasons/{year}/"
         f"teams/{team_id}/"
         "depthcharts"
+    )
+
+    print(
+        f"{team}: Fetching Core "
+        f"depth chart: "
+        f"{url}"
     )
 
     return fetch_json(
@@ -1883,6 +2060,7 @@ def resolve_ref_object(
         "positions",
         "athletes",
         "position",
+        "abbreviation",
     }
 
     if any(
@@ -2028,6 +2206,20 @@ def parse_player(
         pos_obj,
         dict,
     ):
+        if (
+            not pos_obj.get(
+                "abbreviation"
+            )
+            and pos_obj.get(
+                "$ref"
+            )
+        ):
+            pos_obj = (
+                resolve_ref_object(
+                    pos_obj
+                )
+            )
+
         pos = clean_text(
             pos_obj.get(
                 "abbreviation"
@@ -2064,11 +2256,13 @@ def parse_player(
 
 def parse_roster_players(
     team: str,
+    year: int,
 ) -> List[
     Dict
 ]:
     data = fetch_roster_json(
-        team
+        team,
+        year=year,
     )
 
     players: List[
@@ -2077,54 +2271,57 @@ def parse_roster_players(
 
     seen = set()
 
-    for group in (
+    athletes = (
         data.get(
-            "positionGroups"
+            "items"
         )
         or []
-    ):
-        for raw in (
-            group.get(
-                "athletes"
-            )
-            or []
+    )
+
+    for raw in athletes:
+        if not isinstance(
+            raw,
+            dict,
         ):
-            parsed = (
-                parse_player(
-                    raw
-                )
+            continue
+
+        parsed = (
+            parse_player(
+                raw
             )
+        )
 
-            if not parsed:
-                continue
+        if not parsed:
+            continue
 
-            key = (
-                parsed[
-                    "name_key"
-                ]
-            )
+        key = (
+            parsed[
+                "name_key"
+            ]
+        )
 
-            if key in seen:
-                continue
+        if key in seen:
+            continue
 
-            seen.add(
-                key
-            )
+        seen.add(
+            key
+        )
 
-            players.append(
-                parsed
-            )
+        players.append(
+            parsed
+        )
 
     if not players:
         raise RuntimeError(
             "No roster players "
-            f"parsed for {team}."
+            f"parsed for {team} "
+            f"season {year}."
         )
 
     print(
         f"{team}: parsed "
         f"{len(players)} "
-        f"roster players."
+        f"Core roster players."
     )
 
     return players
@@ -2629,7 +2826,8 @@ def get_players(
 ]:
     roster_players = (
         parse_roster_players(
-            team
+            team,
+            year,
         )
     )
 
@@ -2666,8 +2864,8 @@ def get_players(
         )
 
         print(
-            "Using roster "
-            "API order."
+            "Using Core team-"
+            "athlete order."
         )
 
     except Exception as exc:
@@ -2678,8 +2876,8 @@ def get_players(
         )
 
         print(
-            "Using roster "
-            "API order."
+            "Using Core team-"
+            "athlete order."
         )
 
     return roster_players
@@ -3130,13 +3328,6 @@ def poster(
 
     y = 50
 
-    # --------------------------------------------------------
-    # TEAM ICON WITH WHITE BACKGROUND
-    #
-    # 215px includes the white card itself, so it does not
-    # become significantly larger than the previous icon.
-    # --------------------------------------------------------
-
     logo = create_team_icon(
         team,
         size=215,
@@ -3161,10 +3352,6 @@ def poster(
             + 20
         )
 
-    # --------------------------------------------------------
-    # TEAM NAME
-    # --------------------------------------------------------
-
     y = (
         draw_centered(
             draw,
@@ -3177,10 +3364,6 @@ def poster(
         + 16
     )
 
-    # --------------------------------------------------------
-    # TITLE
-    # --------------------------------------------------------
-
     y = (
         draw_centered(
             draw,
@@ -3192,10 +3375,6 @@ def poster(
         )
         + 34
     )
-
-    # --------------------------------------------------------
-    # MAIN PANEL
-    # --------------------------------------------------------
 
     panel_x1 = 105
     panel_y1 = y
@@ -3442,7 +3621,8 @@ def main():
         default=DEFAULT_YEAR,
         help=(
             "Season year. "
-            "Defaults to 2025."
+            "Defaults to "
+            f"{DEFAULT_YEAR}."
         ),
     )
 
