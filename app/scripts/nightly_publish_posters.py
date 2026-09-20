@@ -24,11 +24,26 @@ from app.scripts.nfl_stat_leaders_generate import (
 STANDINGS_SEASON = 2026
 
 STAT_LEADERS_REGULAR_SEASON = 2026
+
 STAT_LEADERS_POSTSEASON_SEASON = 2025
 
 
-def public_storage_url(storage_key: str) -> str:
-    base = os.environ["SUPABASE_URL"].rstrip("/")
+# ============================================================
+# STORAGE HELPERS
+# ============================================================
+
+def public_storage_url(
+    storage_key: str,
+) -> str:
+
+    base = (
+        os.environ[
+            "SUPABASE_URL"
+        ].rstrip(
+            "/"
+        )
+    )
+
     bucket = os.environ.get(
         "SUPABASE_BUCKET",
         "nfl-posters",
@@ -40,16 +55,35 @@ def public_storage_url(storage_key: str) -> str:
     )
 
 
-def standings_has_data(season: int) -> bool:
-    from app.scripts.nfl_standings_conference_generate import get_json
+# ============================================================
+# STANDINGS DATA CHECK
+# ============================================================
 
-    data = get_json(season)
+def standings_has_data(
+    season: int,
+) -> bool:
 
-    return bool(
-        data.get("AFC")
-        or data.get("NFC")
+    from app.scripts.nfl_standings_conference_generate import (
+        get_json,
     )
 
+    data = get_json(
+        season
+    )
+
+    return bool(
+        data.get(
+            "AFC"
+        )
+        or data.get(
+            "NFC"
+        )
+    )
+
+
+# ============================================================
+# STAT LEADER UPLOAD
+# ============================================================
 
 def upload_stat_leaders(
     tmpdir: str,
@@ -58,9 +92,13 @@ def upload_stat_leaders(
     phase: str,
 ) -> Dict[str, str]:
 
-    posters: Dict[str, str] = {}
+    posters: Dict[
+        str,
+        str,
+    ] = {}
 
     try:
+
         outdir = os.path.join(
             tmpdir,
             f"stat_leaders_{phase}",
@@ -71,22 +109,48 @@ def upload_stat_leaders(
             exist_ok=True,
         )
 
-        outputs = generate_all_stat_leader_posters(
-            season=season,
-            seasontype=seasontype,
-            outdir=outdir,
+        print()
+        print(
+            "=" * 80
         )
 
-        for slug, *_rest in STAT_CONFIG:
+        print(
+            f"GENERATING STAT LEADERS "
+            f"FOR SEASON {season} "
+            f"TYPE {seasontype} "
+            f"({phase.upper()})"
+        )
 
-            local_path = outputs.get(
-                slug
+        print(
+            "=" * 80
+        )
+
+        outputs = (
+            generate_all_stat_leader_posters(
+                season=season,
+                seasontype=seasontype,
+                outdir=outdir,
+            )
+        )
+
+        for (
+            slug,
+            *_rest,
+        ) in STAT_CONFIG:
+
+            local_path = (
+                outputs.get(
+                    slug
+                )
             )
 
             if (
                 not local_path
-                or not os.path.exists(local_path)
+                or not os.path.exists(
+                    local_path
+                )
             ):
+
                 print(
                     f"WARNING: Missing generated "
                     f"stat leader poster for "
@@ -100,7 +164,9 @@ def upload_stat_leaders(
                 f"{phase}/{slug}.png"
             )
 
-            posters[slug] = (
+            posters[
+                slug
+            ] = (
                 upload_file_return_url(
                     local_path,
                     storage_key,
@@ -113,19 +179,56 @@ def upload_stat_leaders(
                 f"-> {storage_key}"
             )
 
-    except Exception as e:
+    except Exception as error:
 
         print(
             f"WARNING: stat leaders "
-            f"{phase} upload failed: {e}"
+            f"{phase} upload failed: "
+            f"{error}"
         )
 
     return posters
 
 
+# ============================================================
+# PUBLISH ALL NIGHTLY POSTERS
+# ============================================================
+
 def publish_posters(
     keep_versioned: bool = False,
 ) -> dict:
+
+    print()
+    print(
+        "=" * 80
+    )
+
+    print(
+        "NIGHTLY POSTER SEASON CONFIG"
+    )
+
+    print(
+        "=" * 80
+    )
+
+    print(
+        f"Standings: "
+        f"{STANDINGS_SEASON}"
+    )
+
+    print(
+        f"Regular stat leaders: "
+        f"{STAT_LEADERS_REGULAR_SEASON}"
+    )
+
+    print(
+        f"Postseason stat leaders: "
+        f"{STAT_LEADERS_POSTSEASON_SEASON}"
+    )
+
+    print(
+        "=" * 80
+    )
 
     with tempfile.TemporaryDirectory() as tmpdir:
 
@@ -140,7 +243,9 @@ def publish_posters(
             },
 
             "seasons": {
-                "standings": STANDINGS_SEASON,
+                "standings": (
+                    STANDINGS_SEASON
+                ),
                 "stat_leaders_regular": (
                     STAT_LEADERS_REGULAR_SEASON
                 ),
@@ -152,7 +257,8 @@ def publish_posters(
 
         # ====================================================
         # STANDINGS
-        # 2026 REGULAR SEASON
+        #
+        # 2026 REGULAR-SEASON STANDINGS
         # ====================================================
 
         standings_png = os.path.join(
@@ -168,50 +274,70 @@ def publish_posters(
             standings_png,
         )
 
-        standings_url = upload_file_return_url(
-            standings_png,
-            "standings/current.png",
+        standings_url = (
+            upload_file_return_url(
+                standings_png,
+                "standings/current.png",
+            )
         )
 
-        payload["standings"] = {
-            "season": STANDINGS_SEASON,
-            "image_url": standings_url,
+        payload[
+            "standings"
+        ] = {
+            "season": (
+                STANDINGS_SEASON
+            ),
+            "image_url": (
+                standings_url
+            ),
         }
 
         # ====================================================
         # STAT LEADERS
+        #
         # 2026 REGULAR SEASON
+        # ESPN SEASON TYPE 2
         # ====================================================
 
         payload[
             "stat_leaders"
         ][
             "regular"
-        ] = upload_stat_leaders(
-            tmpdir=tmpdir,
-            season=STAT_LEADERS_REGULAR_SEASON,
-            seasontype=2,
-            phase="regular",
+        ] = (
+            upload_stat_leaders(
+                tmpdir=tmpdir,
+                season=(
+                    STAT_LEADERS_REGULAR_SEASON
+                ),
+                seasontype=2,
+                phase="regular",
+            )
         )
 
         # ====================================================
         # STAT LEADERS
+        #
         # KEEP 2025 POSTSEASON
+        # ESPN SEASON TYPE 3
         # ====================================================
 
         payload[
             "stat_leaders"
         ][
             "postseason"
-        ] = upload_stat_leaders(
-            tmpdir=tmpdir,
-            season=STAT_LEADERS_POSTSEASON_SEASON,
-            seasontype=3,
-            phase="postseason",
+        ] = (
+            upload_stat_leaders(
+                tmpdir=tmpdir,
+                season=(
+                    STAT_LEADERS_POSTSEASON_SEASON
+                ),
+                seasontype=3,
+                phase="postseason",
+            )
         )
 
         # ====================================================
-        # METADATA
+        # CURRENT METADATA
         # ====================================================
 
         local_json = os.path.join(
@@ -223,36 +349,48 @@ def publish_posters(
             local_json,
             "w",
             encoding="utf-8",
-        ) as f:
+        ) as file:
 
             json.dump(
                 payload,
-                f,
+                file,
                 indent=2,
             )
 
         payload[
             "metadata_url"
-        ] = upload_file_return_url(
-            local_json,
-            "nightly_posters/current.json",
+        ] = (
+            upload_file_return_url(
+                local_json,
+                "nightly_posters/current.json",
+            )
         )
+
+        # ====================================================
+        # VERSIONED METADATA
+        # ====================================================
 
         if keep_versioned:
 
             payload[
                 "versioned_metadata_url"
-            ] = upload_file_return_url(
-                local_json,
-                (
-                    "nightly_posters/history/"
-                    f"{STANDINGS_SEASON}/"
-                    "metadata.json"
-                ),
+            ] = (
+                upload_file_return_url(
+                    local_json,
+                    (
+                        "nightly_posters/history/"
+                        f"{STANDINGS_SEASON}/"
+                        "metadata.json"
+                    ),
+                )
             )
 
         return payload
 
+
+# ============================================================
+# CURRENT PUBLIC PAYLOAD
+# ============================================================
 
 def get_current_posters_payload() -> dict:
 
@@ -271,33 +409,56 @@ def get_current_posters_payload() -> dict:
     }
 
 
+# ============================================================
+# CLI
+# ============================================================
+
 def parse_args():
 
-    parser = argparse.ArgumentParser()
+    parser = (
+        argparse.ArgumentParser()
+    )
 
     parser.add_argument(
         "--keep_versioned",
         action="store_true",
     )
 
-    return parser.parse_args()
+    return (
+        parser.parse_args()
+    )
 
+
+# ============================================================
+# MAIN
+# ============================================================
 
 def main():
 
-    args = parse_args()
+    args = (
+        parse_args()
+    )
 
+    result = (
+        publish_posters(
+            keep_versioned=(
+                args.keep_versioned
+            )
+        )
+    )
+
+    print()
     print(
         json.dumps(
-            publish_posters(
-                keep_versioned=(
-                    args.keep_versioned
-                )
-            ),
+            result,
             indent=2,
         )
     )
 
+
+# ============================================================
+# ENTRY POINT
+# ============================================================
 
 if __name__ == "__main__":
     main()
