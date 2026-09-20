@@ -1,20 +1,44 @@
 #!/usr/bin/env python3
 
+from __future__ import annotations
+
 import argparse
 import os
 import re
+import time
 from collections import defaultdict
+from html.parser import HTMLParser
+from typing import Dict, List, Optional
 
 import requests
 from PIL import Image, ImageDraw, ImageFont
 
 
+# ============================================================
+# CONFIG
+# ============================================================
+
 SEASON_DEFAULT = 2027
-VERSION = 4
+
 TOP_N = 5
+
 OUTPUT_DIR = "big_board_posters"
 
-BOARD_URL = "https://www.pff.com/api/college/big_board"
+DRAFTTEK_PAGE_URL = (
+    "https://www.drafttek.com/"
+    "{season}-NFL-Draft-Big-Board/"
+    "Top-NFL-Draft-Prospects-{season}-Page-{page}.asp"
+)
+
+# DraftTek currently publishes the 2027 board across:
+# Page 1 = 1-150
+# Page 2 = 151-300
+# Page 3 = 301-450
+DRAFTTEK_PAGES = (
+    1,
+    2,
+    3,
+)
 
 USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -22,11 +46,115 @@ USER_AGENT = (
     "Chrome/138.0.0.0 Safari/537.36"
 )
 
-SKIP_POSITIONS = {
-    "FB",
-    "K",
-    "P",
+HEADERS = {
+    "User-Agent": USER_AGENT,
+    "Accept": (
+        "text/html,application/xhtml+xml,"
+        "application/xml;q=0.9,*/*;q=0.8"
+    ),
+    "Accept-Language": "en-US,en;q=0.9",
+    "Cache-Control": "no-cache",
 }
+
+
+# ============================================================
+# TARGET POSTER GROUPS
+#
+# Keep exactly the same position groups the app previously
+# published from the PFF Big Board.
+# ============================================================
+
+TARGET_POSITIONS = (
+    "CB",
+    "DI",
+    "ED",
+    "IOL",
+    "LB",
+    "QB",
+    "RB",
+    "S",
+    "T",
+    "TE",
+    "WR",
+)
+
+
+# ============================================================
+# DRAFTTEK POSITION -> APP POSITION
+#
+# DraftTek uses more granular position labels.
+# Collapse them into the exact same groups our existing
+# Big Board posters used.
+# ============================================================
+
+DRAFTTEK_POSITION_MAP = {
+    # Quarterback
+    "QB": "QB",
+
+    # Running back
+    "RB": "RB",
+    "HB": "RB",
+    "TB": "RB",
+
+    # Wide receiver
+    "WR": "WR",
+    "WRS": "WR",
+    "SWR": "WR",
+
+    # Tight end
+    "TE": "TE",
+
+    # Offensive tackle
+    "OT": "T",
+    "T": "T",
+    "LT": "T",
+    "RT": "T",
+
+    # Interior offensive line
+    "OG": "IOL",
+    "G": "IOL",
+    "LG": "IOL",
+    "RG": "IOL",
+    "OC": "IOL",
+    "C": "IOL",
+    "IOL": "IOL",
+    "OL": "IOL",
+
+    # Edge defender
+    "EDGE": "ED",
+    "DE": "ED",
+    "ED": "ED",
+
+    # Interior defensive line
+    "DL1T": "DI",
+    "DL3T": "DI",
+    "DL5T": "DI",
+    "DT": "DI",
+    "NT": "DI",
+    "DL": "DI",
+    "DI": "DI",
+
+    # Linebacker
+    "LB": "LB",
+    "ILB": "LB",
+    "OLB": "LB",
+    "MLB": "LB",
+
+    # Cornerback
+    "CB": "CB",
+    "CBN": "CB",
+    "NCB": "CB",
+
+    # Safety
+    "S": "S",
+    "FS": "S",
+    "SS": "S",
+}
+
+
+# ============================================================
+# POSTER DIMENSIONS
+# ============================================================
 
 POSTER_WIDTH = 1450
 HEADER_HEIGHT = 280
@@ -39,7 +167,7 @@ MARGIN = 44
 # OUTPUT
 # ============================================================
 
-def ensure_output_dir():
+def ensure_output_dir() -> None:
 
     os.makedirs(
         OUTPUT_DIR,
@@ -56,6 +184,908 @@ def safe_filename(
         "_",
         name,
     ).strip("_")
+
+
+# ============================================================
+# TEXT HELPERS
+# ============================================================
+
+def clean_text(
+    value,
+) -> str:
+
+    text = str(
+        value or ""
+    )
+
+    text = (
+        text
+        .replace("\xa0", " ")
+        .replace("\u200b", "")
+        .replace("\ufeff", "")
+    )
+
+    return re.sub(
+        r"\s+",
+        " ",
+        text,
+    ).strip()
+
+
+def canonical_header(
+    value: str,
+) -> str:
+
+    value = clean_text(
+        value
+    ).lower()
+
+    value = re.sub(
+        r"[^a-z0-9]+",
+        " ",
+        value,
+    )
+
+    return re.sub(
+        r"\s+",
+        " ",
+        value,
+    ).strip()
+
+
+def parse_rank(
+    value: str,
+) -> Optional[int]:
+
+    value = clean_text(
+        value
+    )
+
+    match = re.search(
+        r"\b(\d{1,4})\b",
+        value,
+    )
+
+    if not match:
+        return None
+
+    try:
+        return int(
+            match.group(1)
+        )
+
+    except Exception:
+        return None
+
+
+# ============================================================
+# HTML TABLE PARSER
+#
+# Standard-library parser only.
+# No BeautifulSoup dependency required.
+# ============================================================
+
+class DraftTekTableParser(
+    HTMLParser,
+):
+
+    def __init__(
+        self,
+    ):
+
+        super().__init__(
+            convert_charrefs=True
+        )
+
+        self.rows: List[
+            List[str]
+        ] = []
+
+        self._in_row = False
+        self._in_cell = False
+
+        self._row: List[str] = []
+        self._cell_parts: List[str] = []
+
+    def handle_starttag(
+        self,
+        tag,
+        attrs,
+    ):
+
+        tag = tag.lower()
+
+        if tag == "tr":
+
+            self._in_row = True
+            self._row = []
+
+        elif (
+            self._in_row
+            and tag in (
+                "td",
+                "th",
+            )
+        ):
+
+            self._in_cell = True
+            self._cell_parts = []
+
+    def handle_data(
+        self,
+        data,
+    ):
+
+        if self._in_cell:
+
+            text = clean_text(
+                data
+            )
+
+            if text:
+                self._cell_parts.append(
+                    text
+                )
+
+    def handle_endtag(
+        self,
+        tag,
+    ):
+
+        tag = tag.lower()
+
+        if (
+            self._in_cell
+            and tag in (
+                "td",
+                "th",
+            )
+        ):
+
+            value = clean_text(
+                " ".join(
+                    self._cell_parts
+                )
+            )
+
+            self._row.append(
+                value
+            )
+
+            self._in_cell = False
+            self._cell_parts = []
+
+        elif (
+            self._in_row
+            and tag == "tr"
+        ):
+
+            if self._row:
+
+                self.rows.append(
+                    self._row
+                )
+
+            self._in_row = False
+            self._row = []
+
+
+# ============================================================
+# COLUMN DETECTION
+# ============================================================
+
+def find_column(
+    headers: List[str],
+    names,
+) -> Optional[int]:
+
+    normalized = [
+        canonical_header(
+            header
+        )
+        for header in headers
+    ]
+
+    for index, header in enumerate(
+        normalized
+    ):
+
+        for name in names:
+
+            target = canonical_header(
+                name
+            )
+
+            if (
+                header == target
+                or header.startswith(
+                    target + " "
+                )
+            ):
+
+                return index
+
+    return None
+
+
+def find_header_row(
+    rows: List[List[str]],
+):
+
+    for row_index, row in enumerate(
+        rows
+    ):
+
+        normalized = [
+            canonical_header(
+                cell
+            )
+            for cell in row
+        ]
+
+        has_rank = any(
+            cell == "rank"
+            for cell in normalized
+        )
+
+        has_prospect = any(
+            cell in (
+                "prospect",
+                "player",
+            )
+            for cell in normalized
+        )
+
+        has_college = any(
+            cell.startswith(
+                "college"
+            )
+            for cell in normalized
+        )
+
+        has_position = any(
+            cell.startswith(
+                "pos"
+            )
+            or cell == "p1"
+            for cell in normalized
+        )
+
+        if (
+            has_rank
+            and has_prospect
+            and has_college
+            and has_position
+        ):
+
+            return (
+                row_index,
+                row,
+            )
+
+    return (
+        None,
+        None,
+    )
+
+
+# ============================================================
+# DRAFTTEK POSITION NORMALIZATION
+# ============================================================
+
+def normalize_position(
+    value,
+) -> str:
+
+    raw = clean_text(
+        value
+    ).upper()
+
+    raw = (
+        raw
+        .replace("-", "")
+        .replace(" ", "")
+    )
+
+    return (
+        DRAFTTEK_POSITION_MAP.get(
+            raw,
+            ""
+        )
+    )
+
+
+# ============================================================
+# PARSE ONE DRAFTTEK PAGE
+# ============================================================
+
+def parse_drafttek_page(
+    html: str,
+    season: int,
+    page: int,
+) -> List[dict]:
+
+    parser = (
+        DraftTekTableParser()
+    )
+
+    parser.feed(
+        html
+    )
+
+    rows = parser.rows
+
+    header_index, header_row = (
+        find_header_row(
+            rows
+        )
+    )
+
+    if (
+        header_index is None
+        or header_row is None
+    ):
+
+        raise RuntimeError(
+            f"Could not find DraftTek "
+            f"Big Board table header "
+            f"for season={season}, "
+            f"page={page}."
+        )
+
+    rank_col = find_column(
+        header_row,
+        (
+            "Rank",
+        ),
+    )
+
+    name_col = find_column(
+        header_row,
+        (
+            "Prospect",
+            "Player",
+        ),
+    )
+
+    college_col = find_column(
+        header_row,
+        (
+            "College",
+        ),
+    )
+
+    position_col = find_column(
+        header_row,
+        (
+            "Pos",
+            "P1",
+            "Position",
+        ),
+    )
+
+    height_col = find_column(
+        header_row,
+        (
+            "Ht",
+            "Height",
+        ),
+    )
+
+    weight_col = find_column(
+        header_row,
+        (
+            "Wt",
+            "Weight",
+        ),
+    )
+
+    class_col = find_column(
+        header_row,
+        (
+            "Cls",
+            "YR",
+            "Class",
+            "Elig",
+        ),
+    )
+
+    required_columns = {
+        "rank": rank_col,
+        "name": name_col,
+        "college": college_col,
+        "position": position_col,
+    }
+
+    missing = [
+        name
+        for name, index
+        in required_columns.items()
+        if index is None
+    ]
+
+    if missing:
+
+        raise RuntimeError(
+            "DraftTek table is missing "
+            f"required columns: {missing}. "
+            f"Headers={header_row}"
+        )
+
+    players: List[
+        dict
+    ] = []
+
+    for row in rows[
+        header_index + 1:
+    ]:
+
+        needed_indices = [
+            index
+            for index in (
+                rank_col,
+                name_col,
+                college_col,
+                position_col,
+            )
+            if index is not None
+        ]
+
+        if (
+            not needed_indices
+            or len(row)
+            <= max(
+                needed_indices
+            )
+        ):
+
+            continue
+
+        rank = parse_rank(
+            row[
+                rank_col
+            ]
+        )
+
+        if rank is None:
+            continue
+
+        name = clean_text(
+            row[
+                name_col
+            ]
+        )
+
+        college = clean_text(
+            row[
+                college_col
+            ]
+        )
+
+        source_position = (
+            clean_text(
+                row[
+                    position_col
+                ]
+            )
+            .upper()
+        )
+
+        position = normalize_position(
+            source_position
+        )
+
+        height = (
+            clean_text(
+                row[
+                    height_col
+                ]
+            )
+            if (
+                height_col is not None
+                and height_col < len(row)
+            )
+            else "N/A"
+        )
+
+        weight = (
+            clean_text(
+                row[
+                    weight_col
+                ]
+            )
+            if (
+                weight_col is not None
+                and weight_col < len(row)
+            )
+            else "N/A"
+        )
+
+        player_class = (
+            clean_text(
+                row[
+                    class_col
+                ]
+            )
+            if (
+                class_col is not None
+                and class_col < len(row)
+            )
+            else "N/A"
+        )
+
+        if not name:
+            continue
+
+        players.append(
+            {
+                "rank": rank,
+                "name": name,
+                "college": college or "N/A",
+                "source_position": source_position,
+                "position": position,
+                "height": height or "N/A",
+                "weight": weight or "N/A",
+                "class": player_class or "N/A",
+            }
+        )
+
+    print(
+        f"DraftTek page {page}: "
+        f"parsed {len(players)} ranked prospects"
+    )
+
+    return players
+
+
+# ============================================================
+# HTTP
+# ============================================================
+
+def fetch_html(
+    url: str,
+) -> str:
+
+    last_error = None
+
+    for attempt in range(
+        1,
+        5,
+    ):
+
+        try:
+
+            response = requests.get(
+                url,
+                headers=HEADERS,
+                timeout=30,
+            )
+
+            print(
+                f"HTTP {response.status_code}: "
+                f"{response.url}"
+            )
+
+            if response.status_code in (
+                429,
+                500,
+                502,
+                503,
+                504,
+            ):
+
+                raise RuntimeError(
+                    f"temporary HTTP "
+                    f"{response.status_code}"
+                )
+
+            response.raise_for_status()
+
+            return response.text
+
+        except Exception as error:
+
+            last_error = error
+
+            print(
+                f"WARNING: DraftTek request "
+                f"attempt {attempt}/4 failed: "
+                f"{error}"
+            )
+
+            if attempt < 4:
+
+                time.sleep(
+                    attempt * 2
+                )
+
+    raise RuntimeError(
+        f"DraftTek request failed "
+        f"after 4 attempts: "
+        f"{last_error}"
+    )
+
+
+# ============================================================
+# FETCH COMPLETE BIG BOARD
+# ============================================================
+
+def fetch_big_board(
+    season,
+):
+
+    all_players: List[
+        dict
+    ] = []
+
+    for page in DRAFTTEK_PAGES:
+
+        url = (
+            DRAFTTEK_PAGE_URL.format(
+                season=season,
+                page=page,
+            )
+        )
+
+        print()
+        print(
+            "=" * 80
+        )
+
+        print(
+            f"FETCHING DRAFTTEK "
+            f"{season} BIG BOARD "
+            f"PAGE {page}"
+        )
+
+        print(
+            "=" * 80
+        )
+
+        html = fetch_html(
+            url
+        )
+
+        page_players = (
+            parse_drafttek_page(
+                html=html,
+                season=season,
+                page=page,
+            )
+        )
+
+        all_players.extend(
+            page_players
+        )
+
+    # --------------------------------------------------------
+    # DEDUPE
+    # --------------------------------------------------------
+
+    unique = {}
+
+    for player in all_players:
+
+        key = (
+            player.get("rank"),
+            clean_text(
+                player.get(
+                    "name"
+                )
+            ).lower(),
+        )
+
+        unique[
+            key
+        ] = player
+
+    players = list(
+        unique.values()
+    )
+
+    players.sort(
+        key=lambda player: (
+            int(
+                player.get(
+                    "rank",
+                    9999,
+                )
+            )
+        )
+    )
+
+    print()
+    print(
+        "=" * 80
+    )
+
+    print(
+        f"DRAFTTEK BIG BOARD "
+        f"{season}: "
+        f"{len(players)} "
+        f"UNIQUE PROSPECTS"
+    )
+
+    print(
+        "=" * 80
+    )
+
+    return {
+        "source": "DraftTek",
+        "season": season,
+        "players": players,
+    }
+
+
+# ============================================================
+# PLAYER LIST
+# ============================================================
+
+def get_player_list(
+    data,
+):
+
+    if isinstance(
+        data,
+        list,
+    ):
+
+        return data
+
+    if isinstance(
+        data,
+        dict,
+    ):
+
+        players = data.get(
+            "players"
+        )
+
+        if isinstance(
+            players,
+            list,
+        ):
+
+            return players
+
+    raise ValueError(
+        "Could not find DraftTek "
+        "player list."
+    )
+
+
+# ============================================================
+# GROUP TOP 5 BY OUR EXISTING APP POSITION GROUPS
+# ============================================================
+
+def group_top_players(
+    players,
+):
+
+    grouped = defaultdict(
+        list
+    )
+
+    unknown_positions = (
+        defaultdict(
+            int
+        )
+    )
+
+    for player in players:
+
+        if not isinstance(
+            player,
+            dict,
+        ):
+
+            continue
+
+        position = clean_text(
+            player.get(
+                "position"
+            )
+        )
+
+        source_position = clean_text(
+            player.get(
+                "source_position"
+            )
+        )
+
+        if (
+            not position
+            or position
+            not in TARGET_POSITIONS
+        ):
+
+            if source_position:
+
+                unknown_positions[
+                    source_position
+                ] += 1
+
+            continue
+
+        grouped[
+            position
+        ].append(
+            player
+        )
+
+    output: Dict[
+        str,
+        List[dict],
+    ] = {}
+
+    for position in TARGET_POSITIONS:
+
+        position_players = (
+            grouped.get(
+                position,
+                []
+            )
+        )
+
+        position_players.sort(
+            key=lambda player: (
+                int(
+                    player.get(
+                        "rank",
+                        9999,
+                    )
+                )
+            )
+        )
+
+        output[
+            position
+        ] = (
+            position_players[
+                :TOP_N
+            ]
+        )
+
+    if unknown_positions:
+
+        print()
+        print(
+            "UNMAPPED DRAFTTEK POSITIONS:"
+        )
+
+        for (
+            source_position,
+            count,
+        ) in sorted(
+            unknown_positions.items()
+        ):
+
+            print(
+                f"  {source_position}: "
+                f"{count}"
+            )
+
+    print()
+    print(
+        "=" * 80
+    )
+
+    print(
+        "TOP-5 POSITION COUNTS"
+    )
+
+    print(
+        "=" * 80
+    )
+
+    for position in TARGET_POSITIONS:
+
+        print(
+            f"{position}: "
+            f"{len(output[position])}"
+        )
+
+    return output
 
 
 # ============================================================
@@ -109,11 +1139,6 @@ def get_font(
     return ImageFont.load_default()
 
 
-TITLE_FONT = get_font(
-    84,
-    bold=True,
-)
-
 SUBTITLE_FONT = get_font(
     34,
     bold=False,
@@ -123,683 +1148,6 @@ HEADER_FONT = get_font(
     34,
     bold=True,
 )
-
-TEXT_FONT = get_font(
-    36,
-    bold=False,
-)
-
-RANK_FONT = get_font(
-    42,
-    bold=True,
-)
-
-NAME_FONT = get_font(
-    44,
-    bold=True,
-)
-
-SMALL_TEXT_FONT = get_font(
-    32,
-    bold=False,
-)
-
-
-# ============================================================
-# SOURCE HEADERS
-# ============================================================
-
-def get_headers(
-    season,
-):
-
-    return {
-        "accept": (
-            "application/json, "
-            "text/plain, */*"
-        ),
-        "referer": (
-            "https://www.pff.com/draft/"
-            f"big-board?season={season}"
-        ),
-        "user-agent": USER_AGENT,
-    }
-
-
-# ============================================================
-# DATA HELPERS
-# ============================================================
-
-def pick(
-    data,
-    keys,
-    default="N/A",
-):
-
-    for key in keys:
-
-        if (
-            key in data
-            and data[key] not in (
-                None,
-                "",
-                [],
-            )
-        ):
-
-            return data[
-                key
-            ]
-
-    return default
-
-
-def normalize_position(
-    position,
-):
-
-    if not position:
-
-        return "UNK"
-
-    if isinstance(
-        position,
-        dict,
-    ):
-
-        position = (
-            position.get("abbreviation")
-            or position.get("short_name")
-            or position.get("shortName")
-            or position.get("name")
-            or position.get("display_name")
-            or position.get("displayName")
-            or ""
-        )
-
-    position = str(
-        position,
-    ).strip().upper()
-
-    mapping = {
-        "HB": "RB",
-        "TB": "RB",
-        "OLB": "LB",
-        "ILB": "LB",
-        "MLB": "LB",
-        "SS": "S",
-        "FS": "S",
-        "NT": "DL",
-        "DT": "DL",
-        "DE": "EDGE",
-        "ED": "EDGE",
-        "G": "IOL",
-        "OG": "IOL",
-        "C": "IOL",
-        "OL": "IOL",
-        "OT": "T",
-    }
-
-    return mapping.get(
-        position,
-        position,
-    )
-
-
-# ============================================================
-# PLAYER LIST DETECTION
-# ============================================================
-
-PLAYER_NAME_KEYS = {
-    "player_name",
-    "playerName",
-    "name",
-    "full_name",
-    "fullName",
-}
-
-PLAYER_POSITION_KEYS = {
-    "position",
-    "pos",
-    "position_name",
-    "positionName",
-    "position_abbreviation",
-    "positionAbbreviation",
-}
-
-PLAYER_CONTEXT_KEYS = {
-    "college",
-    "school",
-    "team_name",
-    "teamName",
-    "height",
-    "weight",
-    "age",
-    "rank",
-    "overall_rank",
-    "overallRank",
-}
-
-
-def looks_like_player(
-    item,
-) -> bool:
-
-    if not isinstance(
-        item,
-        dict,
-    ):
-
-        return False
-
-    keys = set(
-        item.keys()
-    )
-
-    has_name = bool(
-        keys
-        & PLAYER_NAME_KEYS
-    )
-
-    has_position = bool(
-        keys
-        & PLAYER_POSITION_KEYS
-    )
-
-    has_context = bool(
-        keys
-        & PLAYER_CONTEXT_KEYS
-    )
-
-    # Strongest signal:
-    # a player record normally has a name + position.
-    if (
-        has_name
-        and has_position
-    ):
-
-        return True
-
-    # Allow slightly different schemas if player-like
-    # contextual information exists too.
-    if (
-        has_name
-        and has_context
-        and (
-            "id" in keys
-            or "player_id" in keys
-            or "playerId" in keys
-        )
-    ):
-
-        return True
-
-    return False
-
-
-def list_looks_like_players(
-    value,
-) -> bool:
-
-    if not isinstance(
-        value,
-        list,
-    ):
-
-        return False
-
-    if not value:
-
-        return False
-
-    dictionaries = [
-        item
-        for item in value
-        if isinstance(
-            item,
-            dict,
-        )
-    ]
-
-    if not dictionaries:
-
-        return False
-
-    sample = dictionaries[
-        : min(
-            10,
-            len(
-                dictionaries
-            ),
-        )
-    ]
-
-    player_count = sum(
-        1
-        for item in sample
-        if looks_like_player(
-            item
-        )
-    )
-
-    # Require a meaningful portion of the sample
-    # to actually resemble player records.
-    return (
-        player_count
-        >= max(
-            1,
-            len(sample) // 2,
-        )
-    )
-
-
-def get_player_list(
-    data,
-):
-
-    if isinstance(
-        data,
-        list,
-    ):
-
-        if list_looks_like_players(
-            data
-        ):
-
-            return data
-
-        for item in data:
-
-            if isinstance(
-                item,
-                (
-                    dict,
-                    list,
-                ),
-            ):
-
-                try:
-
-                    nested_players = (
-                        get_player_list(
-                            item
-                        )
-                    )
-
-                    if nested_players:
-
-                        return nested_players
-
-                except ValueError:
-
-                    pass
-
-        raise ValueError(
-            "List did not contain "
-            "player-like records."
-        )
-
-    if isinstance(
-        data,
-        dict,
-    ):
-
-        # ----------------------------------------------------
-        # FIRST: PREFERRED PLAYER/PROSPECT KEYS
-        # ----------------------------------------------------
-
-        preferred_keys = [
-            "players",
-            "prospects",
-            "big_board",
-            "bigBoard",
-            "rankings",
-            "board",
-            "results",
-            "athletes",
-        ]
-
-        for key in preferred_keys:
-
-            value = data.get(
-                key,
-            )
-
-            if list_looks_like_players(
-                value
-            ):
-
-                return value
-
-            if isinstance(
-                value,
-                (
-                    dict,
-                    list,
-                ),
-            ):
-
-                try:
-
-                    nested_players = (
-                        get_player_list(
-                            value
-                        )
-                    )
-
-                    if nested_players:
-
-                        return nested_players
-
-                except ValueError:
-
-                    pass
-
-        # ----------------------------------------------------
-        # SECOND: OTHER NESTED DICTS
-        # ----------------------------------------------------
-
-        for key, value in data.items():
-
-            if key in preferred_keys:
-
-                continue
-
-            if isinstance(
-                value,
-                dict,
-            ):
-
-                try:
-
-                    nested_players = (
-                        get_player_list(
-                            value
-                        )
-                    )
-
-                    if nested_players:
-
-                        return nested_players
-
-                except ValueError:
-
-                    pass
-
-        # ----------------------------------------------------
-        # THIRD: OTHER LISTS
-        #
-        # IMPORTANT:
-        # Only accept them if they actually look like players.
-        # This prevents conference lists such as FBS/FCS from
-        # being incorrectly treated as prospect records.
-        # ----------------------------------------------------
-
-        for key, value in data.items():
-
-            if key in preferred_keys:
-
-                continue
-
-            if list_looks_like_players(
-                value
-            ):
-
-                return value
-
-            if isinstance(
-                value,
-                list,
-            ):
-
-                for item in value:
-
-                    if isinstance(
-                        item,
-                        (
-                            dict,
-                            list,
-                        ),
-                    ):
-
-                        try:
-
-                            nested_players = (
-                                get_player_list(
-                                    item
-                                )
-                            )
-
-                            if nested_players:
-
-                                return nested_players
-
-                        except ValueError:
-
-                            pass
-
-    raise ValueError(
-        "Could not find a non-empty "
-        "player/prospect list in the "
-        "PFF Big Board response."
-    )
-
-
-# ============================================================
-# PLAYER PARSING
-# ============================================================
-
-def parse_player(
-    raw,
-    rank,
-):
-
-    position_value = pick(
-        raw,
-        [
-            "position",
-            "pos",
-            "position_name",
-            "positionName",
-            "position_abbreviation",
-            "positionAbbreviation",
-        ],
-        "UNK",
-    )
-
-    return {
-        "rank": pick(
-            raw,
-            [
-                "rank",
-                "overall_rank",
-                "overallRank",
-            ],
-            rank,
-        ),
-
-        "name": str(
-            pick(
-                raw,
-                [
-                    "player_name",
-                    "playerName",
-                    "full_name",
-                    "fullName",
-                    "name",
-                ],
-                "Unknown",
-            )
-        ),
-
-        "position": normalize_position(
-            position_value
-        ),
-
-        "college": str(
-            pick(
-                raw,
-                [
-                    "college",
-                    "school",
-                    "team_name",
-                    "teamName",
-                    "college_name",
-                    "collegeName",
-                ],
-                "N/A",
-            )
-        ),
-
-        "height": str(
-            pick(
-                raw,
-                [
-                    "height",
-                    "height_display",
-                    "heightDisplay",
-                ],
-                "N/A",
-            )
-        ),
-
-        "weight": str(
-            pick(
-                raw,
-                [
-                    "weight",
-                    "weight_display",
-                    "weightDisplay",
-                ],
-                "N/A",
-            )
-        ),
-
-        "age": str(
-            pick(
-                raw,
-                [
-                    "age",
-                ],
-                "N/A",
-            )
-        ),
-    }
-
-
-# ============================================================
-# FETCH BIG BOARD
-# ============================================================
-
-def fetch_big_board(
-    season,
-):
-
-    response = requests.get(
-        BOARD_URL,
-        params={
-            "season": season,
-            "version": VERSION,
-        },
-        headers=get_headers(
-            season,
-        ),
-        timeout=30,
-    )
-
-    print(
-        "PFF BIG BOARD REQUEST:",
-        response.url,
-    )
-
-    print(
-        "PFF BIG BOARD STATUS:",
-        response.status_code,
-    )
-
-    response.raise_for_status()
-
-    return response.json()
-
-
-# ============================================================
-# GROUP PLAYERS
-# ============================================================
-
-def group_top_players(
-    players,
-):
-
-    grouped = defaultdict(
-        list,
-    )
-
-    for index, raw in enumerate(
-        players,
-    ):
-
-        if not looks_like_player(
-            raw
-        ):
-
-            continue
-
-        player = parse_player(
-            raw,
-            index + 1,
-        )
-
-        if (
-            player[
-                "position"
-            ]
-            in SKIP_POSITIONS
-        ):
-
-            continue
-
-        if (
-            player[
-                "position"
-            ]
-            == "UNK"
-        ):
-
-            print(
-                "WARNING: Skipping player "
-                "with unknown position:",
-                player[
-                    "name"
-                ],
-            )
-
-            continue
-
-        grouped[
-            player[
-                "position"
-            ]
-        ].append(
-            player,
-        )
-
-    for position in grouped:
-
-        grouped[
-            position
-        ] = (
-            grouped[
-                position
-            ][
-                :TOP_N
-            ]
-        )
-
-    return dict(
-        sorted(
-            grouped.items(),
-        )
-    )
 
 
 # ============================================================
@@ -818,8 +1166,7 @@ def fit_font(
     size = start_size
 
     while (
-        size
-        >= min_size
+        size >= min_size
     ):
 
         font = get_font(
@@ -860,7 +1207,7 @@ def draw_vertical_gradient(
 ):
 
     for y in range(
-        height,
+        height
     ):
 
         ratio = (
@@ -873,27 +1220,21 @@ def draw_vertical_gradient(
 
         red = int(
             top_color[0]
-            * (
-                1 - ratio
-            )
+            * (1 - ratio)
             + bottom_color[0]
             * ratio
         )
 
         green = int(
             top_color[1]
-            * (
-                1 - ratio
-            )
+            * (1 - ratio)
             + bottom_color[1]
             * ratio
         )
 
         blue = int(
             top_color[2]
-            * (
-                1 - ratio
-            )
+            * (1 - ratio)
             + bottom_color[2]
             * ratio
         )
@@ -915,6 +1256,12 @@ def draw_vertical_gradient(
 
 # ============================================================
 # POSTER
+#
+# Same visual layout/colors as the existing Big Board.
+#
+# Only data-field change:
+# AGE -> CLASS
+# because DraftTek exposes class rather than age.
 # ============================================================
 
 def create_poster(
@@ -1026,8 +1373,12 @@ def create_poster(
     )
 
     draw = ImageDraw.Draw(
-        image,
+        image
     )
+
+    # --------------------------------------------------------
+    # BACKGROUND
+    # --------------------------------------------------------
 
     draw_vertical_gradient(
         draw,
@@ -1036,6 +1387,10 @@ def create_poster(
         bg_top,
         bg_bottom,
     )
+
+    # --------------------------------------------------------
+    # OUTER BORDER
+    # --------------------------------------------------------
 
     draw.rounded_rectangle(
         (
@@ -1073,8 +1428,11 @@ def create_poster(
     )
 
     top_height = 180
-
     top_y = 34
+
+    # --------------------------------------------------------
+    # TITLE PANEL
+    # --------------------------------------------------------
 
     draw.rounded_rectangle(
         (
@@ -1102,6 +1460,10 @@ def create_poster(
         radius=24,
         fill=panel_2,
     )
+
+    # --------------------------------------------------------
+    # TITLE
+    # --------------------------------------------------------
 
     title = (
         f"{position} - TOP "
@@ -1165,6 +1527,10 @@ def create_poster(
         font=SUBTITLE_FONT,
     )
 
+    # --------------------------------------------------------
+    # TABLE SETUP
+    # --------------------------------------------------------
+
     table_left = (
         left + 12
     )
@@ -1196,9 +1562,7 @@ def create_poster(
         in column_fractions
     ]
 
-    column_widths[
-        -1
-    ] += (
+    column_widths[-1] += (
         table_width
         - sum(
             column_widths
@@ -1211,7 +1575,7 @@ def create_poster(
         "COLLEGE",
         "HEIGHT",
         "WEIGHT",
-        "AGE",
+        "CLASS",
     ]
 
     header_y = (
@@ -1221,6 +1585,10 @@ def create_poster(
     )
 
     header_height = 58
+
+    # --------------------------------------------------------
+    # TABLE HEADER
+    # --------------------------------------------------------
 
     draw.rounded_rectangle(
         (
@@ -1250,7 +1618,7 @@ def create_poster(
     x = table_left
 
     for index, header in enumerate(
-        headers,
+        headers
     ):
 
         if index in (
@@ -1271,10 +1639,21 @@ def create_poster(
 
         else:
 
+            header_font = fit_font(
+                draw,
+                header,
+                column_widths[
+                    index
+                ] - 22,
+                34,
+                22,
+                bold=True,
+            )
+
             header_width = (
                 draw.textlength(
                     header,
-                    font=HEADER_FONT,
+                    font=header_font,
                 )
             )
 
@@ -1290,7 +1669,7 @@ def create_poster(
                 ),
                 header,
                 fill=muted,
-                font=HEADER_FONT,
+                font=header_font,
             )
 
         x += (
@@ -1320,6 +1699,10 @@ def create_poster(
                 width=1,
             )
 
+    # --------------------------------------------------------
+    # PLAYER ROWS
+    # --------------------------------------------------------
+
     row_y = (
         header_y
         + header_height
@@ -1330,7 +1713,7 @@ def create_poster(
         row_index,
         player,
     ) in enumerate(
-        players,
+        players
     ):
 
         fill = (
@@ -1358,34 +1741,40 @@ def create_poster(
 
         values = [
             str(
-                player[
-                    "rank"
-                ]
+                player.get(
+                    "rank",
+                    "N/A",
+                )
             ),
             str(
-                player[
-                    "name"
-                ]
+                player.get(
+                    "name",
+                    "Unknown",
+                )
             ),
             str(
-                player[
-                    "college"
-                ]
+                player.get(
+                    "college",
+                    "N/A",
+                )
             ),
             str(
-                player[
-                    "height"
-                ]
+                player.get(
+                    "height",
+                    "N/A",
+                )
             ),
             str(
-                player[
-                    "weight"
-                ]
+                player.get(
+                    "weight",
+                    "N/A",
+                )
             ),
             str(
-                player[
-                    "age"
-                ]
+                player.get(
+                    "class",
+                    "N/A",
+                )
             ),
         ]
 
@@ -1395,7 +1784,7 @@ def create_poster(
             column_index,
             value,
         ) in enumerate(
-            values,
+            values
         ):
 
             column_width = (
@@ -1403,6 +1792,10 @@ def create_poster(
                     column_index
                 ]
             )
+
+            # ------------------------------------------------
+            # RANK
+            # ------------------------------------------------
 
             if (
                 column_index
@@ -1433,6 +1826,10 @@ def create_poster(
                     font=font,
                 )
 
+            # ------------------------------------------------
+            # NAME
+            # ------------------------------------------------
+
             elif (
                 column_index
                 == 1
@@ -1462,6 +1859,10 @@ def create_poster(
                     font=font,
                 )
 
+            # ------------------------------------------------
+            # COLLEGE
+            # ------------------------------------------------
+
             elif (
                 column_index
                 == 2
@@ -1490,6 +1891,10 @@ def create_poster(
                     fill=accent,
                     font=font,
                 )
+
+            # ------------------------------------------------
+            # HEIGHT / WEIGHT
+            # ------------------------------------------------
 
             elif column_index in (
                 3,
@@ -1530,6 +1935,10 @@ def create_poster(
                     font=font,
                 )
 
+            # ------------------------------------------------
+            # CLASS
+            # ------------------------------------------------
+
             else:
 
                 font = fit_font(
@@ -1537,8 +1946,8 @@ def create_poster(
                     value,
                     column_width
                     - 20,
-                    40,
-                    26,
+                    36,
+                    22,
                     bold=False,
                 )
 
@@ -1595,6 +2004,10 @@ def create_poster(
             ROW_HEIGHT
         )
 
+    # --------------------------------------------------------
+    # SAVE
+    # --------------------------------------------------------
+
     path = os.path.join(
         OUTPUT_DIR,
         (
@@ -1604,13 +2017,61 @@ def create_poster(
     )
 
     image.save(
-        path,
+        path
     )
 
     print(
         "Saved",
         path,
     )
+
+    return path
+
+
+# ============================================================
+# VALIDATE POSITION COVERAGE
+# ============================================================
+
+def validate_position_groups(
+    grouped,
+) -> None:
+
+    problems = []
+
+    for position in TARGET_POSITIONS:
+
+        count = len(
+            grouped.get(
+                position,
+                []
+            )
+        )
+
+        if count < TOP_N:
+
+            problems.append(
+                (
+                    position,
+                    count,
+                )
+            )
+
+    if problems:
+
+        message = ", ".join(
+            f"{position}={count}"
+            for (
+                position,
+                count,
+            )
+            in problems
+        )
+
+        raise RuntimeError(
+            "DraftTek did not provide "
+            "five usable prospects for "
+            f"every required group: {message}"
+        )
 
 
 # ============================================================
@@ -1629,71 +2090,63 @@ def main():
         default=SEASON_DEFAULT,
     )
 
+    parser.add_argument(
+        "--outdir",
+        type=str,
+        default=OUTPUT_DIR,
+    )
+
     args = (
         parser.parse_args()
+    )
+
+    global OUTPUT_DIR
+
+    OUTPUT_DIR = (
+        args.outdir
     )
 
     ensure_output_dir()
 
     print(
-        "Fetching big board for "
+        f"Fetching DraftTek "
+        f"Big Board for "
         f"{args.season}..."
     )
 
     data = fetch_big_board(
-        args.season,
+        args.season
     )
 
     players = get_player_list(
-        data,
+        data
     )
 
     print(
-        f"Found {len(players)} "
-        f"player/prospect records."
+        f"Found "
+        f"{len(players)} "
+        f"DraftTek prospects."
     )
-
-    if players:
-
-        print(
-            "FIRST PLAYER RECORD:"
-        )
-
-        print(
-            players[0]
-        )
 
     grouped = group_top_players(
-        players,
+        players
     )
 
-    print(
-        "POSITION GROUPS:"
+    validate_position_groups(
+        grouped
     )
 
-    for (
-        position,
-        player_list,
-    ) in grouped.items():
-
-        print(
-            position,
-            len(
-                player_list
-            ),
-        )
-
-    for (
-        position,
-        player_list,
-    ) in grouped.items():
+    for position in TARGET_POSITIONS:
 
         create_poster(
             position,
-            player_list,
+            grouped[
+                position
+            ],
             args.season,
         )
 
+    print()
     print(
         "Done."
     )
