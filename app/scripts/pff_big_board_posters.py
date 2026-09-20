@@ -202,6 +202,21 @@ def normalize_position(
 
         return "UNK"
 
+    if isinstance(
+        position,
+        dict,
+    ):
+
+        position = (
+            position.get("abbreviation")
+            or position.get("short_name")
+            or position.get("shortName")
+            or position.get("name")
+            or position.get("display_name")
+            or position.get("displayName")
+            or ""
+        )
+
     position = str(
         position,
     ).strip().upper()
@@ -217,9 +232,12 @@ def normalize_position(
         "NT": "DL",
         "DT": "DL",
         "DE": "EDGE",
+        "ED": "EDGE",
         "G": "IOL",
+        "OG": "IOL",
         "C": "IOL",
         "OL": "IOL",
+        "OT": "T",
     }
 
     return mapping.get(
@@ -229,8 +247,151 @@ def normalize_position(
 
 
 # ============================================================
-# PLAYER LIST
+# PLAYER LIST DETECTION
 # ============================================================
+
+PLAYER_NAME_KEYS = {
+    "player_name",
+    "playerName",
+    "name",
+    "full_name",
+    "fullName",
+}
+
+PLAYER_POSITION_KEYS = {
+    "position",
+    "pos",
+    "position_name",
+    "positionName",
+    "position_abbreviation",
+    "positionAbbreviation",
+}
+
+PLAYER_CONTEXT_KEYS = {
+    "college",
+    "school",
+    "team_name",
+    "teamName",
+    "height",
+    "weight",
+    "age",
+    "rank",
+    "overall_rank",
+    "overallRank",
+}
+
+
+def looks_like_player(
+    item,
+) -> bool:
+
+    if not isinstance(
+        item,
+        dict,
+    ):
+
+        return False
+
+    keys = set(
+        item.keys()
+    )
+
+    has_name = bool(
+        keys
+        & PLAYER_NAME_KEYS
+    )
+
+    has_position = bool(
+        keys
+        & PLAYER_POSITION_KEYS
+    )
+
+    has_context = bool(
+        keys
+        & PLAYER_CONTEXT_KEYS
+    )
+
+    # Strongest signal:
+    # a player record normally has a name + position.
+    if (
+        has_name
+        and has_position
+    ):
+
+        return True
+
+    # Allow slightly different schemas if player-like
+    # contextual information exists too.
+    if (
+        has_name
+        and has_context
+        and (
+            "id" in keys
+            or "player_id" in keys
+            or "playerId" in keys
+        )
+    ):
+
+        return True
+
+    return False
+
+
+def list_looks_like_players(
+    value,
+) -> bool:
+
+    if not isinstance(
+        value,
+        list,
+    ):
+
+        return False
+
+    if not value:
+
+        return False
+
+    dictionaries = [
+        item
+        for item in value
+        if isinstance(
+            item,
+            dict,
+        )
+    ]
+
+    if not dictionaries:
+
+        return False
+
+    sample = dictionaries[
+        : min(
+            10,
+            len(
+                dictionaries
+            ),
+        )
+    ]
+
+    player_count = sum(
+        1
+        for item in sample
+        if looks_like_player(
+            item
+        )
+    )
+
+    # Require a meaningful portion of the sample
+    # to actually resemble player records.
+    return (
+        player_count
+        >= max(
+            1,
+            len(sample) // 2,
+        )
+    )
+
 
 def get_player_list(
     data,
@@ -241,24 +402,61 @@ def get_player_list(
         list,
     ):
 
-        if data:
+        if list_looks_like_players(
+            data
+        ):
 
             return data
 
-        return []
+        for item in data:
+
+            if isinstance(
+                item,
+                (
+                    dict,
+                    list,
+                ),
+            ):
+
+                try:
+
+                    nested_players = (
+                        get_player_list(
+                            item
+                        )
+                    )
+
+                    if nested_players:
+
+                        return nested_players
+
+                except ValueError:
+
+                    pass
+
+        raise ValueError(
+            "List did not contain "
+            "player-like records."
+        )
 
     if isinstance(
         data,
         dict,
     ):
 
+        # ----------------------------------------------------
+        # FIRST: PREFERRED PLAYER/PROSPECT KEYS
+        # ----------------------------------------------------
+
         preferred_keys = [
             "players",
+            "prospects",
             "big_board",
             "bigBoard",
+            "rankings",
+            "board",
             "results",
-            "prospects",
-            "data",
+            "athletes",
         ]
 
         for key in preferred_keys:
@@ -267,26 +465,25 @@ def get_player_list(
                 key,
             )
 
-            if (
-                isinstance(
-                    value,
-                    list,
-                )
-                and value
+            if list_looks_like_players(
+                value
             ):
 
                 return value
 
             if isinstance(
                 value,
-                dict,
+                (
+                    dict,
+                    list,
+                ),
             ):
 
                 try:
 
                     nested_players = (
                         get_player_list(
-                            value,
+                            value
                         )
                     )
 
@@ -298,22 +495,15 @@ def get_player_list(
 
                     pass
 
-        for value in data.values():
+        # ----------------------------------------------------
+        # SECOND: OTHER NESTED DICTS
+        # ----------------------------------------------------
 
-            if (
-                isinstance(
-                    value,
-                    list,
-                )
-                and value
-            ):
+        for key, value in data.items():
 
-                if isinstance(
-                    value[0],
-                    dict,
-                ):
+            if key in preferred_keys:
 
-                    return value
+                continue
 
             if isinstance(
                 value,
@@ -324,7 +514,7 @@ def get_player_list(
 
                     nested_players = (
                         get_player_list(
-                            value,
+                            value
                         )
                     )
 
@@ -336,9 +526,62 @@ def get_player_list(
 
                     pass
 
+        # ----------------------------------------------------
+        # THIRD: OTHER LISTS
+        #
+        # IMPORTANT:
+        # Only accept them if they actually look like players.
+        # This prevents conference lists such as FBS/FCS from
+        # being incorrectly treated as prospect records.
+        # ----------------------------------------------------
+
+        for key, value in data.items():
+
+            if key in preferred_keys:
+
+                continue
+
+            if list_looks_like_players(
+                value
+            ):
+
+                return value
+
+            if isinstance(
+                value,
+                list,
+            ):
+
+                for item in value:
+
+                    if isinstance(
+                        item,
+                        (
+                            dict,
+                            list,
+                        ),
+                    ):
+
+                        try:
+
+                            nested_players = (
+                                get_player_list(
+                                    item
+                                )
+                            )
+
+                            if nested_players:
+
+                                return nested_players
+
+                        except ValueError:
+
+                            pass
+
     raise ValueError(
         "Could not find a non-empty "
-        "player list."
+        "player/prospect list in the "
+        "PFF Big Board response."
     )
 
 
@@ -351,8 +594,29 @@ def parse_player(
     rank,
 ):
 
+    position_value = pick(
+        raw,
+        [
+            "position",
+            "pos",
+            "position_name",
+            "positionName",
+            "position_abbreviation",
+            "positionAbbreviation",
+        ],
+        "UNK",
+    )
+
     return {
-        "rank": rank,
+        "rank": pick(
+            raw,
+            [
+                "rank",
+                "overall_rank",
+                "overallRank",
+            ],
+            rank,
+        ),
 
         "name": str(
             pick(
@@ -360,6 +624,8 @@ def parse_player(
                 [
                     "player_name",
                     "playerName",
+                    "full_name",
+                    "fullName",
                     "name",
                 ],
                 "Unknown",
@@ -367,14 +633,7 @@ def parse_player(
         ),
 
         "position": normalize_position(
-            pick(
-                raw,
-                [
-                    "position",
-                    "pos",
-                ],
-                "UNK",
-            )
+            position_value
         ),
 
         "college": str(
@@ -385,6 +644,8 @@ def parse_player(
                     "school",
                     "team_name",
                     "teamName",
+                    "college_name",
+                    "collegeName",
                 ],
                 "N/A",
             )
@@ -446,6 +707,16 @@ def fetch_big_board(
         timeout=30,
     )
 
+    print(
+        "PFF BIG BOARD REQUEST:",
+        response.url,
+    )
+
+    print(
+        "PFF BIG BOARD STATUS:",
+        response.status_code,
+    )
+
     response.raise_for_status()
 
     return response.json()
@@ -467,6 +738,12 @@ def group_top_players(
         players,
     ):
 
+        if not looks_like_player(
+            raw
+        ):
+
+            continue
+
         player = parse_player(
             raw,
             index + 1,
@@ -478,6 +755,23 @@ def group_top_players(
             ]
             in SKIP_POSITIONS
         ):
+
+            continue
+
+        if (
+            player[
+                "position"
+            ]
+            == "UNK"
+        ):
+
+            print(
+                "WARNING: Skipping player "
+                "with unknown position:",
+                player[
+                    "name"
+                ],
+            )
 
             continue
 
@@ -735,10 +1029,6 @@ def create_poster(
         image,
     )
 
-    # --------------------------------------------------------
-    # BACKGROUND
-    # --------------------------------------------------------
-
     draw_vertical_gradient(
         draw,
         POSTER_WIDTH,
@@ -746,10 +1036,6 @@ def create_poster(
         bg_top,
         bg_bottom,
     )
-
-    # --------------------------------------------------------
-    # OUTER BORDER
-    # --------------------------------------------------------
 
     draw.rounded_rectangle(
         (
@@ -790,10 +1076,6 @@ def create_poster(
 
     top_y = 34
 
-    # --------------------------------------------------------
-    # TITLE PANEL
-    # --------------------------------------------------------
-
     draw.rounded_rectangle(
         (
             left,
@@ -820,10 +1102,6 @@ def create_poster(
         radius=24,
         fill=panel_2,
     )
-
-    # --------------------------------------------------------
-    # TITLE
-    # --------------------------------------------------------
 
     title = (
         f"{position} - TOP "
@@ -862,10 +1140,6 @@ def create_poster(
         font=title_font,
     )
 
-    # --------------------------------------------------------
-    # SUBTITLE
-    # --------------------------------------------------------
-
     subtitle = (
         f"SEASON {season}"
     )
@@ -890,10 +1164,6 @@ def create_poster(
         fill=muted,
         font=SUBTITLE_FONT,
     )
-
-    # --------------------------------------------------------
-    # TABLE SETUP
-    # --------------------------------------------------------
 
     table_left = (
         left + 12
@@ -951,10 +1221,6 @@ def create_poster(
     )
 
     header_height = 58
-
-    # --------------------------------------------------------
-    # TABLE HEADER
-    # --------------------------------------------------------
 
     draw.rounded_rectangle(
         (
@@ -1054,10 +1320,6 @@ def create_poster(
                 width=1,
             )
 
-    # --------------------------------------------------------
-    # PLAYER ROWS
-    # --------------------------------------------------------
-
     row_y = (
         header_y
         + header_height
@@ -1142,10 +1404,6 @@ def create_poster(
                 ]
             )
 
-            # ------------------------------------------------
-            # RANK
-            # ------------------------------------------------
-
             if (
                 column_index
                 == 0
@@ -1174,10 +1432,6 @@ def create_poster(
                     fill=gold,
                     font=font,
                 )
-
-            # ------------------------------------------------
-            # NAME
-            # ------------------------------------------------
 
             elif (
                 column_index
@@ -1208,10 +1462,6 @@ def create_poster(
                     font=font,
                 )
 
-            # ------------------------------------------------
-            # COLLEGE
-            # ------------------------------------------------
-
             elif (
                 column_index
                 == 2
@@ -1240,10 +1490,6 @@ def create_poster(
                     fill=accent,
                     font=font,
                 )
-
-            # ------------------------------------------------
-            # HEIGHT / WEIGHT
-            # ------------------------------------------------
 
             elif column_index in (
                 3,
@@ -1283,10 +1529,6 @@ def create_poster(
                     fill=text,
                     font=font,
                 )
-
-            # ------------------------------------------------
-            # AGE
-            # ------------------------------------------------
 
             else:
 
@@ -1353,10 +1595,6 @@ def create_poster(
             ROW_HEIGHT
         )
 
-    # --------------------------------------------------------
-    # SAVE
-    # --------------------------------------------------------
-
     path = os.path.join(
         OUTPUT_DIR,
         (
@@ -1410,9 +1648,40 @@ def main():
         data,
     )
 
+    print(
+        f"Found {len(players)} "
+        f"player/prospect records."
+    )
+
+    if players:
+
+        print(
+            "FIRST PLAYER RECORD:"
+        )
+
+        print(
+            players[0]
+        )
+
     grouped = group_top_players(
         players,
     )
+
+    print(
+        "POSITION GROUPS:"
+    )
+
+    for (
+        position,
+        player_list,
+    ) in grouped.items():
+
+        print(
+            position,
+            len(
+                player_list
+            ),
+        )
 
     for (
         position,
