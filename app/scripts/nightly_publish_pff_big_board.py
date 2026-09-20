@@ -28,9 +28,7 @@ def public_storage_url(
     base = (
         os.environ[
             "SUPABASE_URL"
-        ].rstrip(
-            "/"
-        )
+        ].rstrip("/")
     )
 
     bucket = os.environ.get(
@@ -54,16 +52,12 @@ def draft_cycle_has_big_board(
 
     try:
 
-        data = (
-            bigboard.fetch_big_board(
-                season
-            )
+        data = bigboard.fetch_big_board(
+            season
         )
 
-        players = (
-            bigboard.get_player_list(
-                data
-            )
+        players = bigboard.get_player_list(
+            data
         )
 
         return bool(
@@ -79,6 +73,84 @@ def draft_cycle_has_big_board(
         )
 
         return False
+
+
+# ============================================================
+# DEBUG HELPERS
+# ============================================================
+
+def print_player_debug(
+    players,
+    limit: int = 3,
+) -> None:
+
+    print()
+    print(
+        "=" * 80
+    )
+
+    print(
+        "PFF BIG BOARD RAW PLAYER DEBUG"
+    )
+
+    print(
+        "=" * 80
+    )
+
+    print(
+        f"Total raw players returned: "
+        f"{len(players)}"
+    )
+
+    print()
+
+    for index, player in enumerate(
+        players[:limit],
+        start=1,
+    ):
+
+        print(
+            "-" * 80
+        )
+
+        print(
+            f"RAW PLAYER #{index}"
+        )
+
+        print(
+            "-" * 80
+        )
+
+        print(
+            json.dumps(
+                player,
+                indent=2,
+                default=str,
+            )
+        )
+
+        if isinstance(
+            player,
+            dict,
+        ):
+
+            print()
+
+            print(
+                "TOP-LEVEL KEYS:"
+            )
+
+            print(
+                sorted(
+                    player.keys()
+                )
+            )
+
+        print()
+
+    print(
+        "=" * 80
+    )
 
 
 # ============================================================
@@ -120,19 +192,15 @@ def publish_pff_big_board(
         bigboard.ensure_output_dir()
 
         # ----------------------------------------------------
-        # FETCH 2027 BIG BOARD
+        # FETCH BIG BOARD
         # ----------------------------------------------------
 
-        data = (
-            bigboard.fetch_big_board(
-                season
-            )
+        data = bigboard.fetch_big_board(
+            season
         )
 
-        players = (
-            bigboard.get_player_list(
-                data
-            )
+        players = bigboard.get_player_list(
+            data
         )
 
         if not players:
@@ -144,13 +212,50 @@ def publish_pff_big_board(
             )
 
         # ----------------------------------------------------
+        # DEBUG RAW 2027 PLAYER DATA
+        #
+        # This lets us see exactly which keys PFF uses
+        # for position, player name, school, etc.
+        # ----------------------------------------------------
+
+        print_player_debug(
+            players,
+            limit=3,
+        )
+
+        # ----------------------------------------------------
         # GROUP BY POSITION
         # ----------------------------------------------------
 
-        grouped = (
-            bigboard.group_top_players(
-                players
+        grouped = bigboard.group_top_players(
+            players
+        )
+
+        print()
+        print(
+            "=" * 80
+        )
+
+        print(
+            "GROUPED POSITION SUMMARY"
+        )
+
+        print(
+            "=" * 80
+        )
+
+        for (
+            position,
+            player_list,
+        ) in grouped.items():
+
+            print(
+                f"{position}: "
+                f"{len(player_list)} players"
             )
+
+        print(
+            "=" * 80
         )
 
         if not grouped:
@@ -195,11 +300,9 @@ def publish_pff_big_board(
                 "_top_5.png"
             )
 
-            local_path = (
-                os.path.join(
-                    tmpdir,
-                    filename,
-                )
+            local_path = os.path.join(
+                tmpdir,
+                filename,
             )
 
             if not os.path.exists(
@@ -253,16 +356,12 @@ def publish_pff_big_board(
             "count": len(
                 posters
             ),
-            "posters": (
-                posters
-            ),
+            "posters": posters,
         }
 
-        local_json = (
-            os.path.join(
-                tmpdir,
-                "current.json",
-            )
+        local_json = os.path.join(
+            tmpdir,
+            "current.json",
         )
 
         with open(
@@ -333,18 +432,14 @@ def get_current_pff_big_board_payload() -> dict:
 
 def parse_args():
 
-    parser = (
-        argparse.ArgumentParser()
-    )
+    parser = argparse.ArgumentParser()
 
     parser.add_argument(
         "--keep_versioned",
         action="store_true",
     )
 
-    return (
-        parser.parse_args()
-    )
+    return parser.parse_args()
 
 
 # ============================================================
@@ -353,19 +448,16 @@ def parse_args():
 
 def main():
 
-    args = (
-        parse_args()
-    )
+    args = parse_args()
 
-    result = (
-        publish_pff_big_board(
-            keep_versioned=(
-                args.keep_versioned
-            ),
-        )
+    result = publish_pff_big_board(
+        keep_versioned=(
+            args.keep_versioned
+        ),
     )
 
     print()
+
     print(
         json.dumps(
             result,
