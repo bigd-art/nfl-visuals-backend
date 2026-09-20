@@ -9,7 +9,7 @@ import requests
 from PIL import Image, ImageDraw, ImageFont
 
 
-SEASON_DEFAULT = 2026
+SEASON_DEFAULT = 2027
 VERSION = 4
 TOP_N = 5
 OUTPUT_DIR = "big_board_posters"
