@@ -10,26 +10,14 @@ from app.services.storage_supabase import upload_file_return_url
 import app.scripts.pff_big_board_posters as bigboard
 
 
-# ============================================================
-# DRAFT CLASS / BIG BOARD SEASON
-# ============================================================
-
 PFF_BIG_BOARD_SEASON = 2027
 
-
-# ============================================================
-# STORAGE HELPERS
-# ============================================================
 
 def public_storage_url(
     storage_key: str,
 ) -> str:
 
-    base = (
-        os.environ[
-            "SUPABASE_URL"
-        ].rstrip("/")
-    )
+    base = os.environ["SUPABASE_URL"].rstrip("/")
 
     bucket = os.environ.get(
         "SUPABASE_BUCKET",
@@ -41,10 +29,6 @@ def public_storage_url(
         f"{bucket}/{storage_key}"
     )
 
-
-# ============================================================
-# BIG BOARD AVAILABILITY CHECK
-# ============================================================
 
 def draft_cycle_has_big_board(
     season: int,
@@ -60,144 +44,178 @@ def draft_cycle_has_big_board(
             data
         )
 
-        return bool(
-            players
-        )
+        return bool(players)
 
     except Exception as error:
 
         print(
-            f"WARNING: PFF Big Board "
-            f"unavailable for season "
-            f"{season}: {error}"
+            f"WARNING: PFF Big Board unavailable "
+            f"for season {season}: {error}"
         )
 
         return False
 
 
-# ============================================================
-# DEBUG HELPERS
-# ============================================================
-
-def print_player_debug(
-    players,
-    limit: int = 3,
+def print_response_debug(
+    data,
 ) -> None:
 
     print()
-    print(
-        "=" * 80
-    )
+    print("=" * 80)
+    print("PFF FULL RESPONSE STRUCTURE DEBUG")
+    print("=" * 80)
 
     print(
-        "PFF BIG BOARD RAW PLAYER DEBUG"
+        f"TOP LEVEL TYPE: "
+        f"{type(data).__name__}"
     )
 
-    print(
-        "=" * 80
-    )
+    if isinstance(
+        data,
+        dict,
+    ):
 
-    print(
-        f"Total raw players returned: "
-        f"{len(players)}"
-    )
+        print()
+        print("TOP LEVEL KEYS:")
 
-    print()
+        print(
+            sorted(
+                data.keys()
+            )
+        )
 
-    for index, player in enumerate(
-        players[:limit],
-        start=1,
+        print()
+        print("TOP LEVEL VALUE SUMMARY:")
+
+        for key, value in data.items():
+
+            if isinstance(
+                value,
+                list,
+            ):
+
+                print(
+                    f"{key}: list "
+                    f"length={len(value)}"
+                )
+
+                if value:
+
+                    print(
+                        f"  first item type="
+                        f"{type(value[0]).__name__}"
+                    )
+
+                    if isinstance(
+                        value[0],
+                        dict,
+                    ):
+
+                        print(
+                            "  first item keys="
+                            f"{sorted(value[0].keys())}"
+                        )
+
+            elif isinstance(
+                value,
+                dict,
+            ):
+
+                print(
+                    f"{key}: dict "
+                    f"keys={sorted(value.keys())}"
+                )
+
+            else:
+
+                print(
+                    f"{key}: "
+                    f"{type(value).__name__} "
+                    f"value={value}"
+                )
+
+    elif isinstance(
+        data,
+        list,
     ):
 
         print(
-            "-" * 80
+            f"TOP LEVEL LIST LENGTH: "
+            f"{len(data)}"
         )
 
-        print(
-            f"RAW PLAYER #{index}"
-        )
-
-        print(
-            "-" * 80
-        )
-
-        print(
-            json.dumps(
-                player,
-                indent=2,
-                default=str,
-            )
-        )
-
-        if isinstance(
-            player,
-            dict,
-        ):
-
-            print()
+        if data:
 
             print(
-                "TOP-LEVEL KEYS:"
+                f"FIRST ITEM TYPE: "
+                f"{type(data[0]).__name__}"
             )
 
-            print(
-                sorted(
-                    player.keys()
+            if isinstance(
+                data[0],
+                dict,
+            ):
+
+                print(
+                    "FIRST ITEM KEYS: "
+                    f"{sorted(data[0].keys())}"
                 )
-            )
 
-        print()
+    print()
+    print("=" * 80)
+    print("FIRST 12000 CHARS OF RAW RESPONSE")
+    print("=" * 80)
 
-    print(
-        "=" * 80
+    raw_text = json.dumps(
+        data,
+        indent=2,
+        default=str,
     )
 
+    print(
+        raw_text[:12000]
+    )
 
-# ============================================================
-# PUBLISH BIG BOARD
-# ============================================================
+    print()
+    print("=" * 80)
+
 
 def publish_pff_big_board(
     keep_versioned: bool = False,
 ) -> dict:
 
-    season = (
-        PFF_BIG_BOARD_SEASON
-    )
+    season = PFF_BIG_BOARD_SEASON
 
     print()
-    print(
-        "=" * 80
-    )
+    print("=" * 80)
 
     print(
         f"Publishing PFF Big Board "
         f"for {season}..."
     )
 
-    print(
-        "=" * 80
-    )
+    print("=" * 80)
 
     with tempfile.TemporaryDirectory() as tmpdir:
 
-        # ----------------------------------------------------
-        # SEND GENERATOR OUTPUT TO TEMP DIRECTORY
-        # ----------------------------------------------------
-
-        bigboard.OUTPUT_DIR = (
-            tmpdir
-        )
-
+        bigboard.OUTPUT_DIR = tmpdir
         bigboard.ensure_output_dir()
-
-        # ----------------------------------------------------
-        # FETCH BIG BOARD
-        # ----------------------------------------------------
 
         data = bigboard.fetch_big_board(
             season
         )
+
+        # ====================================================
+        # DEBUG THE FULL 2027 RESPONSE BEFORE PARSING
+        # ====================================================
+
+        print_response_debug(
+            data
+        )
+
+        # ====================================================
+        # TRY TO FIND PLAYERS
+        # ====================================================
 
         players = bigboard.get_player_list(
             data
@@ -206,43 +224,38 @@ def publish_pff_big_board(
         if not players:
 
             raise RuntimeError(
-                f"PFF returned no Big Board "
-                f"players for season "
-                f"{season}."
+                f"PFF returned no Big Board players "
+                f"for season {season}."
             )
 
-        # ----------------------------------------------------
-        # DEBUG RAW 2027 PLAYER DATA
-        #
-        # This lets us see exactly which keys PFF uses
-        # for position, player name, school, etc.
-        # ----------------------------------------------------
-
-        print_player_debug(
-            players,
-            limit=3,
+        print()
+        print(
+            f"FOUND {len(players)} "
+            f"PLAYER RECORDS"
         )
 
-        # ----------------------------------------------------
-        # GROUP BY POSITION
-        # ----------------------------------------------------
+        print()
+
+        print(
+            "FIRST PLAYER:"
+        )
+
+        print(
+            json.dumps(
+                players[0],
+                indent=2,
+                default=str,
+            )
+        )
 
         grouped = bigboard.group_top_players(
             players
         )
 
         print()
-        print(
-            "=" * 80
-        )
-
-        print(
-            "GROUPED POSITION SUMMARY"
-        )
-
-        print(
-            "=" * 80
-        )
+        print("=" * 80)
+        print("GROUPED POSITION SUMMARY")
+        print("=" * 80)
 
         for (
             position,
@@ -254,33 +267,23 @@ def publish_pff_big_board(
                 f"{len(player_list)} players"
             )
 
-        print(
-            "=" * 80
-        )
+        print("=" * 80)
 
         if not grouped:
 
             raise RuntimeError(
-                f"No PFF position groups "
-                f"were created for season "
-                f"{season}."
+                f"No PFF position groups were created "
+                f"for season {season}."
             )
 
         posters = {}
-
-        # ----------------------------------------------------
-        # GENERATE + UPLOAD POSTERS
-        # ----------------------------------------------------
 
         for (
             position,
             player_list,
         ) in grouped.items():
 
-            if (
-                position
-                == "UNK"
-            ):
+            if position == "UNK":
 
                 print(
                     "WARNING: Skipping invalid "
@@ -310,8 +313,7 @@ def publish_pff_big_board(
             ):
 
                 raise FileNotFoundError(
-                    f"Expected poster was "
-                    f"not created: "
+                    f"Expected poster was not created: "
                     f"{local_path}"
                 )
 
@@ -335,27 +337,17 @@ def publish_pff_big_board(
                 f"-> {storage_key}"
             )
 
-        # ----------------------------------------------------
-        # ENSURE WE ACTUALLY CREATED SOMETHING
-        # ----------------------------------------------------
-
         if not posters:
 
             raise RuntimeError(
-                f"No valid PFF Big Board "
-                f"posters were generated "
-                f"for season {season}."
+                f"No valid PFF Big Board posters "
+                f"were generated for season "
+                f"{season}."
             )
-
-        # ----------------------------------------------------
-        # METADATA PAYLOAD
-        # ----------------------------------------------------
 
         payload = {
             "season": season,
-            "count": len(
-                posters
-            ),
+            "count": len(posters),
             "posters": posters,
         }
 
@@ -376,10 +368,6 @@ def publish_pff_big_board(
                 indent=2,
             )
 
-        # ----------------------------------------------------
-        # CURRENT METADATA
-        # ----------------------------------------------------
-
         payload[
             "metadata_url"
         ] = (
@@ -388,10 +376,6 @@ def publish_pff_big_board(
                 "pff_big_board/current.json",
             )
         )
-
-        # ----------------------------------------------------
-        # VERSIONED METADATA
-        # ----------------------------------------------------
 
         if keep_versioned:
 
@@ -411,24 +395,14 @@ def publish_pff_big_board(
         return payload
 
 
-# ============================================================
-# CURRENT PUBLIC PAYLOAD
-# ============================================================
-
 def get_current_pff_big_board_payload() -> dict:
 
     return {
-        "metadata_url": (
-            public_storage_url(
-                "pff_big_board/current.json"
-            )
+        "metadata_url": public_storage_url(
+            "pff_big_board/current.json"
         ),
     }
 
-
-# ============================================================
-# CLI
-# ============================================================
 
 def parse_args():
 
@@ -442,21 +416,13 @@ def parse_args():
     return parser.parse_args()
 
 
-# ============================================================
-# MAIN
-# ============================================================
-
 def main():
 
     args = parse_args()
 
     result = publish_pff_big_board(
-        keep_versioned=(
-            args.keep_versioned
-        ),
+        keep_versioned=args.keep_versioned,
     )
-
-    print()
 
     print(
         json.dumps(
@@ -465,10 +431,6 @@ def main():
         )
     )
 
-
-# ============================================================
-# ENTRY POINT
-# ============================================================
 
 if __name__ == "__main__":
     main()
