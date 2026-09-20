@@ -6,15 +6,37 @@ import json
 import os
 import tempfile
 
-from app.services.storage_supabase import upload_file_return_url
+from app.services.storage_supabase import (
+    upload_file_return_url,
+)
+
 import app.scripts.pff_big_board_posters as bigboard
 
 
 # ============================================================
-# DRAFT CLASS / BIG BOARD SEASON
+# CONFIG
 # ============================================================
 
-PFF_BIG_BOARD_SEASON = 2027
+BIG_BOARD_SEASON = 2027
+
+SOURCE_NAME = "DraftTek"
+
+
+# ============================================================
+# STORAGE
+#
+# Keep the existing pff_big_board storage path so we do not
+# break the mobile app or backend routes that already expect it.
+# The data source itself is now DraftTek.
+# ============================================================
+
+CURRENT_STORAGE_PREFIX = (
+    "pff_big_board/current"
+)
+
+HISTORY_STORAGE_PREFIX = (
+    "pff_big_board/history"
+)
 
 
 # ============================================================
@@ -25,7 +47,11 @@ def public_storage_url(
     storage_key: str,
 ) -> str:
 
-    base = os.environ["SUPABASE_URL"].rstrip("/")
+    base = (
+        os.environ[
+            "SUPABASE_URL"
+        ].rstrip("/")
+    )
 
     bucket = os.environ.get(
         "SUPABASE_BUCKET",
@@ -39,77 +65,25 @@ def public_storage_url(
 
 
 # ============================================================
-# CURRENT PUBLISHED BIG BOARD
+# CURRENT PAYLOAD
 # ============================================================
 
 def get_current_pff_big_board_payload() -> dict:
 
     return {
-        "metadata_url": public_storage_url(
-            "pff_big_board/current.json"
+        "metadata_url": (
+            public_storage_url(
+                (
+                    f"{CURRENT_STORAGE_PREFIX}/"
+                    "current.json"
+                )
+            )
         ),
     }
 
 
 # ============================================================
-# PLAYER EXTRACTION
-# ============================================================
-
-def get_available_players(
-    data,
-):
-
-    # --------------------------------------------------------
-    # PFF 2027 CURRENT RESPONSE
-    #
-    # The response currently contains a top-level "players"
-    # array, but PFF is returning it empty.
-    #
-    # Handle that explicitly instead of treating conference/
-    # team metadata as player records.
-    # --------------------------------------------------------
-
-    if isinstance(
-        data,
-        dict,
-    ):
-
-        players = data.get(
-            "players"
-        )
-
-        if isinstance(
-            players,
-            list,
-        ):
-
-            return players
-
-    # --------------------------------------------------------
-    # FALLBACK
-    #
-    # If PFF changes the response again in the future,
-    # allow the Big Board parser to look for player records.
-    # --------------------------------------------------------
-
-    try:
-
-        return bigboard.get_player_list(
-            data
-        )
-
-    except Exception as error:
-
-        print(
-            f"WARNING: Could not locate "
-            f"PFF player records: {error}"
-        )
-
-        return []
-
-
-# ============================================================
-# BIG BOARD AVAILABILITY CHECK
+# AVAILABILITY CHECK
 # ============================================================
 
 def draft_cycle_has_big_board(
@@ -118,30 +92,44 @@ def draft_cycle_has_big_board(
 
     try:
 
-        data = bigboard.fetch_big_board(
-            season
+        data = (
+            bigboard.fetch_big_board(
+                season
+            )
         )
 
-        players = get_available_players(
-            data
+        players = (
+            bigboard.get_player_list(
+                data
+            )
         )
 
-        return bool(
-            players
+        grouped = (
+            bigboard.group_top_players(
+                players
+            )
         )
+
+        bigboard.validate_position_groups(
+            grouped
+        )
+
+        return True
 
     except Exception as error:
 
         print(
-            f"WARNING: PFF Big Board unavailable "
-            f"for season {season}: {error}"
+            f"WARNING: {SOURCE_NAME} "
+            f"Big Board unavailable "
+            f"for season {season}: "
+            f"{error}"
         )
 
         return False
 
 
 # ============================================================
-# SKIP PAYLOAD
+# SKIP WITHOUT DESTROYING CURRENT POSTERS
 # ============================================================
 
 def skipped_payload(
@@ -149,9 +137,12 @@ def skipped_payload(
     reason: str,
 ) -> dict:
 
-    current_metadata_url = (
+    metadata_url = (
         public_storage_url(
-            "pff_big_board/current.json"
+            (
+                f"{CURRENT_STORAGE_PREFIX}/"
+                "current.json"
+            )
         )
     )
 
@@ -161,7 +152,7 @@ def skipped_payload(
     )
 
     print(
-        "PFF BIG BOARD REFRESH SKIPPED"
+        "BIG BOARD REFRESH SKIPPED"
     )
 
     print(
@@ -169,7 +160,12 @@ def skipped_payload(
     )
 
     print(
-        f"Requested season: {season}"
+        f"Source: {SOURCE_NAME}"
+    )
+
+    print(
+        f"Requested season: "
+        f"{season}"
     )
 
     print(
@@ -178,12 +174,7 @@ def skipped_payload(
 
     print(
         "Existing published Big Board "
-        "files will remain untouched."
-    )
-
-    print(
-        f"Current metadata remains at: "
-        f"{current_metadata_url}"
+        "posters remain untouched."
     )
 
     print(
@@ -192,22 +183,25 @@ def skipped_payload(
 
     return {
         "status": "skipped",
+        "source": SOURCE_NAME,
         "requested_season": season,
         "reason": reason,
         "preserved_existing_posters": True,
-        "metadata_url": current_metadata_url,
+        "metadata_url": metadata_url,
     }
 
 
 # ============================================================
-# PUBLISH BIG BOARD
+# PUBLISH
 # ============================================================
 
 def publish_pff_big_board(
     keep_versioned: bool = False,
 ) -> dict:
 
-    season = PFF_BIG_BOARD_SEASON
+    season = (
+        BIG_BOARD_SEASON
+    )
 
     print()
     print(
@@ -215,8 +209,8 @@ def publish_pff_big_board(
     )
 
     print(
-        f"Publishing PFF Big Board "
-        f"for {season}..."
+        f"Publishing {SOURCE_NAME} "
+        f"Big Board for {season}..."
     )
 
     print(
@@ -224,13 +218,21 @@ def publish_pff_big_board(
     )
 
     # ========================================================
-    # FETCH PFF DATA
+    # FETCH
     # ========================================================
 
     try:
 
-        data = bigboard.fetch_big_board(
-            season
+        data = (
+            bigboard.fetch_big_board(
+                season
+            )
+        )
+
+        players = (
+            bigboard.get_player_list(
+                data
+            )
         )
 
     except Exception as error:
@@ -238,48 +240,19 @@ def publish_pff_big_board(
         return skipped_payload(
             season=season,
             reason=(
-                "PFF Big Board request failed: "
-                f"{error}"
+                f"{SOURCE_NAME} fetch/"
+                f"parse failed: {error}"
             ),
         )
 
-    # ========================================================
-    # READ PLAYER ARRAY
-    # ========================================================
-
-    players = get_available_players(
-        data
-    )
-
-    # ========================================================
-    # NO 2027 PLAYERS YET
-    #
-    # This is expected while PFF returns:
-    #
-    #     "players": []
-    #
-    # Do NOT overwrite current posters.
-    # Do NOT fail the GitHub Action.
-    # ========================================================
-
-    if not players:
-
-        return skipped_payload(
-            season=season,
-            reason=(
-                f"PFF returned no player records "
-                f"for season {season}."
-            ),
-        )
-
+    print()
     print(
-        f"PFF returned "
-        f"{len(players)} player records "
-        f"for season {season}."
+        f"{SOURCE_NAME} returned "
+        f"{len(players)} prospects."
     )
 
     # ========================================================
-    # GROUP PLAYERS
+    # GROUP
     # ========================================================
 
     try:
@@ -290,88 +263,48 @@ def publish_pff_big_board(
             )
         )
 
+        bigboard.validate_position_groups(
+            grouped
+        )
+
     except Exception as error:
 
         return skipped_payload(
             season=season,
             reason=(
-                "PFF player grouping failed: "
-                f"{error}"
+                f"{SOURCE_NAME} position "
+                f"grouping failed: {error}"
             ),
         )
 
     # ========================================================
-    # FILTER INVALID GROUPS
-    # ========================================================
-
-    valid_grouped = {}
-
-    for (
-        position,
-        player_list,
-    ) in grouped.items():
-
-        if (
-            not position
-            or position == "UNK"
-        ):
-
-            print(
-                "WARNING: Skipping invalid "
-                f"position group: {position}"
-            )
-
-            continue
-
-        if not player_list:
-
-            print(
-                "WARNING: Skipping empty "
-                f"position group: {position}"
-            )
-
-            continue
-
-        valid_grouped[
-            position
-        ] = player_list
-
-    if not valid_grouped:
-
-        return skipped_payload(
-            season=season,
-            reason=(
-                f"PFF returned player data for "
-                f"season {season}, but no valid "
-                f"position groups could be created."
-            ),
-        )
-
-    # ========================================================
-    # GENERATE INTO TEMP DIRECTORY
+    # GENERATE EVERYTHING LOCALLY FIRST
     #
-    # Nothing touches the current published posters until
-    # valid posters have actually been generated.
+    # This ensures a parsing/generation problem does not
+    # partially replace the currently published board.
     # ========================================================
 
     with tempfile.TemporaryDirectory() as tmpdir:
 
-        bigboard.OUTPUT_DIR = tmpdir
+        bigboard.OUTPUT_DIR = (
+            tmpdir
+        )
 
         bigboard.ensure_output_dir()
 
         generated_files = {}
 
-        # ----------------------------------------------------
-        # GENERATE ALL POSTERS FIRST
-        # ----------------------------------------------------
-
         try:
 
-            for (
-                position,
-                player_list,
-            ) in valid_grouped.items():
+            for position in (
+                bigboard.TARGET_POSITIONS
+            ):
+
+                player_list = (
+                    grouped[
+                        position
+                    ]
+                )
 
                 bigboard.create_poster(
                     position,
@@ -384,9 +317,11 @@ def publish_pff_big_board(
                     "_top_5.png"
                 )
 
-                local_path = os.path.join(
-                    tmpdir,
-                    filename,
+                local_path = (
+                    os.path.join(
+                        tmpdir,
+                        filename,
+                    )
                 )
 
                 if not os.path.exists(
@@ -394,8 +329,9 @@ def publish_pff_big_board(
                 ):
 
                     raise FileNotFoundError(
-                        f"Expected poster was not created: "
-                        f"{local_path}"
+                        "Expected Big Board "
+                        "poster was not "
+                        f"created: {local_path}"
                     )
 
                 generated_files[
@@ -410,27 +346,34 @@ def publish_pff_big_board(
             return skipped_payload(
                 season=season,
                 reason=(
-                    "PFF poster generation failed: "
-                    f"{error}"
+                    "Poster generation "
+                    f"failed: {error}"
                 ),
             )
 
-        if not generated_files:
+        if (
+            len(
+                generated_files
+            )
+            != len(
+                bigboard.TARGET_POSITIONS
+            )
+        ):
 
             return skipped_payload(
                 season=season,
                 reason=(
-                    f"No PFF Big Board posters "
-                    f"were generated for season "
-                    f"{season}."
+                    "Not all required "
+                    "position posters "
+                    "were generated."
                 ),
             )
 
         print()
         print(
-            f"Successfully generated "
+            f"Generated all "
             f"{len(generated_files)} "
-            f"Big Board posters."
+            f"required Big Board posters."
         )
 
         # ====================================================
@@ -439,10 +382,15 @@ def publish_pff_big_board(
 
         posters = {}
 
-        for (
-            position,
-            file_info,
-        ) in generated_files.items():
+        for position in (
+            bigboard.TARGET_POSITIONS
+        ):
+
+            file_info = (
+                generated_files[
+                    position
+                ]
+            )
 
             filename = (
                 file_info[
@@ -457,7 +405,7 @@ def publish_pff_big_board(
             )
 
             storage_key = (
-                "pff_big_board/current/"
+                f"{CURRENT_STORAGE_PREFIX}/"
                 f"{filename}"
             )
 
@@ -477,21 +425,27 @@ def publish_pff_big_board(
             )
 
         # ====================================================
-        # METADATA PAYLOAD
+        # METADATA
         # ====================================================
 
         payload = {
             "status": "published",
+            "source": SOURCE_NAME,
             "season": season,
             "count": len(
                 posters
             ),
+            "positions": list(
+                bigboard.TARGET_POSITIONS
+            ),
             "posters": posters,
         }
 
-        local_json = os.path.join(
-            tmpdir,
-            "current.json",
+        local_json = (
+            os.path.join(
+                tmpdir,
+                "current.json",
+            )
         )
 
         with open(
@@ -506,16 +460,15 @@ def publish_pff_big_board(
                 indent=2,
             )
 
-        # ====================================================
-        # CURRENT METADATA
-        # ====================================================
-
         payload[
             "metadata_url"
         ] = (
             upload_file_return_url(
                 local_json,
-                "pff_big_board/current.json",
+                (
+                    f"{CURRENT_STORAGE_PREFIX}/"
+                    "current.json"
+                ),
             )
         )
 
@@ -531,9 +484,8 @@ def publish_pff_big_board(
                 upload_file_return_url(
                     local_json,
                     (
-                        "pff_big_board/history/"
-                        f"{season}/"
-                        "metadata.json"
+                        f"{HISTORY_STORAGE_PREFIX}/"
+                        f"{season}/metadata.json"
                     ),
                 )
             )
@@ -544,7 +496,8 @@ def publish_pff_big_board(
         )
 
         print(
-            f"PFF BIG BOARD {season} "
+            f"{SOURCE_NAME.upper()} "
+            f"BIG BOARD {season} "
             f"PUBLISHED SUCCESSFULLY"
         )
 
@@ -561,14 +514,18 @@ def publish_pff_big_board(
 
 def parse_args():
 
-    parser = argparse.ArgumentParser()
+    parser = (
+        argparse.ArgumentParser()
+    )
 
     parser.add_argument(
         "--keep_versioned",
         action="store_true",
     )
 
-    return parser.parse_args()
+    return (
+        parser.parse_args()
+    )
 
 
 # ============================================================
@@ -577,12 +534,16 @@ def parse_args():
 
 def main():
 
-    args = parse_args()
+    args = (
+        parse_args()
+    )
 
-    result = publish_pff_big_board(
-        keep_versioned=(
-            args.keep_versioned
-        ),
+    result = (
+        publish_pff_big_board(
+            keep_versioned=(
+                args.keep_versioned
+            ),
+        )
     )
 
     print()
