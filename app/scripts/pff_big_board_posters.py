@@ -19,9 +19,7 @@ from PIL import Image, ImageDraw, ImageFont
 # ============================================================
 
 SEASON_DEFAULT = 2027
-
 TOP_N = 5
-
 OUTPUT_DIR = "big_board_posters"
 
 DRAFTTEK_PAGE_URL = (
@@ -30,10 +28,6 @@ DRAFTTEK_PAGE_URL = (
     "Top-NFL-Draft-Prospects-{season}-Page-{page}.asp"
 )
 
-# DraftTek currently publishes the 2027 board across:
-# Page 1 = 1-150
-# Page 2 = 151-300
-# Page 3 = 301-450
 DRAFTTEK_PAGES = (
     1,
     2,
@@ -58,10 +52,7 @@ HEADERS = {
 
 
 # ============================================================
-# TARGET POSTER GROUPS
-#
-# Keep exactly the same position groups the app previously
-# published from the PFF Big Board.
+# TARGET POSITION GROUPS
 # ============================================================
 
 TARGET_POSITIONS = (
@@ -81,36 +72,26 @@ TARGET_POSITIONS = (
 
 # ============================================================
 # DRAFTTEK POSITION -> APP POSITION
-#
-# DraftTek uses more granular position labels.
-# Collapse them into the exact same groups our existing
-# Big Board posters used.
 # ============================================================
 
 DRAFTTEK_POSITION_MAP = {
-    # Quarterback
     "QB": "QB",
 
-    # Running back
     "RB": "RB",
     "HB": "RB",
     "TB": "RB",
 
-    # Wide receiver
     "WR": "WR",
     "WRS": "WR",
     "SWR": "WR",
 
-    # Tight end
     "TE": "TE",
 
-    # Offensive tackle
     "OT": "T",
     "T": "T",
     "LT": "T",
     "RT": "T",
 
-    # Interior offensive line
     "OG": "IOL",
     "G": "IOL",
     "LG": "IOL",
@@ -120,12 +101,10 @@ DRAFTTEK_POSITION_MAP = {
     "IOL": "IOL",
     "OL": "IOL",
 
-    # Edge defender
     "EDGE": "ED",
     "DE": "ED",
     "ED": "ED",
 
-    # Interior defensive line
     "DL1T": "DI",
     "DL3T": "DI",
     "DL5T": "DI",
@@ -134,18 +113,15 @@ DRAFTTEK_POSITION_MAP = {
     "DL": "DI",
     "DI": "DI",
 
-    # Linebacker
     "LB": "LB",
     "ILB": "LB",
     "OLB": "LB",
     "MLB": "LB",
 
-    # Cornerback
     "CB": "CB",
     "CBN": "CB",
     "NCB": "CB",
 
-    # Safety
     "S": "S",
     "FS": "S",
     "SS": "S",
@@ -200,9 +176,18 @@ def clean_text(
 
     text = (
         text
-        .replace("\xa0", " ")
-        .replace("\u200b", "")
-        .replace("\ufeff", "")
+        .replace(
+            "\xa0",
+            " ",
+        )
+        .replace(
+            "\u200b",
+            "",
+        )
+        .replace(
+            "\ufeff",
+            "",
+        )
     )
 
     return re.sub(
@@ -216,9 +201,12 @@ def canonical_header(
     value: str,
 ) -> str:
 
-    value = clean_text(
-        value
-    ).lower()
+    value = (
+        clean_text(
+            value
+        )
+        .lower()
+    )
 
     value = re.sub(
         r"[^a-z0-9]+",
@@ -250,19 +238,18 @@ def parse_rank(
         return None
 
     try:
+
         return int(
             match.group(1)
         )
 
     except Exception:
+
         return None
 
 
 # ============================================================
 # HTML TABLE PARSER
-#
-# Standard-library parser only.
-# No BeautifulSoup dependency required.
 # ============================================================
 
 class DraftTekTableParser(
@@ -284,8 +271,13 @@ class DraftTekTableParser(
         self._in_row = False
         self._in_cell = False
 
-        self._row: List[str] = []
-        self._cell_parts: List[str] = []
+        self._row: List[
+            str
+        ] = []
+
+        self._cell_parts: List[
+            str
+        ] = []
 
     def handle_starttag(
         self,
@@ -323,6 +315,7 @@ class DraftTekTableParser(
             )
 
             if text:
+
                 self._cell_parts.append(
                     text
                 )
@@ -444,10 +437,13 @@ def find_header_row(
         )
 
         has_position = any(
-            cell.startswith(
-                "pos"
+            (
+                cell.startswith(
+                    "pos"
+                )
+                or cell == "p1"
+                or cell == "position"
             )
-            or cell == "p1"
             for cell in normalized
         )
 
@@ -470,27 +466,32 @@ def find_header_row(
 
 
 # ============================================================
-# DRAFTTEK POSITION NORMALIZATION
+# POSITION NORMALIZATION
 # ============================================================
 
 def normalize_position(
     value,
 ) -> str:
 
-    raw = clean_text(
-        value
-    ).upper()
-
     raw = (
-        raw
-        .replace("-", "")
-        .replace(" ", "")
+        clean_text(
+            value
+        )
+        .upper()
+        .replace(
+            "-",
+            "",
+        )
+        .replace(
+            " ",
+            "",
+        )
     )
 
     return (
         DRAFTTEK_POSITION_MAP.get(
             raw,
-            ""
+            "",
         )
     )
 
@@ -505,9 +506,7 @@ def parse_drafttek_page(
     page: int,
 ) -> List[dict]:
 
-    parser = (
-        DraftTekTableParser()
-    )
+    parser = DraftTekTableParser()
 
     parser.feed(
         html
@@ -532,6 +531,11 @@ def parse_drafttek_page(
             f"for season={season}, "
             f"page={page}."
         )
+
+    print(
+        f"DraftTek page {page} headers: "
+        f"{header_row}"
+    )
 
     rank_col = find_column(
         header_row,
@@ -721,18 +725,33 @@ def parse_drafttek_page(
             {
                 "rank": rank,
                 "name": name,
-                "college": college or "N/A",
-                "source_position": source_position,
+                "college": (
+                    college
+                    or "N/A"
+                ),
+                "source_position": (
+                    source_position
+                ),
                 "position": position,
-                "height": height or "N/A",
-                "weight": weight or "N/A",
-                "class": player_class or "N/A",
+                "height": (
+                    height
+                    or "N/A"
+                ),
+                "weight": (
+                    weight
+                    or "N/A"
+                ),
+                "class": (
+                    player_class
+                    or "N/A"
+                ),
             }
         )
 
     print(
         f"DraftTek page {page}: "
-        f"parsed {len(players)} ranked prospects"
+        f"parsed {len(players)} "
+        f"ranked prospects"
     )
 
     return players
@@ -858,16 +877,14 @@ def fetch_big_board(
             page_players
         )
 
-    # --------------------------------------------------------
-    # DEDUPE
-    # --------------------------------------------------------
-
     unique = {}
 
     for player in all_players:
 
         key = (
-            player.get("rank"),
+            player.get(
+                "rank"
+            ),
             clean_text(
                 player.get(
                     "name"
@@ -955,7 +972,7 @@ def get_player_list(
 
 
 # ============================================================
-# GROUP TOP 5 BY OUR EXISTING APP POSITION GROUPS
+# GROUP TOP PLAYERS
 # ============================================================
 
 def group_top_players(
@@ -1089,6 +1106,53 @@ def group_top_players(
 
 
 # ============================================================
+# VALIDATE POSITION COVERAGE
+# ============================================================
+
+def validate_position_groups(
+    grouped,
+) -> None:
+
+    problems = []
+
+    for position in TARGET_POSITIONS:
+
+        count = len(
+            grouped.get(
+                position,
+                []
+            )
+        )
+
+        if count < TOP_N:
+
+            problems.append(
+                (
+                    position,
+                    count,
+                )
+            )
+
+    if problems:
+
+        message = ", ".join(
+            f"{position}={count}"
+            for (
+                position,
+                count,
+            )
+            in problems
+        )
+
+        raise RuntimeError(
+            "DraftTek did not provide "
+            "five usable prospects for "
+            f"every required group: "
+            f"{message}"
+        )
+
+
+# ============================================================
 # FONTS
 # ============================================================
 
@@ -1166,7 +1230,8 @@ def fit_font(
     size = start_size
 
     while (
-        size >= min_size
+        size
+        >= min_size
     ):
 
         font = get_font(
@@ -1256,12 +1321,6 @@ def draw_vertical_gradient(
 
 # ============================================================
 # POSTER
-#
-# Same visual layout/colors as the existing Big Board.
-#
-# Only data-field change:
-# AGE -> CLASS
-# because DraftTek exposes class rather than age.
 # ============================================================
 
 def create_poster(
@@ -1562,7 +1621,9 @@ def create_poster(
         in column_fractions
     ]
 
-    column_widths[-1] += (
+    column_widths[
+        -1
+    ] += (
         table_width
         - sum(
             column_widths
@@ -1644,7 +1705,8 @@ def create_poster(
                 header,
                 column_widths[
                     index
-                ] - 22,
+                ]
+                - 22,
                 34,
                 22,
                 bold=True,
@@ -2029,56 +2091,12 @@ def create_poster(
 
 
 # ============================================================
-# VALIDATE POSITION COVERAGE
-# ============================================================
-
-def validate_position_groups(
-    grouped,
-) -> None:
-
-    problems = []
-
-    for position in TARGET_POSITIONS:
-
-        count = len(
-            grouped.get(
-                position,
-                []
-            )
-        )
-
-        if count < TOP_N:
-
-            problems.append(
-                (
-                    position,
-                    count,
-                )
-            )
-
-    if problems:
-
-        message = ", ".join(
-            f"{position}={count}"
-            for (
-                position,
-                count,
-            )
-            in problems
-        )
-
-        raise RuntimeError(
-            "DraftTek did not provide "
-            "five usable prospects for "
-            f"every required group: {message}"
-        )
-
-
-# ============================================================
 # MAIN
 # ============================================================
 
 def main():
+
+    global OUTPUT_DIR
 
     parser = (
         argparse.ArgumentParser()
@@ -2099,8 +2117,6 @@ def main():
     args = (
         parser.parse_args()
     )
-
-    global OUTPUT_DIR
 
     OUTPUT_DIR = (
         args.outdir
@@ -2151,6 +2167,10 @@ def main():
         "Done."
     )
 
+
+# ============================================================
+# ENTRY POINT
+# ============================================================
 
 if __name__ == "__main__":
     main()
