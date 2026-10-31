@@ -8,7 +8,7 @@ from bs4 import BeautifulSoup
 from PIL import Image, ImageDraw, ImageFont
 
 SOURCE_URL = "https://www.tankathon.com/nfl/mock-draft"
-OUTPUT_DIR = "tankathon_mock-posters"
+OUTPUT_DIR = "tankathon_mock_posters"
 
 POSTER_WIDTH = 1600
 POSTER_HEIGHT = 2000
