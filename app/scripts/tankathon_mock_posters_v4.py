@@ -7,7 +7,8 @@ import requests
 from bs4 import BeautifulSoup
 from PIL import Image, ImageDraw, ImageFont
 
-SOURCE_URL = "https://www.tankathon.com/nfl/mock-draft"
+
+SOURCE_URL = "https://www.tankathon.com/nfl/mock_draft"
 OUTPUT_DIR = "tankathon_mock_posters"
 
 POSTER_WIDTH = 1600
@@ -15,20 +16,26 @@ POSTER_HEIGHT = 2000
 ROWS_PER_POSTER = 8
 TOTAL_POSTERS = 4
 
+
 USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/138.0.0.0 Safari/537.36"
 )
 
+
 HEADERS = {
     "User-Agent": USER_AGENT,
     "Accept-Language": "en-US,en;q=0.9",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+    "Accept": (
+        "text/html,application/xhtml+xml,"
+        "application/xml;q=0.9,image/webp,*/*;q=0.8"
+    ),
     "Referer": "https://www.google.com/",
     "Cache-Control": "no-cache",
     "Pragma": "no-cache",
 }
+
 
 TEAM_ABBRS = {
     "ARI", "ATL", "BAL", "BUF", "CAR", "CHI", "CIN", "CLE",
@@ -37,6 +44,7 @@ TEAM_ABBRS = {
     "NYJ", "PHI", "PIT", "SEA", "SF", "TB", "TEN", "WSH",
 }
 
+
 TEAM_FIXES = {
     "JAC": "JAX",
     "WAS": "WSH",
@@ -44,53 +52,3293 @@ TEAM_FIXES = {
 }
 
 
-# Tankathon currently exposes the team name in the same text chunk
-# that the old parser may capture as part of the player name.
-# Keep the original parser intact, then clean that prefix afterward.
+# ============================================================
+# TEAM NAME PREFIXES
+#
+# Tankathon currently includes team text in front of some
+# player names, for example:
+#
+#   LA Chargers Jeremiah Smith
+#   Tennessee Drew Mestemaker
+#   From Indianapolis Darian Mensah
+#
+# We detect those prefixes AFTER the original parser has
+# already parsed the pick.
+# ============================================================
+
 TEAM_NAME_PREFIXES = {
+    "FROM LOS ANGELES CHARGERS": "LAC",
+    "LOS ANGELES CHARGERS": "LAC",
+    "LA CHARGERS": "LAC",
+
+    "FROM LOS ANGELES RAMS": "LAR",
+    "LOS ANGELES RAMS": "LAR",
+    "LA RAMS": "LAR",
+
+    "FROM ARIZONA CARDINALS": "ARI",
     "ARIZONA CARDINALS": "ARI",
+    "FROM ARIZONA": "ARI",
     "ARIZONA": "ARI",
+
+    "FROM ATLANTA FALCONS": "ATL",
     "ATLANTA FALCONS": "ATL",
+    "FROM ATLANTA": "ATL",
     "ATLANTA": "ATL",
+
+    "FROM BALTIMORE RAVENS": "BAL",
     "BALTIMORE RAVENS": "BAL",
+    "FROM BALTIMORE": "BAL",
     "BALTIMORE": "BAL",
+
+    "FROM BUFFALO BILLS": "BUF",
     "BUFFALO BILLS": "BUF",
+    "FROM BUFFALO": "BUF",
     "BUFFALO": "BUF",
+
+    "FROM CAROLINA PANTHERS": "CAR",
     "CAROLINA PANTHERS": "CAR",
+    "FROM CAROLINA": "CAR",
     "CAROLINA": "CAR",
+
+    "FROM CHICAGO BEARS": "CHI",
     "CHICAGO BEARS": "CHI",
+    "FROM CHICAGO": "CHI",
     "CHICAGO": "CHI",
+
+    "FROM CINCINNATI BENGALS": "CIN",
     "CINCINNATI BENGALS": "CIN",
+    "FROM CINCINNATI": "CIN",
     "CINCINNATI": "CIN",
+
+    "FROM CLEVELAND BROWNS": "CLE",
     "CLEVELAND BROWNS": "CLE",
+    "FROM CLEVELAND": "CLE",
     "CLEVELAND": "CLE",
+
+    "FROM DALLAS COWBOYS": "DAL",
     "DALLAS COWBOYS": "DAL",
+    "FROM DALLAS": "DAL",
     "DALLAS": "DAL",
+
+    "FROM DENVER BRONCOS": "DEN",
     "DENVER BRONCOS": "DEN",
+    "FROM DENVER": "DEN",
     "DENVER": "DEN",
+
+    "FROM DETROIT LIONS": "DET",
     "DETROIT LIONS": "DET",
+    "FROM DETROIT": "DET",
     "DETROIT": "DET",
+
+    "FROM GREEN BAY PACKERS": "GB",
     "GREEN BAY PACKERS": "GB",
+    "FROM GREEN BAY": "GB",
     "GREEN BAY": "GB",
+
+    "FROM HOUSTON TEXANS": "HOU",
     "HOUSTON TEXANS": "HOU",
+    "FROM HOUSTON": "HOU",
     "HOUSTON": "HOU",
+
+    "FROM INDIANAPOLIS COLTS": "IND",
     "INDIANAPOLIS COLTS": "IND",
     "FROM INDIANAPOLIS": "IND",
     "INDIANAPOLIS": "IND",
+
+    "FROM JACKSONVILLE JAGUARS": "JAX",
     "JACKSONVILLE JAGUARS": "JAX",
+    "FROM JACKSONVILLE": "JAX",
     "JACKSONVILLE": "JAX",
+
+    "FROM KANSAS CITY CHIEFS": "KC",
     "KANSAS CITY CHIEFS": "KC",
+    "FROM KANSAS CITY": "KC",
     "KANSAS CITY": "KC",
+
+    "FROM LAS VEGAS RAIDERS": "LV",
     "LAS VEGAS RAIDERS": "LV",
+    "FROM LAS VEGAS": "LV",
     "LAS VEGAS": "LV",
-    "LOS ANGELES CHARGERS": "LAC",
-    "LA CHARGERS": "LAC",
-    "CHARGERS": "LAC",
-    "LOS ANGELES RAMS": "LAR",
-    "LA RAMS": "LAR",
-    "RAMS": "LAR",
+
+    "FROM MIAMI DOLPHINS": "MIA",
     "MIAMI DOLPHINS": "MIA",
+    "FROM MIAMI": "MIA",
     "MIAMI": "MIA",
+
+    "FROM MINNESOTA VIKINGS": "MIN",
     "MINNESOTA VIKINGS": "MIN",
+    "FROM MINNESOTA": "MIN",
     "MINNESOTA": "MIN",
+
+    "FROM NEW ENGLAND PATRIOTS": "NE",
     "NEW ENGLAND PATRIOTS": "NE",
+    "FROM NEW ENGLAND": "NE",
+    "NEW ENGLAND": "NE",
+
+    "FROM NEW ORLEANS SAINTS": "NO",
+    "NEW ORLEANS SAINTS": "NO",
+    "FROM NEW ORLEANS": "NO",
+    "NEW ORLEANS": "NO",
+
+    "FROM NEW YORK GIANTS": "NYG",
+    "NEW YORK GIANTS": "NYG",
+    "FROM NY GIANTS": "NYG",
+    "NY GIANTS": "NYG",
+
+    "FROM NEW YORK JETS": "NYJ",
+    "NEW YORK JETS": "NYJ",
+    "FROM NY JETS": "NYJ",
+    "NY JETS": "NYJ",
+
+    "FROM PHILADELPHIA EAGLES": "PHI",
+    "PHILADELPHIA EAGLES": "PHI",
+    "FROM PHILADELPHIA": "PHI",
+    "PHILADELPHIA": "PHI",
+
+    "FROM PITTSBURGH STEELERS": "PIT",
+    "PITTSBURGH STEELERS": "PIT",
+    "FROM PITTSBURGH": "PIT",
+    "PITTSBURGH": "PIT",
+
+    "FROM SAN FRANCISCO 49ERS": "SF",
+    "SAN FRANCISCO 49ERS": "SF",
+    "FROM SAN FRANCISCO": "SF",
+    "SAN FRANCISCO": "SF",
+
+    "FROM SEATTLE SEAHAWKS": "SEA",
+    "SEATTLE SEAHAWKS": "SEA",
+    "FROM SEATTLE": "SEA",
+    "SEATTLE": "SEA",
+
+    "FROM TAMPA BAY BUCCANEERS": "TB",
+    "TAMPA BAY BUCCANEERS": "TB",
+    "FROM TAMPA BAY": "TB",
+    "TAMPA BAY": "TB",
+
+    "FROM TENNESSEE TITANS": "TEN",
+    "TENNESSEE TITANS": "TEN",
+    "FROM TENNESSEE": "TEN",
+    "TENNESSEE": "TEN",
+
+    "FROM WASHINGTON COMMANDERS": "WSH",
+    "WASHINGTON COMMANDERS": "WSH",
+    "FROM WASHINGTON": "WSH",
+    "WASHINGTON": "WSH",
+}
+
+
+TEAM_COLORS = {
+    "ARI": ("#97233F", "#E6A13B"),
+    "ATL": ("#A71930", "#111111"),
+    "BAL": ("#4F2A86", "#D5A824"),
+    "BUF": ("#1769AA", "#C8102E"),
+    "CAR": ("#0085CA", "#101820"),
+    "CHI": ("#C95C12", "#5A3216"),
+    "CIN": ("#FB4F14", "#111111"),
+    "CLE": ("#E85D04", "#5B2C12"),
+    "DAL": ("#17365D", "#B7C1CC"),
+    "DEN": ("#F36C21", "#17365D"),
+    "DET": ("#1673B1", "#A7B1BA"),
+    "GB": ("#1F5132", "#E3B23C"),
+    "HOU": ("#17365D", "#C51F35"),
+    "IND": ("#194F90", "#FFFFFF"),
+    "JAX": ("#D5A52A", "#008C95"),
+    "KC": ("#C62828", "#EFB32B"),
+    "LV": ("#252525", "#B8B8B8"),
+    "LAC": ("#168DD0", "#F5C542"),
+    "LAR": ("#E0A520", "#1C4C8C"),
+    "MIA": ("#1499A5", "#ED6A29"),
+    "MIN": ("#5B328A", "#E5B735"),
+    "NE": ("#17365D", "#C6283E"),
+    "NO": ("#C9A13B", "#171717"),
+    "NYG": ("#1F5594", "#B92739"),
+    "NYJ": ("#1F573D", "#FFFFFF"),
+    "PHI": ("#126A70", "#D5D8DA"),
+    "PIT": ("#E3B52B", "#CB273A"),
+    "SF": ("#C5412D", "#D9A640"),
+    "SEA": ("#17365D", "#58A64A"),
+    "TB": ("#B82729", "#E36D2E"),
+    "TEN": ("#4D85BD", "#17365D"),
+    "WSH": ("#8F2433", "#E6B640"),
+}
+
+
+POSITION_TOKENS = [
+    "LB/EDGE",
+    "OT/IOL",
+    "IOL",
+    "EDGE",
+    "QB",
+    "RB",
+    "WR",
+    "TE",
+    "OT",
+    "OG",
+    "C",
+    "DE",
+    "DT",
+    "DL",
+    "LB",
+    "OLB",
+    "ILB",
+    "CB",
+    "FS",
+    "SS",
+    "S",
+    "DB",
+]
+
+
+POSITION_PATTERN = "|".join(
+    sorted(
+        [re.escape(x) for x in POSITION_TOKENS],
+        key=len,
+        reverse=True,
+    )
+)
+
+
+def ensure_dir(path: str) -> None:
+    os.makedirs(
+        path,
+        exist_ok=True,
+    )
+
+
+def load_font(
+    size: int,
+    bold: bool = False,
+):
+    candidates = [
+        (
+            "/System/Library/Fonts/Supplemental/Arial Bold.ttf"
+            if bold
+            else "/System/Library/Fonts/Supplemental/Arial.ttf"
+        ),
+        (
+            "/Library/Fonts/Arial Bold.ttf"
+            if bold
+            else "/Library/Fonts/Arial.ttf"
+        ),
+        (
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+            if bold
+            else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+        ),
+    ]
+
+    for path in candidates:
+        if os.path.exists(path):
+            try:
+                return ImageFont.truetype(
+                    path,
+                    size=size,
+                )
+            except Exception:
+                pass
+
+    return ImageFont.load_default()
+
+
+FONT_TITLE = load_font(
+    74,
+    bold=True,
+)
+
+FONT_SUBTITLE = load_font(
+    30,
+    bold=False,
+)
+
+FONT_PICK = load_font(
+    44,
+    bold=True,
+)
+
+FONT_TEAM = load_font(
+    32,
+    bold=True,
+)
+
+FONT_PLAYER = load_font(
+    42,
+    bold=True,
+)
+
+FONT_META = load_font(
+    28,
+    bold=False,
+)
+
+
+def hex_to_rgb(
+    value: str,
+):
+    value = (
+        value
+        .replace(
+            "#",
+            "",
+        )
+        .strip()
+    )
+
+    return tuple(
+        int(
+            value[
+                i:i + 2
+            ],
+            16,
+        )
+        for i in (
+            0,
+            2,
+            4,
+        )
+    )
+
+
+def fetch_html(
+    url: str,
+) -> str:
+    resp = requests.get(
+        url,
+        headers=HEADERS,
+        timeout=30,
+    )
+
+    resp.raise_for_status()
+
+    return resp.text
+
+
+def normalize_team_abbr(
+    team: str,
+) -> str:
+    team = (
+        team
+        or ""
+    ).strip().upper()
+
+    return TEAM_FIXES.get(
+        team,
+        team,
+    )
+
+
+def clean_text(
+    text: str,
+) -> str:
+    return re.sub(
+        r"\s+",
+        " ",
+        text or "",
+    ).strip()
+
+
+# ============================================================
+# FINAL TEAM PREFIX CLEANUP
+# ============================================================
+
+def extract_team_prefix(
+    player_text: str,
+):
+    original = clean_text(
+        player_text
+    )
+
+    upper = original.upper()
+
+    for prefix in sorted(
+        TEAM_NAME_PREFIXES.keys(),
+        key=len,
+        reverse=True,
+    ):
+        prefix_upper = prefix.upper()
+
+        if upper.startswith(
+            prefix_upper + " "
+        ):
+            team = TEAM_NAME_PREFIXES[
+                prefix
+            ]
+
+            player = clean_text(
+                original[
+                    len(prefix):
+                ]
+            )
+
+            return (
+                team,
+                player,
+            )
+
+    return (
+        "",
+        original,
+    )
+
+
+def apply_team_prefix_cleanup(
+    item: dict,
+) -> dict:
+    item = dict(
+        item
+    )
+
+    player = clean_text(
+        item.get(
+            "player",
+            "",
+        )
+    )
+
+    existing_team = normalize_team_abbr(
+        item.get(
+            "team",
+            "",
+        )
+    )
+
+    detected_team, cleaned_player = (
+        extract_team_prefix(
+            player
+        )
+    )
+
+    if detected_team:
+        item[
+            "team"
+        ] = detected_team
+
+        item[
+            "player"
+        ] = cleaned_player
+
+    else:
+        item[
+            "team"
+        ] = existing_team
+
+        item[
+            "player"
+        ] = player
+
+    return item
+
+
+def soup_to_text_with_img_alts(
+    html: str,
+) -> str:
+    soup = BeautifulSoup(
+        html,
+        "html.parser",
+    )
+
+    for img in soup.find_all(
+        "img"
+    ):
+        alt = clean_text(
+            img.get(
+                "alt",
+                "",
+            )
+        )
+
+        if alt:
+            img.replace_with(
+                f"\nImage: {alt}\n"
+            )
+        else:
+            img.replace_with(
+                "\n"
+            )
+
+    text = soup.get_text(
+        "\n"
+    )
+
+    text = text.replace(
+        "\r",
+        "\n",
+    )
+
+    text = re.sub(
+        r"\n{3,}",
+        "\n\n",
+        text,
+    )
+
+    return text
+
+
+def extract_round1_text(
+    full_text: str,
+) -> str:
+    match = re.search(
+        r"\bRound 1\b(.*?)(?:\bRound 2\b|$)",
+        full_text,
+        flags=(
+            re.DOTALL
+            | re.IGNORECASE
+        ),
+    )
+
+    if not match:
+        raise RuntimeError(
+            "Could not find Round 1 section."
+        )
+
+    return match.group(
+        1
+    )
+
+
+def parse_pick_block(
+    block_text: str,
+):
+    team_matches = re.findall(
+        r"Image:\s*([A-Z]{2,3})\b",
+        block_text,
+    )
+
+    team = ""
+
+    for item in team_matches:
+        item = normalize_team_abbr(
+            item
+        )
+
+        if item in TEAM_ABBRS:
+            team = item
+            break
+
+    player_match = re.search(
+        rf"\b("
+        rf"[A-Z][A-Za-z\.'\-]+"
+        rf"(?:\s+[A-Z][A-Za-z\.'\-]+)*"
+        rf")"
+        rf"\s+"
+        rf"({POSITION_PATTERN})"
+        rf"\s*\|\s*"
+        rf"([^\n]+)",
+        block_text,
+    )
+
+    if not player_match:
+        return None
+
+    player = clean_text(
+        player_match.group(
+            1
+        )
+    )
+
+    position = clean_text(
+        player_match.group(
+            2
+        )
+    )
+
+    college = clean_text(
+        player_match.group(
+            3
+        )
+    )
+
+    college = re.sub(
+        r"\s+$",
+        "",
+        college,
+    )
+
+    college = re.sub(
+        r"\s{2,}.*$",
+        "",
+        college,
+    )
+
+    return {
+        "team": team,
+        "player": player,
+        "position": position,
+        "college": college,
+    }
+
+
+def parse_by_number_blocks(
+    round1_text: str,
+):
+    pattern = re.compile(
+        r"(?m)^\s*(\d{1,2})\s*$"
+    )
+
+    matches = list(
+        pattern.finditer(
+            round1_text
+        )
+    )
+
+    picks = []
+
+    for index, match in enumerate(
+        matches
+    ):
+        pick_num = int(
+            match.group(
+                1
+            )
+        )
+
+        if not (
+            1
+            <= pick_num
+            <= 32
+        ):
+            continue
+
+        start = match.end()
+
+        end = (
+            matches[
+                index + 1
+            ].start()
+            if (
+                index + 1
+                < len(matches)
+            )
+            else len(
+                round1_text
+            )
+        )
+
+        block = round1_text[
+            start:end
+        ]
+
+        parsed = parse_pick_block(
+            block
+        )
+
+        if parsed:
+            parsed[
+                "pick"
+            ] = pick_num
+
+            picks.append(
+                parsed
+            )
+
+    return picks
+
+
+def parse_by_loose_regex(
+    round1_text: str,
+):
+    text = round1_text
+    picks = []
+
+    loose_pattern = re.compile(
+        rf"""
+        (?P<pick>\b[1-9]\b|\b[12][0-9]\b|\b3[0-2]\b)
+        [\s\S]{{0,220}}?
+        Image:\s*(?P<team>[A-Z]{{2,3}})
+        [\s\S]{{0,500}}?
+        (?P<player>
+            [A-Z][A-Za-z\.'\-]+
+            (?:\s+[A-Z][A-Za-z\.'\-]+)*
+        )
+        \s+
+        (?P<position>{POSITION_PATTERN})
+        \s*\|\s*
+        (?P<college>[A-Za-z][A-Za-z\.\-&' ]+)
+        """,
+        flags=re.VERBOSE,
+    )
+
+    for match in loose_pattern.finditer(
+        text
+    ):
+        try:
+            pick_num = int(
+                match.group(
+                    "pick"
+                )
+            )
+
+        except Exception:
+            continue
+
+        if not (
+            1
+            <= pick_num
+            <= 32
+        ):
+            continue
+
+        team = normalize_team_abbr(
+            match.group(
+                "team"
+            )
+        )
+
+        if team not in TEAM_ABBRS:
+            continue
+
+        player = clean_text(
+            match.group(
+                "player"
+            )
+        )
+
+        position = clean_text(
+            match.group(
+                "position"
+            )
+        )
+
+        college = clean_text(
+            match.group(
+                "college"
+            )
+        )
+
+        college = re.split(
+            r"\s+(?:Image:|Draft|Player|Team|Pick|Round|\d{1,2}\b)",
+            college,
+        )[0]
+
+        college = clean_text(
+            college
+        )
+
+        if (
+            not player
+            or not position
+            or not college
+        ):
+            continue
+
+        picks.append(
+            {
+                "pick": pick_num,
+                "team": team,
+                "player": player,
+                "position": position,
+                "college": college,
+            }
+        )
+
+    return picks
+
+
+def write_debug(
+    round1_text: str,
+    output,
+):
+    ensure_dir(
+        OUTPUT_DIR
+    )
+
+    debug_path = os.path.join(
+        OUTPUT_DIR,
+        "round1_debug.txt",
+    )
+
+    with open(
+        debug_path,
+        "w",
+        encoding="utf-8",
+    ) as file:
+        file.write(
+            round1_text
+        )
+
+    print(
+        f"DEBUG WRITTEN: "
+        f"{debug_path}"
+    )
+
+    for item in output:
+        print(
+            f"#{item['pick']} "
+            f"{item['team']} - "
+            f"{item['player']} "
+            f"("
+            f"{item['position']}, "
+            f"{item['college']}"
+            f")"
+        )
+
+
+def parse_round1_picks(
+    round1_text: str,
+):
+    picks = parse_by_number_blocks(
+        round1_text
+    )
+
+    deduped = {}
+
+    for pick in picks:
+        if (
+            1
+            <= pick[
+                "pick"
+            ]
+            <= 32
+        ):
+            deduped[
+                pick[
+                    "pick"
+                ]
+            ] = pick
+
+    missing_after_primary = [
+        number
+        for number in range(
+            1,
+            33,
+        )
+        if number
+        not in deduped
+    ]
+
+    if missing_after_primary:
+        print(
+            f"Primary parser "
+            f"missing picks: "
+            f"{missing_after_primary}"
+        )
+
+        fallback_picks = (
+            parse_by_loose_regex(
+                round1_text
+            )
+        )
+
+        for pick in fallback_picks:
+            if (
+                pick[
+                    "pick"
+                ]
+                in missing_after_primary
+            ):
+                deduped[
+                    pick[
+                        "pick"
+                    ]
+                ] = pick
+
+    output = [
+        deduped[
+            key
+        ]
+        for key in sorted(
+            deduped.keys()
+        )
+        if (
+            1
+            <= key
+            <= 32
+        )
+    ]
+
+    missing = [
+        number
+        for number in range(
+            1,
+            33,
+        )
+        if number
+        not in deduped
+    ]
+
+    if missing:
+        print(
+            f"WARNING: Expected "
+            f"32 picks, found "
+            f"{len(output)}. "
+            f"Missing picks: "
+            f"{missing}"
+        )
+
+        write_debug(
+            round1_text,
+            output,
+        )
+
+        for number in missing:
+            output.append(
+                {
+                    "pick": number,
+                    "team": "",
+                    "player": "TBD",
+                    "position": "TBD",
+                    "college": (
+                        "Tankathon row "
+                        "not parsed"
+                    ),
+                }
+            )
+
+    output = sorted(
+        output,
+        key=lambda item: (
+            item[
+                "pick"
+            ]
+        ),
+    )
+
+    # ========================================================
+    # IMPORTANT:
+    #
+    # Keep all of the original parsing above untouched.
+    #
+    # NOW normalize team names found at the beginning of
+    # player strings.
+    #
+    # Example:
+    #
+    # LA Chargers Jeremiah Smith
+    #
+    # becomes:
+    #
+    # team   = LAC
+    # player = Jeremiah Smith
+    # ========================================================
+
+    output = [
+        apply_team_prefix_cleanup(
+            item
+        )
+        for item in output
+    ]
+
+    if len(
+        output
+    ) != 32:
+        write_debug(
+            round1_text,
+            output,
+        )
+
+        raise RuntimeError(
+            f"Expected 32 picks "
+            f"after fallback, "
+            f"found {len(output)}."
+        )
+
+    return output
+
+
+def rounded_rect(
+    draw,
+    box,
+    radius,
+    fill,
+    outline=None,
+    width=1,
+):
+    draw.rounded_rectangle(
+        box,
+        radius=radius,
+        fill=fill,
+        outline=outline,
+        width=width,
+    )
+
+
+def wrap_text(
+    draw,
+    text,
+    font,
+    max_width,
+    max_lines=2,
+):
+    words = text.split()
+
+    if not words:
+        return [
+            ""
+        ]
+
+    lines = []
+
+    current = words[
+        0
+    ]
+
+    for word in words[
+        1:
+    ]:
+        test = (
+            current
+            + " "
+            + word
+        )
+
+        if (
+            draw.textlength(
+                test,
+                font=font,
+            )
+            <= max_width
+        ):
+            current = test
+
+        else:
+            lines.append(
+                current
+            )
+
+            current = word
+
+    lines.append(
+        current
+    )
+
+    if (
+        len(lines)
+        > max_lines
+    ):
+        lines = lines[
+            :max_lines
+        ]
+
+        last = lines[
+            -1
+        ]
+
+        while (
+            last
+            and draw.textlength(
+                last + "…",
+                font=font,
+            )
+            > max_width
+        ):
+            last = last[
+                :-1
+            ]
+
+        lines[
+            -1
+        ] = (
+            last.rstrip()
+            + "…"
+        )
+
+    return lines
+
+
+def make_background():
+    img = Image.new(
+        "RGB",
+        (
+            POSTER_WIDTH,
+            POSTER_HEIGHT,
+        ),
+        (
+            10,
+            14,
+            24,
+        ),
+    )
+
+    draw = ImageDraw.Draw(
+        img
+    )
+
+    draw.rectangle(
+        (
+            0,
+            0,
+            POSTER_WIDTH,
+            165,
+        ),
+        fill=(
+            22,
+            38,
+            74,
+        ),
+    )
+
+    draw.rectangle(
+        (
+            0,
+            165,
+            POSTER_WIDTH,
+            172,
+        ),
+        fill=(
+            128,
+            183,
+            255,
+        ),
+    )
+
+    for y in range(
+        180,
+        POSTER_HEIGHT,
+        30,
+    ):
+        color = (
+            (
+                14,
+                18,
+                28,
+            )
+            if (
+                y // 30
+            ) % 2 == 0
+            else (
+                12,
+                16,
+                26,
+            )
+        )
+
+        draw.rectangle(
+            (
+                0,
+                y,
+                POSTER_WIDTH,
+                y + 15,
+            ),
+            fill=color,
+        )
+
+    return img
+
+
+def draw_star(
+    draw,
+    cx,
+    cy,
+    radius,
+    fill,
+):
+    points = [
+        (
+            cx,
+            cy - radius,
+        ),
+        (
+            cx + radius // 4,
+            cy - radius // 4,
+        ),
+        (
+            cx + radius,
+            cy - radius // 4,
+        ),
+        (
+            cx + radius // 3,
+            cy + radius // 5,
+        ),
+        (
+            cx + radius // 2,
+            cy + radius,
+        ),
+        (
+            cx,
+            cy + radius // 2,
+        ),
+        (
+            cx - radius // 2,
+            cy + radius,
+        ),
+        (
+            cx - radius // 3,
+            cy + radius // 5,
+        ),
+        (
+            cx - radius,
+            cy - radius // 4,
+        ),
+        (
+            cx - radius // 4,
+            cy - radius // 4,
+        ),
+    ]
+
+    draw.polygon(
+        points,
+        fill=fill,
+    )
+
+
+def draw_paw(
+    draw,
+    cx,
+    cy,
+    fill,
+):
+    draw.ellipse(
+        (
+            cx - 14,
+            cy - 2,
+            cx + 14,
+            cy + 22,
+        ),
+        fill=fill,
+    )
+
+    for dx, dy in [
+        (-20, -18),
+        (-7, -25),
+        (7, -25),
+        (20, -18),
+    ]:
+        draw.ellipse(
+            (
+                cx + dx - 5,
+                cy + dy - 7,
+                cx + dx + 5,
+                cy + dy + 7,
+            ),
+            fill=fill,
+        )
+
+
+def draw_football(
+    draw,
+    cx,
+    cy,
+    fill,
+    accent,
+):
+    draw.ellipse(
+        (
+            cx - 34,
+            cy - 17,
+            cx + 34,
+            cy + 17,
+        ),
+        fill=fill,
+    )
+
+    draw.line(
+        (
+            cx - 13,
+            cy,
+            cx + 13,
+            cy,
+        ),
+        fill=accent,
+        width=3,
+    )
+
+    for offset in (
+        -8,
+        0,
+        8,
+    ):
+        draw.line(
+            (
+                cx + offset,
+                cy - 5,
+                cx + offset,
+                cy + 5,
+            ),
+            fill=accent,
+            width=2,
+        )
+
+
+def draw_feather(
+    draw,
+    cx,
+    cy,
+    fill,
+    accent,
+):
+    draw.polygon(
+        [
+            (
+                cx - 27,
+                cy + 26,
+            ),
+            (
+                cx - 14,
+                cy - 18,
+            ),
+            (
+                cx + 27,
+                cy - 33,
+            ),
+            (
+                cx + 18,
+                cy + 8,
+            ),
+            (
+                cx - 9,
+                cy + 27,
+            ),
+        ],
+        fill=fill,
+    )
+
+    draw.line(
+        (
+            cx - 24,
+            cy + 30,
+            cx + 18,
+            cy - 24,
+        ),
+        fill=accent,
+        width=3,
+    )
+
+
+def draw_claws(
+    draw,
+    cx,
+    cy,
+    fill,
+):
+    for offset in (
+        -19,
+        0,
+        19,
+    ):
+        draw.polygon(
+            [
+                (
+                    cx + offset - 5,
+                    cy + 27,
+                ),
+                (
+                    cx + offset + 3,
+                    cy - 30,
+                ),
+                (
+                    cx + offset + 10,
+                    cy - 34,
+                ),
+                (
+                    cx + offset + 3,
+                    cy + 27,
+                ),
+            ],
+            fill=fill,
+        )
+
+
+def draw_stripes(
+    draw,
+    cx,
+    cy,
+    fill,
+    accent,
+):
+    draw.rectangle(
+        (
+            cx - 31,
+            cy - 30,
+            cx + 31,
+            cy + 30,
+        ),
+        fill=fill,
+    )
+
+    for offset in (
+        -34,
+        -9,
+        16,
+    ):
+        draw.polygon(
+            [
+                (
+                    cx + offset,
+                    cy - 30,
+                ),
+                (
+                    cx + offset + 10,
+                    cy - 30,
+                ),
+                (
+                    cx + offset + 35,
+                    cy + 30,
+                ),
+                (
+                    cx + offset + 25,
+                    cy + 30,
+                ),
+            ],
+            fill=accent,
+        )
+
+
+def draw_mountain(
+    draw,
+    cx,
+    cy,
+    fill,
+    accent,
+):
+    draw.polygon(
+        [
+            (
+                cx - 36,
+                cy + 27,
+            ),
+            (
+                cx,
+                cy - 31,
+            ),
+            (
+                cx + 36,
+                cy + 27,
+            ),
+        ],
+        fill=fill,
+    )
+
+    draw.polygon(
+        [
+            (
+                cx - 9,
+                cy - 17,
+            ),
+            (
+                cx,
+                cy - 31,
+            ),
+            (
+                cx + 10,
+                cy - 15,
+            ),
+            (
+                cx + 2,
+                cy - 20,
+            ),
+        ],
+        fill=accent,
+    )
+
+
+def draw_texas(
+    draw,
+    cx,
+    cy,
+    fill,
+    accent,
+):
+    draw.polygon(
+        [
+            (
+                cx - 28,
+                cy - 30,
+            ),
+            (
+                cx + 7,
+                cy - 30,
+            ),
+            (
+                cx + 8,
+                cy - 13,
+            ),
+            (
+                cx + 30,
+                cy - 12,
+            ),
+            (
+                cx + 23,
+                cy + 8,
+            ),
+            (
+                cx + 7,
+                cy + 15,
+            ),
+            (
+                cx - 2,
+                cy + 33,
+            ),
+            (
+                cx - 16,
+                cy + 16,
+            ),
+            (
+                cx - 30,
+                cy + 4,
+            ),
+        ],
+        fill=fill,
+    )
+
+    draw_star(
+        draw,
+        cx,
+        cy,
+        8,
+        accent,
+    )
+
+
+def draw_arc(
+    draw,
+    cx,
+    cy,
+    fill,
+    accent,
+):
+    draw.arc(
+        (
+            cx - 31,
+            cy - 31,
+            cx + 31,
+            cy + 31,
+        ),
+        205,
+        335,
+        fill=fill,
+        width=9,
+    )
+
+    draw.arc(
+        (
+            cx - 20,
+            cy - 20,
+            cx + 20,
+            cy + 20,
+        ),
+        205,
+        335,
+        fill=accent,
+        width=4,
+    )
+
+
+def draw_pennant(
+    draw,
+    cx,
+    cy,
+    fill,
+    accent,
+):
+    draw.rectangle(
+        (
+            cx - 30,
+            cy - 32,
+            cx - 26,
+            cy + 30,
+        ),
+        fill=accent,
+    )
+
+    draw.polygon(
+        [
+            (
+                cx - 26,
+                cy - 27,
+            ),
+            (
+                cx + 33,
+                cy - 4,
+            ),
+            (
+                cx - 26,
+                cy + 17,
+            ),
+        ],
+        fill=fill,
+    )
+
+
+def draw_lightning(
+    draw,
+    cx,
+    cy,
+    fill,
+):
+    draw.polygon(
+        [
+            (
+                cx + 5,
+                cy - 34,
+            ),
+            (
+                cx - 22,
+                cy + 1,
+            ),
+            (
+                cx - 5,
+                cy + 1,
+            ),
+            (
+                cx - 14,
+                cy + 34,
+            ),
+            (
+                cx + 25,
+                cy - 8,
+            ),
+            (
+                cx + 8,
+                cy - 8,
+            ),
+        ],
+        fill=fill,
+    )
+
+
+def draw_wave(
+    draw,
+    cx,
+    cy,
+    fill,
+    accent,
+):
+    draw.polygon(
+        [
+            (
+                cx - 34,
+                cy + 18,
+            ),
+            (
+                cx - 24,
+                cy - 5,
+            ),
+            (
+                cx - 10,
+                cy - 20,
+            ),
+            (
+                cx + 4,
+                cy - 23,
+            ),
+            (
+                cx + 21,
+                cy - 14,
+            ),
+            (
+                cx + 34,
+                cy + 4,
+            ),
+            (
+                cx + 13,
+                cy - 1,
+            ),
+            (
+                cx,
+                cy + 8,
+            ),
+            (
+                cx - 7,
+                cy + 20,
+            ),
+        ],
+        fill=fill,
+    )
+
+    draw.line(
+        (
+            cx - 29,
+            cy + 22,
+            cx + 30,
+            cy + 22,
+        ),
+        fill=accent,
+        width=4,
+    )
+
+
+def draw_spiral(
+    draw,
+    cx,
+    cy,
+    fill,
+):
+    draw.arc(
+        (
+            cx - 28,
+            cy - 28,
+            cx + 28,
+            cy + 28,
+        ),
+        20,
+        340,
+        fill=fill,
+        width=8,
+    )
+
+    draw.arc(
+        (
+            cx - 15,
+            cy - 15,
+            cx + 15,
+            cy + 15,
+        ),
+        20,
+        300,
+        fill=fill,
+        width=6,
+    )
+
+
+def draw_ship(
+    draw,
+    cx,
+    cy,
+    fill,
+    accent,
+):
+    draw.polygon(
+        [
+            (
+                cx - 34,
+                cy + 17,
+            ),
+            (
+                cx + 34,
+                cy + 17,
+            ),
+            (
+                cx + 22,
+                cy + 29,
+            ),
+            (
+                cx - 22,
+                cy + 29,
+            ),
+        ],
+        fill=accent,
+    )
+
+    draw.rectangle(
+        (
+            cx - 2,
+            cy - 31,
+            cx + 2,
+            cy + 15,
+        ),
+        fill=accent,
+    )
+
+    draw.polygon(
+        [
+            (
+                cx + 2,
+                cy - 27,
+            ),
+            (
+                cx + 23,
+                cy - 5,
+            ),
+            (
+                cx + 2,
+                cy - 5,
+            ),
+        ],
+        fill=fill,
+    )
+
+    draw.polygon(
+        [
+            (
+                cx - 3,
+                cy - 24,
+            ),
+            (
+                cx - 22,
+                cy - 4,
+            ),
+            (
+                cx - 3,
+                cy - 4,
+            ),
+        ],
+        fill=fill,
+    )
+
+
+def draw_hat(
+    draw,
+    cx,
+    cy,
+    fill,
+    accent,
+):
+    draw.polygon(
+        [
+            (
+                cx - 33,
+                cy + 16,
+            ),
+            (
+                cx - 19,
+                cy - 13,
+            ),
+            (
+                cx,
+                cy - 25,
+            ),
+            (
+                cx + 19,
+                cy - 13,
+            ),
+            (
+                cx + 33,
+                cy + 16,
+            ),
+            (
+                cx + 10,
+                cy + 9,
+            ),
+            (
+                cx,
+                cy + 21,
+            ),
+            (
+                cx - 10,
+                cy + 9,
+            ),
+        ],
+        fill=fill,
+    )
+
+    draw_star(
+        draw,
+        cx,
+        cy,
+        8,
+        accent,
+    )
+
+
+def draw_trumpet(
+    draw,
+    cx,
+    cy,
+    fill,
+):
+    draw.rectangle(
+        (
+            cx - 23,
+            cy - 5,
+            cx + 10,
+            cy + 5,
+        ),
+        fill=fill,
+    )
+
+    draw.polygon(
+        [
+            (
+                cx + 10,
+                cy - 14,
+            ),
+            (
+                cx + 32,
+                cy - 22,
+            ),
+            (
+                cx + 32,
+                cy + 22,
+            ),
+            (
+                cx + 10,
+                cy + 14,
+            ),
+        ],
+        fill=fill,
+    )
+
+    draw.arc(
+        (
+            cx - 29,
+            cy - 1,
+            cx - 11,
+            cy + 24,
+        ),
+        10,
+        190,
+        fill=fill,
+        width=4,
+    )
+
+
+def draw_skyline(
+    draw,
+    cx,
+    cy,
+    fill,
+    accent,
+):
+    buildings = [
+        (-31, 11, -22, 29),
+        (-20, -3, -8, 29),
+        (-6, -29, 6, 29),
+        (8, -10, 21, 29),
+        (23, 3, 32, 29),
+    ]
+
+    for (
+        x1,
+        y1,
+        x2,
+        y2,
+    ) in buildings:
+        draw.rectangle(
+            (
+                cx + x1,
+                cy + y1,
+                cx + x2,
+                cy + y2,
+            ),
+            fill=fill,
+        )
+
+    draw.line(
+        (
+            cx - 35,
+            cy + 30,
+            cx + 35,
+            cy + 30,
+        ),
+        fill=accent,
+        width=4,
+    )
+
+
+def draw_jet(
+    draw,
+    cx,
+    cy,
+    fill,
+):
+    draw.polygon(
+        [
+            (
+                cx - 35,
+                cy + 6,
+            ),
+            (
+                cx - 7,
+                cy - 4,
+            ),
+            (
+                cx + 18,
+                cy - 28,
+            ),
+            (
+                cx + 25,
+                cy - 23,
+            ),
+            (
+                cx + 12,
+                cy - 3,
+            ),
+            (
+                cx + 34,
+                cy + 7,
+            ),
+            (
+                cx + 10,
+                cy + 10,
+            ),
+            (
+                cx + 3,
+                cy + 27,
+            ),
+            (
+                cx - 5,
+                cy + 27,
+            ),
+            (
+                cx - 6,
+                cy + 11,
+            ),
+        ],
+        fill=fill,
+    )
+
+
+def draw_diamonds(
+    draw,
+    cx,
+    cy,
+):
+    data = [
+        (
+            cx,
+            cy - 18,
+            "#F2C230",
+        ),
+        (
+            cx - 19,
+            cy + 13,
+            "#1E5FA8",
+        ),
+        (
+            cx + 19,
+            cy + 13,
+            "#D32E3E",
+        ),
+    ]
+
+    for (
+        x,
+        y,
+        color,
+    ) in data:
+        draw.polygon(
+            [
+                (
+                    x,
+                    y - 9,
+                ),
+                (
+                    x + 9,
+                    y,
+                ),
+                (
+                    x,
+                    y + 9,
+                ),
+                (
+                    x - 9,
+                    y,
+                ),
+            ],
+            fill=color,
+        )
+
+
+def draw_bridge(
+    draw,
+    cx,
+    cy,
+    fill,
+    accent,
+):
+    draw.rectangle(
+        (
+            cx - 26,
+            cy - 27,
+            cx - 21,
+            cy + 27,
+        ),
+        fill=fill,
+    )
+
+    draw.rectangle(
+        (
+            cx + 21,
+            cy - 27,
+            cx + 26,
+            cy + 27,
+        ),
+        fill=fill,
+    )
+
+    draw.line(
+        (
+            cx - 34,
+            cy + 18,
+            cx + 34,
+            cy + 18,
+        ),
+        fill=fill,
+        width=5,
+    )
+
+    draw.arc(
+        (
+            cx - 24,
+            cy - 22,
+            cx + 24,
+            cy + 31,
+        ),
+        180,
+        360,
+        fill=accent,
+        width=3,
+    )
+
+
+def draw_flag(
+    draw,
+    cx,
+    cy,
+    fill,
+    accent,
+):
+    draw.rectangle(
+        (
+            cx - 28,
+            cy - 32,
+            cx - 24,
+            cy + 30,
+        ),
+        fill=accent,
+    )
+
+    draw.polygon(
+        [
+            (
+                cx - 24,
+                cy - 26,
+            ),
+            (
+                cx + 29,
+                cy - 21,
+            ),
+            (
+                cx + 20,
+                cy + 3,
+            ),
+            (
+                cx - 24,
+                cy + 8,
+            ),
+        ],
+        fill=fill,
+    )
+
+
+def draw_sword(
+    draw,
+    cx,
+    cy,
+    fill,
+    accent,
+):
+    draw.polygon(
+        [
+            (
+                cx - 4,
+                cy - 33,
+            ),
+            (
+                cx + 5,
+                cy - 33,
+            ),
+            (
+                cx + 6,
+                cy + 13,
+            ),
+            (
+                cx - 6,
+                cy + 13,
+            ),
+        ],
+        fill=fill,
+    )
+
+    draw.polygon(
+        [
+            (
+                cx - 4,
+                cy - 33,
+            ),
+            (
+                cx,
+                cy - 42,
+            ),
+            (
+                cx + 5,
+                cy - 33,
+            ),
+        ],
+        fill=accent,
+    )
+
+    draw.rectangle(
+        (
+            cx - 18,
+            cy + 11,
+            cx + 18,
+            cy + 16,
+        ),
+        fill=accent,
+    )
+
+    draw.rectangle(
+        (
+            cx - 4,
+            cy + 16,
+            cx + 5,
+            cy + 31,
+        ),
+        fill=accent,
+    )
+
+
+def draw_column(
+    draw,
+    cx,
+    cy,
+    fill,
+    accent,
+):
+    draw.rectangle(
+        (
+            cx - 27,
+            cy - 28,
+            cx + 27,
+            cy - 22,
+        ),
+        fill=accent,
+    )
+
+    draw.rectangle(
+        (
+            cx - 31,
+            cy + 23,
+            cx + 31,
+            cy + 29,
+        ),
+        fill=accent,
+    )
+
+    for x in (
+        -19,
+        -6,
+        6,
+        19,
+    ):
+        draw.rectangle(
+            (
+                cx + x - 3,
+                cy - 19,
+                cx + x + 3,
+                cy + 21,
+            ),
+            fill=fill,
+        )
+
+
+def draw_team_symbol(
+    draw,
+    team: str,
+    cx: int,
+    cy: int,
+    primary,
+    secondary,
+):
+    if team == "ARI":
+        draw.rectangle(
+            (
+                cx - 5,
+                cy - 29,
+                cx + 5,
+                cy + 27,
+            ),
+            fill=primary,
+        )
+
+        draw.rectangle(
+            (
+                cx - 21,
+                cy - 6,
+                cx - 4,
+                cy + 3,
+            ),
+            fill=primary,
+        )
+
+        draw.rectangle(
+            (
+                cx - 21,
+                cy - 18,
+                cx - 13,
+                cy + 3,
+            ),
+            fill=primary,
+        )
+
+        draw.rectangle(
+            (
+                cx + 4,
+                cy - 10,
+                cx + 20,
+                cy - 2,
+            ),
+            fill=primary,
+        )
+
+        draw.rectangle(
+            (
+                cx + 13,
+                cy - 21,
+                cx + 20,
+                cy - 2,
+            ),
+            fill=primary,
+        )
+
+    elif team in {
+        "ATL",
+        "BAL",
+        "PHI",
+    }:
+        draw_feather(
+            draw,
+            cx,
+            cy,
+            primary,
+            secondary,
+        )
+
+    elif team == "BUF":
+        draw.ellipse(
+            (
+                cx - 26,
+                cy - 26,
+                cx - 4,
+                cy + 5,
+            ),
+            fill=primary,
+        )
+
+        draw.ellipse(
+            (
+                cx + 4,
+                cy - 26,
+                cx + 26,
+                cy + 5,
+            ),
+            fill=primary,
+        )
+
+        draw.ellipse(
+            (
+                cx - 9,
+                cy + 9,
+                cx + 9,
+                cy + 26,
+            ),
+            fill=secondary,
+        )
+
+    elif team == "CAR":
+        draw_claws(
+            draw,
+            cx,
+            cy,
+            primary,
+        )
+
+    elif team in {
+        "CHI",
+        "DET",
+        "JAX",
+    }:
+        draw_paw(
+            draw,
+            cx,
+            cy,
+            primary,
+        )
+
+    elif team == "CIN":
+        draw_stripes(
+            draw,
+            cx,
+            cy,
+            primary,
+            secondary,
+        )
+
+    elif team in {
+        "CLE",
+        "GB",
+    }:
+        draw_football(
+            draw,
+            cx,
+            cy,
+            primary,
+            secondary,
+        )
+
+    elif team == "DAL":
+        draw_star(
+            draw,
+            cx,
+            cy,
+            30,
+            primary,
+        )
+
+    elif team == "DEN":
+        draw_mountain(
+            draw,
+            cx,
+            cy,
+            primary,
+            secondary,
+        )
+
+    elif team == "HOU":
+        draw_texas(
+            draw,
+            cx,
+            cy,
+            primary,
+            secondary,
+        )
+
+    elif team == "IND":
+        draw_arc(
+            draw,
+            cx,
+            cy,
+            primary,
+            secondary,
+        )
+
+    elif team == "KC":
+        draw_pennant(
+            draw,
+            cx,
+            cy,
+            primary,
+            secondary,
+        )
+
+    elif team == "LV":
+        draw_hat(
+            draw,
+            cx,
+            cy,
+            primary,
+            secondary,
+        )
+
+    elif team == "LAC":
+        draw_lightning(
+            draw,
+            cx,
+            cy,
+            secondary,
+        )
+
+    elif team == "LAR":
+        draw_spiral(
+            draw,
+            cx,
+            cy,
+            primary,
+        )
+
+    elif team == "MIA":
+        draw_wave(
+            draw,
+            cx,
+            cy,
+            primary,
+            secondary,
+        )
+
+    elif team == "MIN":
+        draw_ship(
+            draw,
+            cx,
+            cy,
+            primary,
+            secondary,
+        )
+
+    elif team == "NE":
+        draw_hat(
+            draw,
+            cx,
+            cy,
+            primary,
+            secondary,
+        )
+
+    elif team == "NO":
+        draw_trumpet(
+            draw,
+            cx,
+            cy,
+            primary,
+        )
+
+    elif team == "NYG":
+        draw_skyline(
+            draw,
+            cx,
+            cy,
+            primary,
+            secondary,
+        )
+
+    elif team == "NYJ":
+        draw_jet(
+            draw,
+            cx,
+            cy,
+            primary,
+        )
+
+    elif team == "PIT":
+        draw_diamonds(
+            draw,
+            cx,
+            cy,
+        )
+
+    elif team == "SF":
+        draw_bridge(
+            draw,
+            cx,
+            cy,
+            primary,
+            secondary,
+        )
+
+    elif team == "SEA":
+        draw_wave(
+            draw,
+            cx,
+            cy,
+            primary,
+            secondary,
+        )
+
+    elif team == "TB":
+        draw_flag(
+            draw,
+            cx,
+            cy,
+            primary,
+            secondary,
+        )
+
+    elif team == "TEN":
+        draw_sword(
+            draw,
+            cx,
+            cy,
+            primary,
+            secondary,
+        )
+
+    elif team == "WSH":
+        draw_column(
+            draw,
+            cx,
+            cy,
+            secondary,
+            primary,
+        )
+
+    else:
+        draw_football(
+            draw,
+            cx,
+            cy,
+            primary,
+            secondary,
+        )
+
+
+def create_team_icon(
+    team_abbr: str,
+    size: int = 116,
+) -> Image.Image:
+    team_abbr = normalize_team_abbr(
+        team_abbr
+    )
+
+    if (
+        not team_abbr
+        or team_abbr
+        not in TEAM_COLORS
+    ):
+        canvas = Image.new(
+            "RGBA",
+            (
+                size,
+                size,
+            ),
+            (
+                30,
+                34,
+                48,
+                255,
+            ),
+        )
+
+        draw = ImageDraw.Draw(
+            canvas
+        )
+
+        draw.rounded_rectangle(
+            (
+                2,
+                2,
+                size - 2,
+                size - 2,
+            ),
+            radius=20,
+            outline=(
+                120,
+                130,
+                160,
+            ),
+            width=3,
+        )
+
+        text = "TBD"
+
+        badge_font = load_font(
+            22,
+            bold=True,
+        )
+
+        text_width = draw.textlength(
+            text,
+            font=badge_font,
+        )
+
+        draw.text(
+            (
+                (
+                    size
+                    - text_width
+                )
+                / 2,
+                size / 2 - 12,
+            ),
+            text,
+            fill=(
+                235,
+                240,
+                250,
+            ),
+            font=badge_font,
+        )
+
+        return canvas
+
+    (
+        primary_hex,
+        secondary_hex,
+    ) = TEAM_COLORS[
+        team_abbr
+    ]
+
+    primary = hex_to_rgb(
+        primary_hex
+    )
+
+    secondary = hex_to_rgb(
+        secondary_hex
+    )
+
+    base_width = 104
+    base_height = 118
+
+    icon = Image.new(
+        "RGBA",
+        (
+            base_width,
+            base_height,
+        ),
+        (
+            0,
+            0,
+            0,
+            0,
+        ),
+    )
+
+    draw = ImageDraw.Draw(
+        icon
+    )
+
+    draw_team_symbol(
+        draw,
+        team_abbr,
+        base_width // 2,
+        45,
+        primary,
+        secondary,
+    )
+
+    abbreviation_font = load_font(
+        18,
+        bold=True,
+    )
+
+    bbox = draw.textbbox(
+        (
+            0,
+            0,
+        ),
+        team_abbr,
+        font=abbreviation_font,
+    )
+
+    text_width = (
+        bbox[2]
+        - bbox[0]
+    )
+
+    draw.rounded_rectangle(
+        (
+            13,
+            88,
+            base_width - 13,
+            115,
+        ),
+        radius=4,
+        fill=(
+            8,
+            12,
+            18,
+            235,
+        ),
+    )
+
+    text_fill = primary
+
+    if sum(
+        primary
+    ) < 140:
+        text_fill = (
+            230,
+            230,
+            230,
+        )
+
+    draw.text(
+        (
+            (
+                base_width
+                - text_width
+            )
+            // 2,
+            91,
+        ),
+        team_abbr,
+        font=abbreviation_font,
+        fill=text_fill,
+    )
+
+    ratio = (
+        size
+        / base_height
+    )
+
+    output_width = max(
+        1,
+        int(
+            base_width
+            * ratio
+        ),
+    )
+
+    return icon.resize(
+        (
+            output_width,
+            size,
+        ),
+        Image.Resampling.NEAREST,
+    )
+
+
+def draw_card(
+    base_img,
+    draw,
+    item,
+    box,
+):
+    (
+        x1,
+        y1,
+        x2,
+        y2,
+    ) = box
+
+    rounded_rect(
+        draw,
+        box,
+        radius=28,
+        fill=(
+            24,
+            29,
+            42,
+        ),
+        outline=(
+            64,
+            74,
+            98,
+        ),
+        width=3,
+    )
+
+    pill = (
+        x1 + 22,
+        y1 + 20,
+        x1 + 160,
+        y1 + 78,
+    )
+
+    rounded_rect(
+        draw,
+        pill,
+        radius=18,
+        fill=(
+            128,
+            183,
+            255,
+        ),
+    )
+
+    pick_text = (
+        f"#{item['pick']}"
+    )
+
+    pick_width = draw.textlength(
+        pick_text,
+        font=FONT_PICK,
+    )
+
+    draw.text(
+        (
+            pill[0]
+            + (
+                pill[2]
+                - pill[0]
+                - pick_width
+            )
+            / 2,
+            pill[1] + 7,
+        ),
+        pick_text,
+        font=FONT_PICK,
+        fill=(
+            15,
+            20,
+            28,
+        ),
+    )
+
+    team_text = (
+        item[
+            "team"
+        ]
+        if item[
+            "team"
+        ]
+        else "TBD"
+    )
+
+    draw.text(
+        (
+            x1 + 186,
+            y1 + 28,
+        ),
+        team_text,
+        font=FONT_TEAM,
+        fill=(
+            223,
+            231,
+            244,
+        ),
+    )
+
+    logo = create_team_icon(
+        item[
+            "team"
+        ],
+        size=116,
+    )
+
+    logo_x = (
+        x2 - 160
+    )
+
+    logo_y = (
+        y1
+        + (
+            y2
+            - y1
+            - logo.height
+        )
+        // 2
+    )
+
+    base_img.paste(
+        logo,
+        (
+            logo_x,
+            logo_y,
+        ),
+        logo,
+    )
+
+    text_left = (
+        x1 + 28
+    )
+
+    text_right = (
+        logo_x - 28
+    )
+
+    max_width = (
+        text_right
+        - text_left
+    )
+
+    player_lines = wrap_text(
+        draw,
+        item[
+            "player"
+        ],
+        FONT_PLAYER,
+        max_width,
+        max_lines=2,
+    )
+
+    y = (
+        y1 + 92
+    )
+
+    for line in player_lines:
+        draw.text(
+            (
+                text_left,
+                y,
+            ),
+            line,
+            font=FONT_PLAYER,
+            fill=(
+                246,
+                248,
+                252,
+            ),
+        )
+
+        y += 46
+
+    meta = (
+        f"{item['position']}"
+        f"  •  "
+        f"{item['college']}"
+    )
+
+    meta_lines = wrap_text(
+        draw,
+        meta,
+        FONT_META,
+        max_width,
+        max_lines=2,
+    )
+
+    for line in meta_lines:
+        draw.text(
+            (
+                text_left,
+                y + 2,
+            ),
+            line,
+            font=FONT_META,
+            fill=(
+                188,
+                198,
+                217,
+            ),
+        )
+
+        y += 32
+
+
+def render_poster(
+    chunk,
+):
+    img = make_background()
+
+    draw = ImageDraw.Draw(
+        img
+    )
+
+    title = (
+        "MOCK DRAFT"
+    )
+
+    subtitle = (
+        f"PICKS "
+        f"{chunk[0]['pick']}"
+        f"-"
+        f"{chunk[-1]['pick']}"
+    )
+
+    title_width = draw.textlength(
+        title,
+        font=FONT_TITLE,
+    )
+
+    subtitle_width = draw.textlength(
+        subtitle,
+        font=FONT_SUBTITLE,
+    )
+
+    draw.text(
+        (
+            (
+                POSTER_WIDTH
+                - title_width
+            )
+            / 2,
+            36,
+        ),
+        title,
+        font=FONT_TITLE,
+        fill=(
+            245,
+            247,
+            252,
+        ),
+    )
+
+    draw.text(
+        (
+            (
+                POSTER_WIDTH
+                - subtitle_width
+            )
+            / 2,
+            114,
+        ),
+        subtitle,
+        font=FONT_SUBTITLE,
+        fill=(
+            208,
+            218,
+            238,
+        ),
+    )
+
+    left = 70
+
+    right = (
+        POSTER_WIDTH
+        - 70
+    )
+
+    top = 215
+
+    bottom = (
+        POSTER_HEIGHT
+        - 40
+    )
+
+    gap = 18
+
+    usable_height = (
+        bottom
+        - top
+    )
+
+    row_height = int(
+        (
+            usable_height
+            - gap
+            * (
+                ROWS_PER_POSTER
+                - 1
+            )
+        )
+        / ROWS_PER_POSTER
+    )
+
+    for (
+        index,
+        item,
+    ) in enumerate(
+        chunk
+    ):
+        y1 = (
+            top
+            + index
+            * (
+                row_height
+                + gap
+            )
+        )
+
+        y2 = (
+            y1
+            + row_height
+        )
+
+        draw_card(
+            img,
+            draw,
+            item,
+            (
+                left,
+                y1,
+                right,
+                y2,
+            ),
+        )
+
+    return img
+
+
+def main():
+    ensure_dir(
+        OUTPUT_DIR
+    )
+
+    print(
+        "Fetching Tankathon "
+        "mock draft..."
+    )
+
+    html = fetch_html(
+        SOURCE_URL
+    )
+
+    print(
+        "Extracting text..."
+    )
+
+    full_text = (
+        soup_to_text_with_img_alts(
+            html
+        )
+    )
+
+    print(
+        "Extracting Round 1 "
+        "section..."
+    )
+
+    round1_text = (
+        extract_round1_text(
+            full_text
+        )
+    )
+
+    print(
+        "Parsing picks 1-32..."
+    )
+
+    picks = parse_round1_picks(
+        round1_text
+    )
+
+    print(
+        f"Found "
+        f"{len(picks)} "
+        f"picks."
+    )
+
+    print()
+
+    for pick in picks:
+        print(
+            f"#{pick['pick']} "
+            f"{pick['team'] or 'TBD'} "
+            f"- "
+            f"{pick['player']} "
+            f"("
+            f"{pick['position']}, "
+            f"{pick['college']}"
+            f")"
+        )
+
+    print()
+
+    chunks = [
+        picks[
+            index:
+            index + ROWS_PER_POSTER
+        ]
+        for index in range(
+            0,
+            32,
+            ROWS_PER_POSTER,
+        )
+    ]
+
+    if (
+        len(chunks)
+        != TOTAL_POSTERS
+    ):
+        raise RuntimeError(
+            f"Expected "
+            f"{TOTAL_POSTERS} "
+            f"posters, got "
+            f"{len(chunks)}"
+        )
+
+    for (
+        index,
+        chunk,
+    ) in enumerate(
+        chunks,
+        start=1,
+    ):
+        print(
+            f"Rendering poster "
+            f"{index}/"
+            f"{TOTAL_POSTERS}..."
+        )
+
+        poster = render_poster(
+            chunk
+        )
+
+        out_path = os.path.join(
+            OUTPUT_DIR,
+            (
+                "tankathon_mock_"
+                f"poster_{index}.png"
+            ),
+        )
+
+        poster.save(
+            out_path
+        )
+
+        print(
+            f"Saved: "
+            f"{out_path}"
+        )
+
+    print(
+        "\nDone."
+    )
+
+    print(
+        f"Open folder: "
+        f"{OUTPUT_DIR}"
+    )
+
+
+if __name__ == "__main__":
+    try:
+        main()
+
+    except KeyboardInterrupt:
+        print(
+            "\nStopped."
+        )
+
+        sys.exit(
+            1
+        )
+
+    except Exception as error:
+        print(
+            f"\nERROR: "
+            f"{error}",
+            file=sys.stderr,
+        )
+
+        sys.exit(
+            1
+        )
